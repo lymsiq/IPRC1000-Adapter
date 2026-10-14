@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>IPRC1000 Adapter</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="app">
+
+  <!-- ═══════════ 左侧栏 ═══════════ -->
+  <aside class="rail">
+    <div class="logo" title="IPRC1000 Adapter">
+      <svg viewBox="0 0 24 24" width="18" height="18">
+        <rect x="3" y="5" width="18" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <circle cx="9.5" cy="12" r="1.6" fill="currentColor"/>
+        <circle cx="14.5" cy="12" r="1.6" fill="currentColor"/>
+      </svg>
+    </div>
+
+    <div class="brand"><span class="badge">i</span> IPRC1000 Adapter</div>
+
+    <nav class="nav">
+      <button class="nav-btn active" data-page="overview" title="功能总览">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
+      </button>
+      <button class="nav-btn" data-page="keys" title="按键映射">
+        <svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="11" rx="2.4" stroke-width="1.7" fill="none"/><path d="M7 10.6h.01M10.3 10.6h.01M13.6 10.6h.01M16.9 10.6h.01M7.6 14.2h8.8" stroke-width="1.9"/></svg>
+      </button>
+      <button class="nav-btn" data-page="env" title="环境设置">
+        <svg viewBox="0 0 24 24"><path d="M3 13.5h3l2-5.5 3.2 10L14 11l1.9 2.5H21" stroke-width="1.9" fill="none"/></svg>
+      </button>
+    </nav>
+
+    <div class="device">
+      <div class="remote"><img src="remote.png" alt="IPRC1000 遥控器" draggable="false" /></div>
+      <div class="dev-name">IPRC1000</div>
+      <div class="dev-hint" id="devHint">已检测：确认</div>
+    </div>
+
+    <div class="rail-foot"><span class="dot" id="linkDot"></span><span id="linkText">等待遥控器连接</span></div>
+  </aside>
+
+  <!-- ═══════════ 右侧内容 ═══════════ -->
+  <main>
+
+    <!-- ── 功能总览 ── -->
+    <section class="page" id="page-overview">
+      <header class="page-head">
+        <h1>功能总览</h1>
+        <p>遥控器与适配功能的实时状态</p>
+      </header>
+
+      <div class="cards">
+        <div class="card">
+          <div class="card-top">
+            <div class="ic ic-blue"><svg viewBox="0 0 24 24"><path d="M7 7h10v10H7z" fill="none" stroke-width="1.8"/></svg></div>
+            <span class="card-title">设备连接</span>
+            <span class="dot" id="d-device"></span>
+          </div>
+          <div class="card-value" id="v-device">等待连接</div>
+          <div class="card-desc" id="s-device">等待 IPRC1000 连接</div>
+        </div>
+
+        <div class="card">
+          <div class="card-top">
+            <div class="ic ic-indigo"><svg viewBox="0 0 24 24"><path d="M4 18V6m6 12V9m6 9v-7" stroke-width="1.9" fill="none"/></svg></div>
+            <span class="card-title">按键映射</span>
+            <span class="dot" id="d-keys"></span>
+          </div>
+          <div class="card-value" id="v-keys">— 个按键已配置</div>
+          <div class="card-desc">支持单键、组合键与媒体键</div>
+        </div>
+
+        <div class="card">
+          <div class="card-top">
+            <div class="ic ic-amber"><svg viewBox="0 0 24 24"><path d="M12 4v10" stroke-width="1.9" fill="none"/><path d="M8.5 10.5 12 14l3.5-3.5" stroke-width="1.9" fill="none"/><path d="M5 19h14" stroke-width="1.9" fill="none"/></svg></div>
+            <span class="card-title">遥控器语音</span>
+            <span class="dot" id="d-voice"></span>
+          </div>
+          <div class="card-value" id="v-voice">语音通道未就绪</div>
+          <div class="card-desc" id="s-voice">等待 BthPort ETW 音频通道</div>
+        </div>
+
+        <div class="card">
+          <div class="card-top">
+            <div class="ic ic-purple"><svg viewBox="0 0 24 24"><path d="M12 3.5 5 7v5c0 4.2 3 7 7 8.5 4-1.5 7-4.3 7-8.5V7z" fill="none" stroke-width="1.7"/></svg></div>
+            <span class="card-title">输入与权限</span>
+            <span class="dot" id="d-perm"></span>
+          </div>
+          <div class="card-value" id="v-perm">需要检查权限</div>
+          <div class="card-desc">仅拦截 IPRC1000，不影响其他键盘</div>
+        </div>
+      </div>
+
+      <div class="opbar">
+        <div class="op-left">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 13h4l2-5 3 10 2.5-7 1.8 2H21" stroke-width="1.8" fill="none"/></svg>
+          <span>当前操作</span>
+          <b id="opKey">—</b>
+        </div>
+        <div class="op-right" id="opState">—</div>
+      </div>
+    </section>
+
+    <!-- ── 按键映射 ── -->
+    <section class="page hidden" id="page-keys">
+      <header class="page-head row">
+        <div>
+          <h1>按键映射</h1>
+          <p>所有遥控器按键均可设置为单键、组合键或媒体键</p>
+        </div>
+        <div class="row">
+          <button class="btn ghost" id="btnExport">导出</button>
+          <button class="btn ghost" id="btnImport">导入</button>
+          <button class="btn ghost" id="btnReset">恢复默认</button>
+        </div>
+      </header>
+
+      <!-- 配置组 Tab + 搜索 -->
+      <div class="grouptabs">
+        <div class="gtabs" id="gTabs"></div>
+        <button class="tabadd" id="gNew" title="复制当前映射并新建配置组">+</button>
+        <button class="tabadd" id="gDel" title="删除当前配置组（至少保留一组）">−</button>
+        <input class="gsearch" id="gSearch" placeholder="搜索：按键名 / HID 值 / 映射动作" spellcheck="false" />
+      </div>
+
+      <div class="keys-layout">
+        <!-- 左：遥控器实体图（选中键高亮） -->
+        <aside class="remote-pane">
+          <div class="remote-stage" id="remoteStage">
+            <img src="remote.png" alt="IPRC1000 遥控器" draggable="false" />
+            <!-- 23 个透明热区，选中时高亮 -->
+          </div>
+          <div class="remote-name">IPRC1000</div>
+          <div class="remote-hint" id="remoteHint">已检测：—</div>
+        </aside>
+
+        <!-- 右：按键列表（每行是该键的缩略图 + 组合键） -->
+        <div class="keys-pane">
+          <div class="keysum" id="keySum"></div>
+          <div class="keylist" id="keyList"></div>
+        </div>
+      </div>
+
+      <!-- 组合键编辑弹窗：点某一行时弹出 -->
+      <div class="mask hide" id="comboMask">
+        <div class="modal" id="comboModal">
+          <div class="modal-head">
+            <div class="modal-thumb" id="comboThumb"></div>
+            <div>
+              <div class="modal-title" id="comboTitle">设置快捷键</div>
+              <div class="modal-sub" id="comboCur">当前：未设置</div>
+            </div>
+            <button class="modal-x" id="comboClose" title="关闭 (Esc)">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="kb-mods" id="kbMods"></div>
+            <div class="kb-preset" id="kbPreset" style="display:none"></div>
+            <div class="kb-main" id="kbMain"></div>
+            <div class="kb-extra" id="kbExtra"></div>
+            <div class="kb-foot">
+              <span class="kb-cur">当前：<b id="comboCur">未设置</b></span>
+              <span class="grow"></span>
+              <button class="btn ghost" id="kbNone">不执行</button>
+              <button class="btn ghost" id="kbCancel">取消</button>
+              <button class="btn" id="kbSave">保存映射</button>
+            </div>
+            <div class="note" id="comboNote"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── 环境设置 ── -->
+    <section class="page hidden" id="page-env">
+      <header class="page-head">
+        <h1>环境设置</h1>
+        <p>本机运行环境检查与一键修复</p>
+      </header>
+
+      <!-- 0. 环境自检 · 一键就绪 -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="ic ic-green"><svg viewBox="0 0 24 24"><path d="M12 3.5 5 7v5c0 4.2 3 7 7 8.5 4-1.5 7-4.3 7-8.5V7z" fill="none" stroke-width="1.7"/><path d="M8.8 12.2 11 14.4l4.4-4.6" stroke-width="1.9" fill="none"/></svg></div>
+          <div class="panel-title">
+            <b>环境自检 · 一键就绪</b>
+            <span>虚拟声卡 → 虚拟键盘驱动 → 设备驱动 → 默认麦克风，缺哪项点哪项</span>
+          </div>
+          <span class="dot" id="d-setup"></span>
+        </div>
+        <div class="kv" id="setupKv"></div>
+        <div class="note" id="setupNote"></div>
+        <div class="panel-actions">
+          <button class="btn" id="btnSetupAll">一键完成全部</button>
+          <button class="btn ghost" id="btnInstallCable2">安装虚拟声卡</button>
+          <button class="btn ghost" id="btnInstallUhid2">安装虚拟键盘驱动</button>
+          <button class="btn ghost" id="btnSwitchDriver">切换设备驱动</button>
+          <button class="btn ghost" id="btnRevertDriver">还原成键盘驱动</button>
+          <button class="btn ghost" id="btnAutoStart">启动后自动拉起语音桥</button>
+          <button class="btn ghost" id="btnAutoRun">开机自启</button>
+          <button class="btn ghost" id="btnStartMin">启动时进托盘</button>
+          <button class="btn ghost" id="btnAutoDrv">启动自动切驱动</button>
+        </div>
+      </div>
+
+      <!-- 1. 注册表 -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="ic ic-blue"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke-width="1.9" fill="none"/></svg></div>
+          <div class="panel-title">
+            <b>本机环境 · 注册表</b>
+            <span>BthPort ETW 需在驱动加载时读到正确配置，改完必须重启</span>
+          </div>
+          <span class="dot" id="d-reg"></span>
+        </div>
+
+        <div class="kv" id="regKv"></div>
+
+        <div class="note" id="regNote"></div>
+
+        <div class="panel-actions">
+          <button class="btn" id="btnApplyReg">应用推荐值</button>
+          <button class="btn ghost" id="btnRecheck">重新检测</button>
+          <button class="btn ghost" id="btnReboot">立即重启</button>
+        </div>
+      </div>
+
+      <!-- 2. 虚拟声卡 -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="ic ic-indigo"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="3" fill="none" stroke-width="1.8"/><circle cx="9" cy="12" r="2.2" fill="none" stroke-width="1.8"/><path d="M14 10h4M14 14h4" stroke-width="1.8" fill="none"/></svg></div>
+          <div class="panel-title">
+            <b>虚拟声卡 · VB-CABLE</b>
+            <span>把遥控器语音送到输入法：CABLE Input → CABLE Output</span>
+          </div>
+          <span class="dot" id="d-cable"></span>
+        </div>
+
+        <div class="kv" id="cableKv"></div>
+        <div class="note" id="cableNote"></div>
+
+        <div class="panel-actions">
+          <button class="btn" id="btnInstallCable">安装 / 修复虚拟声卡</button>
+          <button class="btn ghost" id="btnSetMic">设为默认麦克风</button>
+          <button class="btn ghost" id="btnOpenCable">打开官网</button>
+        </div>
+      </div>
+
+      <!-- 3. 音频桥 -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="ic ic-amber"><svg viewBox="0 0 24 24"><path d="M4 12h3l2-5 3 10 3-8 2 3h3" stroke-width="1.8" fill="none"/></svg></div>
+          <div class="panel-title">
+            <b>语音桥 · ETW → 虚拟声卡</b>
+            <span>从 BthPort ETW 取完整音频帧并送入 CABLE</span>
+          </div>
+          <span class="dot" id="d-bridge"></span>
+        </div>
+
+        <div class="kv" id="bridgeKv"></div>
+        <div class="note" id="bridgeNote"></div>
+
+        <div class="panel-actions">
+          <button class="btn" id="btnBridge">启动语音桥</button>
+          <button class="btn ghost" id="btnInject">关闭快捷键注入</button>
+          <button class="btn ghost" id="btnAdmin">以管理员身份重启本程序</button>
+        </div>
+      </div>
+
+      <!-- 4. 按键拦截 -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="ic ic-purple"><svg viewBox="0 0 24 24"><path d="M12 3.5 5 7v5c0 4.2 3 7 7 8.5 4-1.5 7-4.3 7-8.5V7z" fill="none" stroke-width="1.7"/><path d="M9 12l2 2 4-4" stroke-width="1.7" fill="none"/></svg></div>
+          <div class="panel-title">
+            <b>按键拦截 · 按住语音键不出字</b>
+            <span>遥控器是标准蓝牙键盘，不拦截的话语音键会一直输出 m</span>
+          </div>
+          <span class="dot" id="d-uhid"></span><span class="dot hidden" id="d-perm2"></span>
+        </div>
+        <div class="note" id="injectNote"></div>
+        <div class="kv" id="injectKv"></div>
+        <div class="kv" id="keySrcKv"></div>
+        <div class="note" id="keySrcNote"></div>
+        <div class="panel-actions">
+          <button class="btn" id="btnReleaseAll">紧急复位：释放所有按键</button>
+        </div>
+        <div class="kv" id="uhidKv"></div>
+        <div class="note" id="uhidNote"></div>
+        <div class="panel-actions">
+          <button class="btn" id="btnInstallUhid">安装虚拟键盘驱动</button>
+          <button class="btn ghost" id="btnTestInject">测试注入右 Alt</button>
+        </div>
+        <div class="panel-actions">
+          <button class="btn ghost" id="btnClearLog">清空按键日志</button>
+          <button class="btn ghost" id="btnExportUhid">导出到桌面手动安装</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+<script>
+  /* 只用一种桥：WebView2（.NET 版）优先；否则加载本地/qrc 的 qwebchannel.js（PySide6 版） */
+  if (!(window.chrome && window.chrome.webview)) {
+    document.write('<script src="qwebchannel.js"><\/script>');
+    document.write('<script>if (typeof QWebChannel === "undefined")'
+      + 'document.write(\'<script src="qrc:///qtwebchannel/qwebchannel.js"><\\/script>\');<\/script>');
+  }
+</script>
+<script src="app.js"></script>
+</body>
+</html>

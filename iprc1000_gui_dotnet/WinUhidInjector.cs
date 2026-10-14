@@ -1,0 +1,307 @@
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace Iprc1000Adapter;
+
+/// <summary>
+/// WinUHid 虚拟 HID 键盘注入（**优先于 SendInput**）。
+///
+/// 为什么需要它：豆包/千问等输入法会**主动过滤 SendInput 注入的按键**
+/// （检测 `KLLKHF_INJECTED` 标志），实测 SendInput 的右 Alt 确实进了输入管线
+/// 但输入法不响应。WinUHid 从驱动层创建**虚拟 HID 设备**，对上层完全等价于真实键盘，
+/// 输入法无法区分。驱动是 UMDF（`.dll` 形式，跑在 wudfhost），**不受 HVCI 约束**。
+///
+/// 调用接口（与 src-tauri/.../xiaomi/hid_injector.rs 一致）：
+///   WinUHidGetDriverInterfaceVersion() -> u32
+///   WinUHidCreateDevice(const WinUHidDeviceConfig*) -> handle
+///   WinUHidStartDevice(handle, null, null) -> i32（非 0 成功）
+///   WinUHidSubmitInputReport(handle, const u8*, u32) -> i32
+///   WinUHidDestroyDevice(handle)
+/// </summary>
+internal static class WinUhidInjector
+{
+    // 标准键盘报告描述符（修饰键 8bit + 保留 8bit + LED 5bit + 6 个键码）
+    private static readonly byte[] KeyboardDescriptor =
+    {
+        0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x05, 0x07, 0x19, 0xE0, 0x29, 0xE7, 0x15, 0x00, 0x25,
+        0x01, 0x75, 0x01, 0x95, 0x08, 0x81, 0x02, 0x95, 0x01, 0x75, 0x08, 0x81, 0x01, 0x95, 0x05,
+        0x75, 0x01, 0x05, 0x08, 0x19, 0x01, 0x29, 0x05, 0x91, 0x02, 0x95, 0x01, 0x75, 0x03, 0x91,
+        0x01, 0x95, 0x06, 0x75, 0x08, 0x15, 0x00, 0x25, 0x73, 0x05, 0x07, 0x19, 0x00, 0x29, 0x73,
+        0x81, 0x00, 0xC0,
+    };
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct DeviceConfig
+    {
+        public int supportedEvents;
+        public ushort vendorId, productId, versionNumber, descriptorLength;
+        public IntPtr descriptor;
+        public unsafe fixed byte containerId[16];
+        public IntPtr instanceId;
+        public IntPtr hardwareIds;
+        public uint readReportPeriodUs;
+    }
+
+    private delegate uint FnGetVersion();
+    private delegate IntPtr FnCreateDevice(IntPtr config);
+    private delegate int FnStartDevice(IntPtr dev, IntPtr a, IntPtr b);
+    private delegate int FnSubmitReport(IntPtr dev, IntPtr report, uint len);
+    private delegate void FnDestroyDevice(IntPtr dev);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr LoadLibraryW(string path);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GetProcAddress(IntPtr module, string name);
+    [DllImport("kernel32.dll")] private static extern bool FreeLibrary(IntPtr module);
+    [DllImport("kernel32.dll")] private static extern IntPtr GetModuleHandleW(string? name);
+
+    private static IntPtr _module = IntPtr.Zero;
+    private static IntPtr _dev = IntPtr.Zero;
+    private static FnSubmitReport? _submit;
+    private static FnDestroyDevice? _destroy;
+    private static readonly object Gate = new();
+
+    /// <summary>最近一次失败原因（给界面显示）</summary>
+    public static string? LastError { get; private set; }
+    /// <summary>驱动接口版本（0 = 驱动不可用）</summary>
+    public static uint DriverVersion { get; private set; }
+    /// <summary>虚拟键盘是否已就绪</summary>
+    public static bool Ready => _dev != IntPtr.Zero;
+    /// <summary>当前是否在用虚拟键盘注入（否则回退 SendInput）</summary>
+    public static bool InUse { get; private set; }
+
+    public static string? DllPath()
+    {
+        foreach (var c in new[]
+                 {
+                     Path.Combine(Env.AppDir, "WinUHid.dll"),
+                     Path.Combine(Env.AppDir, "assets", "winuhid", "WinUHid.dll"),
+                 })
+            if (File.Exists(c)) return c;
+        return null;
+    }
+
+    /// <summary>初始化（幂等）。失败时 LastError 给出原因。</summary>
+    /// <summary>
+    /// 只探测驱动是否就绪（加载 DLL + 读接口版本），**不创建虚拟 HID 设备**。
+    ///
+    /// 与 `EnsureReady()` 的区别：后者会真的创建一个虚拟键盘设备，代价明显；
+    /// 而环境探针每轮都要跑，绝不能在里面创建设备（实测会显著拉高常驻 CPU）。
+    /// 真正的设备改为**第一次注入时惰性创建**。
+    /// </summary>
+    public static bool ProbeDriver()
+    {
+        lock (Gate)
+        {
+            if (DriverVersion >= 1) return true;
+            var dll = DllPath();
+            if (dll == null) { LastError = "未找到 WinUHid.dll"; return false; }
+            if (_module == IntPtr.Zero)
+            {
+                _module = GetModuleHandleW("WinUHid.dll");
+                if (_module == IntPtr.Zero) _module = LoadLibraryW(dll);
+                if (_module == IntPtr.Zero)
+                {
+                    LastError = $"LoadLibraryW WinUHid.dll 失败 err={Marshal.GetLastWin32Error()}";
+                    return false;
+                }
+            }
+            var pVer = GetProcAddress(_module, "WinUHidGetDriverInterfaceVersion");
+            if (pVer == IntPtr.Zero) { LastError = "WinUHid.dll 缺少版本查询导出函数"; return false; }
+            DriverVersion = Marshal.GetDelegateForFunctionPointer<FnGetVersion>(pVer)();
+            if (DriverVersion < 1)
+            {
+                LastError = $"WinUHid 驱动未安装或未就绪（interface version={DriverVersion}）";
+                return false;
+            }
+            return true;
+        }
+    }
+
+    public static bool EnsureReady()
+    {
+        lock (Gate)
+        {
+            if (_dev != IntPtr.Zero) return true;
+
+            var dll = DllPath();
+            if (dll == null) { LastError = "未找到 WinUHid.dll"; return false; }
+
+            if (_module == IntPtr.Zero)
+            {
+                // 先看是否已被加载（例如同进程重复初始化）
+                _module = GetModuleHandleW("WinUHid.dll");
+                if (_module == IntPtr.Zero) _module = LoadLibraryW(dll);
+                if (_module == IntPtr.Zero)
+                {
+                    LastError = $"LoadLibraryW WinUHid.dll 失败 err={Marshal.GetLastWin32Error()}";
+                    return false;
+                }
+            }
+
+            var pVer = GetProcAddress(_module, "WinUHidGetDriverInterfaceVersion");
+            var pCreate = GetProcAddress(_module, "WinUHidCreateDevice");
+            var pStart = GetProcAddress(_module, "WinUHidStartDevice");
+            var pSubmit = GetProcAddress(_module, "WinUHidSubmitInputReport");
+            var pDestroy = GetProcAddress(_module, "WinUHidDestroyDevice");
+            if (pVer == IntPtr.Zero || pCreate == IntPtr.Zero || pStart == IntPtr.Zero
+                || pSubmit == IntPtr.Zero || pDestroy == IntPtr.Zero)
+            {
+                LastError = "WinUHid.dll 缺少导出函数（版本不匹配？）";
+                return false;
+            }
+
+            DriverVersion = Marshal.GetDelegateForFunctionPointer<FnGetVersion>(pVer)();
+            if (DriverVersion < 1)
+            {
+                LastError = $"WinUHid 驱动未安装或未就绪（interface version={DriverVersion}），请先装驱动";
+                return false;
+            }
+
+            var create = Marshal.GetDelegateForFunctionPointer<FnCreateDevice>(pCreate);
+            var start = Marshal.GetDelegateForFunctionPointer<FnStartDevice>(pStart);
+            _submit = Marshal.GetDelegateForFunctionPointer<FnSubmitReport>(pSubmit);
+            _destroy = Marshal.GetDelegateForFunctionPointer<FnDestroyDevice>(pDestroy);
+
+            _dev = CreateKeyboard(create, start);
+            if (_dev == IntPtr.Zero) return false;
+
+            LastError = null;
+            return true;
+        }
+    }
+
+    private static IntPtr CreateKeyboard(FnCreateDevice create, FnStartDevice start)
+    {
+        var instance = Encoding.Unicode.GetBytes("Iprc1000AdapterKeyboard\0");
+        var cfg = Marshal.AllocHGlobal(Marshal.SizeOf<DeviceConfig>());
+        var desc = Marshal.AllocHGlobal(KeyboardDescriptor.Length);
+        var inst = Marshal.AllocHGlobal(instance.Length);
+        try
+        {
+            Marshal.Copy(KeyboardDescriptor, 0, desc, KeyboardDescriptor.Length);
+            Marshal.Copy(instance, 0, inst, instance.Length);
+
+            var c = new DeviceConfig
+            {
+                supportedEvents = 0,
+                vendorId = 0,
+                productId = 1,
+                versionNumber = 1,
+                descriptorLength = (ushort)KeyboardDescriptor.Length,
+                descriptor = desc,
+                instanceId = inst,
+                hardwareIds = IntPtr.Zero,
+                readReportPeriodUs = 0,
+            };
+            Marshal.StructureToPtr(c, cfg, false);
+
+            var dev = create(cfg);
+            if (dev == IntPtr.Zero) { LastError = "WinUHidCreateDevice 失败（驱动没装好？）"; return IntPtr.Zero; }
+            if (start(dev, IntPtr.Zero, IntPtr.Zero) == 0)
+            {
+                LastError = "WinUHidStartDevice 失败";
+                return IntPtr.Zero;
+            }
+            return dev;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(cfg);
+            Marshal.FreeHGlobal(desc);
+            Marshal.FreeHGlobal(inst);
+        }
+    }
+
+    // ── 键码换算 ──
+
+    private static byte? ModifierBit(int vk) => vk switch
+    {
+        0x11 or 0xA2 => 0x01,   // Ctrl
+        0x10 or 0xA0 => 0x02,   // Shift
+        0x12 or 0xA4 => 0x04,   // Alt
+        0x5B => 0x08,           // LWin
+        0xA3 => 0x10,           // RCtrl
+        0xA1 => 0x20,           // RShift
+        0xA5 => 0x40,           // ★ 右 Alt
+        0x5C => 0x80,           // RWin
+        _ => null,
+    };
+
+    private static byte? Usage(int vk)
+    {
+        if (vk >= 0x41 && vk <= 0x5A) return (byte)(vk - 0x41 + 0x04);          // A-Z
+        if (vk >= 0x31 && vk <= 0x39) return (byte)(vk - 0x31 + 0x1E);          // 1-9
+        if (vk >= 0x70 && vk <= 0x7B) return (byte)(vk - 0x70 + 0x3A);          // F1-F12
+        return vk switch
+        {
+            0x30 => 0x27,   // 0
+            0x0D => 0x28,   // Enter
+            0x1B => 0x29,   // Esc
+            0x08 => 0x2A,   // Backspace
+            0x09 => 0x2B,   // Tab
+            0x20 => 0x2C,   // 空格
+            0x21 => 0x4B,   // PageUp
+            0x22 => 0x4E,   // PageDown
+            0x23 => 0x4D,   // End
+            0x24 => 0x4A,   // Home
+            0x25 => 0x50,   // ←
+            0x26 => 0x52,   // ↑
+            0x27 => 0x4F,   // →
+            0x28 => 0x51,   // ↓
+            0x2D => 0x49,   // Insert
+            0x2E => 0x4C,   // Delete
+            0x5D => 0x65,   // 菜单键
+            _ => null,
+        };
+    }
+
+    /// <summary>把一组虚拟键码作为**一个报告**提交（修饰键 + 最多 6 个键）。</summary>
+    public static bool Send(IReadOnlyList<int> vks)
+    {
+        if (!EnsureReady()) return false;
+        var report = new byte[8];
+        var keys = new List<byte>();
+        foreach (var vk in vks)
+        {
+            var bit = ModifierBit(vk);
+            if (bit.HasValue) { report[0] |= bit.Value; continue; }
+            var u = Usage(vk);
+            if (u.HasValue && !keys.Contains(u.Value) && keys.Count < 6) keys.Add(u.Value);
+        }
+        for (var i = 0; i < keys.Count; i++) report[2 + i] = keys[i];
+
+        var buf = Marshal.AllocHGlobal(8);
+        try
+        {
+            Marshal.Copy(report, 0, buf, 8);
+            var rc = _submit!(_dev, buf, 8);
+            if (rc == 0) { LastError = "WinUHidSubmitInputReport 失败"; return false; }
+            InUse = true;
+            LastError = null;
+            return true;
+        }
+        finally { Marshal.FreeHGlobal(buf); }
+    }
+
+    /// <summary>全部松开（空报告）。</summary>
+    public static bool Release() => Send(Array.Empty<int>());
+
+    public static object Status() => new
+    {
+        dllFound = DllPath() != null,
+        driverVersion = DriverVersion,
+        ready = Ready,
+        error = LastError,
+    };
+
+    public static void Shutdown()
+    {
+        lock (Gate)
+        {
+            try { if (_dev != IntPtr.Zero) _destroy?.Invoke(_dev); } catch { }
+            _dev = IntPtr.Zero;
+            InUse = false;
+        }
+    }
+}

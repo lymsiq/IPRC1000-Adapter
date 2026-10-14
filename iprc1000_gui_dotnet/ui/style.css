@@ -1,0 +1,307 @@
+/* IPRC1000 Adapter — 浅蓝白、圆角卡片、柔和阴影 */
+
+:root{
+  --bg1:#eaf2fd; --bg2:#f7fbff; --bg3:#eef6ff;
+  --rail:rgba(255,255,255,.72);
+  --card:rgba(255,255,255,.86);
+  --line:rgba(120,150,190,.18);
+  --txt:#1f2a37; --txt2:#5b6b80; --txt3:#8a99ad;
+  --blue:#2f80ed; --blue-l:#e3f0ff; --blue-d:#1f6fd8;
+  --green:#22c55e; --amber:#f59e0b; --red:#ef4444; --indigo:#6366f1; --purple:#a855f7;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font:14px/1.5 "Microsoft YaHei UI","Microsoft YaHei",-apple-system,"Segoe UI",sans-serif;
+  color:var(--txt);
+  background:linear-gradient(150deg,var(--bg1) 0%,var(--bg2) 45%,var(--bg3) 100%);
+  overflow:hidden; user-select:none;
+}
+.app{display:flex;height:100vh}
+
+/* ───── 左侧栏 ───── */
+.rail{
+  width:272px;flex:0 0 272px;position:relative;overflow:hidden;
+  background:var(--rail);backdrop-filter:blur(14px);
+  border-right:1px solid var(--line);
+  display:flex;flex-direction:column;padding:12px 16px 10px;
+}
+.logo{
+  width:34px;height:34px;border-radius:11px;display:grid;place-items:center;color:#fff;
+  background:linear-gradient(140deg,#4f9dfd,#2f80ed);box-shadow:0 4px 12px rgba(47,128,237,.35);
+}
+.brand{
+  margin-top:12px;display:flex;align-items:center;gap:7px;
+  font-weight:600;font-size:14.5px;letter-spacing:.2px;
+}
+.badge{
+  width:16px;height:16px;border-radius:50%;background:var(--blue);color:#fff;
+  display:grid;place-items:center;font-size:10.5px;font-weight:700;font-style:normal;
+}
+.nav{margin-top:10px;display:flex;flex-direction:column;gap:5px;width:48px}
+.nav-btn{
+  width:52px;height:52px;border:0;border-radius:15px;background:transparent;cursor:pointer;
+  display:grid;place-items:center;color:var(--txt2);transition:.16s;
+}
+.nav-btn svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linejoin:round;stroke-linecap:round}
+.nav-btn svg rect,.nav-btn svg circle{fill:none}
+.nav-btn:hover{background:rgba(47,128,237,.08);color:var(--blue)}
+.nav-btn.active{background:var(--blue-l);color:var(--blue);box-shadow:inset 0 0 0 1px rgba(47,128,237,.22)}
+
+.device{margin-top:6px;display:flex;flex-direction:column;align-items:center;padding-bottom:2px;min-height:0}
+.remote{filter:drop-shadow(0 10px 22px rgba(35,42,54,.28));flex:0 1 auto;min-height:0;display:flex;justify-content:center}
+/* 图片随窗口高度自适应：用 100vh 减去上方固定部分，窗口矮了图片自动缩小，
+   保证下方的 IPRC1000 / 检测状态 / 连接状态 都能完整显示（此前图片固定 122px 会溢出被裁）。*/
+.remote img{display:block;width:92px;height:auto;max-height:calc(100vh - 300px);
+  object-fit:contain;user-select:none;-webkit-user-drag:none}
+.dev-name{margin-top:8px;font-weight:700;font-size:14px;letter-spacing:.3px}
+.dev-hint{margin-top:4px;font-size:12px;color:var(--blue);background:var(--blue-l);
+  padding:1px 10px;border-radius:99px}
+.rail-foot{
+  display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--txt2);
+  border-top:1px solid var(--line);padding-top:11px;
+  margin-top:auto;                 /* ← 把连接状态钉在底部，图片因此上移 */
+}
+.dot{width:8px;height:8px;border-radius:50%;background:#c3ccd9;flex:0 0 8px}
+.dot.on{background:var(--green);box-shadow:0 0 0 3px rgba(34,197,94,.16)}
+.dot.warn{background:var(--amber);box-shadow:0 0 0 3px rgba(245,158,11,.16)}
+.dot.err{background:var(--red);box-shadow:0 0 0 3px rgba(239,68,68,.16)}
+
+/* ───── 内容区 ───── */
+main{flex:1;overflow-y:auto;padding:34px 40px 26px}
+main::-webkit-scrollbar{width:9px}
+main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px}
+.page{max-width:1080px}
+.hidden{display:none}
+.page-head{margin-bottom:22px}
+.page-head h1{font-size:27px;font-weight:800;letter-spacing:.4px}
+.page-head p{margin-top:7px;color:var(--txt2);font-size:13.5px}
+.page-head.row{display:flex;align-items:flex-start;justify-content:space-between}
+
+/* 卡片网格 */
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.card{
+  background:var(--card);border:1px solid var(--line);border-radius:16px;padding:17px 19px 19px;
+  box-shadow:0 6px 20px rgba(120,150,190,.10);backdrop-filter:blur(8px);
+}
+.card-top{display:flex;align-items:center;gap:9px}
+.card-title{font-weight:600;font-size:13.5px}
+.card-top .dot{margin-left:auto}
+.card-value{margin-top:16px;font-weight:700;font-size:18px;letter-spacing:.2px}
+.card-desc{margin-top:7px;font-size:12.5px;color:var(--txt3)}
+.ic{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:0 0 30px}
+.ic svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round}
+.ic-blue{background:#e4f1ff;color:#2f80ed}
+.ic-indigo{background:#e8e9ff;color:#5b5fef}
+.ic-amber{background:#fff2e0;color:#e8890c}
+.ic-purple{background:#f6e9ff;color:#a855f7}
+
+/* 底部操作条 */
+.opbar{
+  margin-top:20px;background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:13px 19px;display:flex;align-items:center;justify-content:space-between;
+  box-shadow:0 6px 18px rgba(120,150,190,.09);
+}
+.op-left{display:flex;align-items:center;gap:9px;color:var(--txt2);font-size:13.5px}
+.op-left svg{fill:none;stroke:var(--blue);stroke-linecap:round;stroke-linejoin:round}
+.op-left b{color:var(--txt);font-size:15px}
+.op-right{color:var(--green);font-weight:600;font-size:13.5px}
+
+/* ───── 按键映射列表 ───── */
+.keylist{display:flex;flex-direction:column;gap:9px;padding-bottom:18px}
+.keyrow{
+  display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--line);
+  border-radius:13px;padding:12px 18px;cursor:pointer;transition:.15s;
+}
+.keyrow:hover{border-color:rgba(47,128,237,.42);box-shadow:0 6px 18px rgba(47,128,237,.10)}
+.keyrow.sel{border-color:var(--blue);box-shadow:0 0 0 2px rgba(47,128,237,.16)}
+.keycap{
+  width:38px;height:38px;border-radius:10px;background:#f2f5f9;border:1px solid var(--line);
+  display:grid;place-items:center;font-size:10px;color:var(--txt2);font-weight:700;letter-spacing:.2px;
+}
+.keyname{font-weight:600;font-size:14px}
+.keyhid{font-size:11.5px;color:var(--txt3);margin-top:2px}
+.keybind{margin-left:auto;font-size:13px;color:var(--txt2);font-family:Consolas,"Cascadia Mono",monospace}
+.keyrow .chev{color:#b8c4d4;margin-left:8px}
+.keyrow.none .keybind{color:var(--txt3)}
+
+/* ───── 面板（环境设置） ───── */
+.panel{
+  background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+  margin-bottom:16px;box-shadow:0 6px 20px rgba(120,150,190,.10);
+}
+.panel-head{display:flex;align-items:flex-start;gap:12px}
+.panel-title{display:flex;flex-direction:column;gap:3px}
+.panel-title b{font-size:15px;font-weight:700}
+.panel-title span{font-size:12.5px;color:var(--txt3)}
+.panel-head .dot{margin-left:auto;margin-top:6px}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:9px;margin-top:15px}
+.kv .item{background:#f5f8fd;border:1px solid var(--line);border-radius:10px;padding:9px 12px}
+.kv .k{font-size:11.5px;color:var(--txt3)}
+.kv .v{margin-top:3px;font-size:14px;font-weight:600;font-family:Consolas,"Cascadia Mono",monospace;word-break:break-all}
+.kv .v.ok{color:#16a34a} .kv .v.bad{color:#e8890c}
+.note{margin-top:13px;font-size:12.5px;color:var(--txt2);background:#f7fafe;
+  border-left:3px solid var(--blue);border-radius:0 8px 8px 0;padding:9px 13px;line-height:1.65}
+.note.warn{border-left-color:var(--amber);background:#fffaf0;color:#8a5a00}
+.panel-actions{display:flex;gap:9px;margin-top:15px;flex-wrap:wrap}
+
+/* 按钮 */
+.btn{
+  border:0;border-radius:10px;padding:9px 17px;font-size:13.5px;font-weight:600;cursor:pointer;
+  background:linear-gradient(140deg,#4f9dfd,#2f80ed);color:#fff;transition:.15s;
+  box-shadow:0 4px 13px rgba(47,128,237,.28);font-family:inherit;
+}
+.btn:hover{filter:brightness(1.05)}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
+.btn.ghost{background:#fff;color:var(--txt2);border:1px solid var(--line);box-shadow:none}
+.btn.ghost:hover{color:var(--blue);border-color:rgba(47,128,237,.45)}
+
+/* Toast */
+#toast{
+  position:fixed;left:50%;bottom:30px;transform:translateX(-50%) translateY(16px);
+  background:rgba(31,42,55,.93);color:#fff;padding:11px 20px;border-radius:11px;font-size:13.5px;
+  opacity:0;transition:.22s;pointer-events:none;max-width:70vw;
+}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+.btn.tiny{padding:4px 9px;font-size:11.5px;border-radius:7px;flex:none}
+
+.keysum{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 10px}
+.keysum .pill{font-size:12px;padding:3px 10px;border-radius:99px;background:var(--blue-l);color:var(--blue)}
+.keygroup{font-size:12px;font-weight:700;color:var(--txt2);letter-spacing:.6px;
+  margin:14px 2px 6px;display:flex;align-items:center;gap:8px}
+.keygroup:after{content:'';flex:1;height:1px;background:var(--line)}
+
+
+/* ───── 紧凑模式（整体收紧间距，一屏容纳更多内容）───── */
+.page-head{margin-bottom:12px}
+.page-head h1{font-size:18px}
+.page-head p{font-size:12px;margin-top:3px}
+.panel{padding:13px 15px;margin-bottom:10px;border-radius:12px}
+.panel-head{margin-bottom:8px;gap:9px}
+.panel-title b{font-size:13.5px}
+.panel-title span{font-size:11.5px;margin-top:1px}
+.panel-actions{margin-top:9px;gap:6px}
+.btn{padding:5px 11px;font-size:12.5px;border-radius:8px}
+.btn.ghost{padding:5px 10px}
+.item{padding:5px 0;gap:8px}
+.item .k{font-size:12.5px}
+.item .v{font-size:12.5px}
+.kv{gap:0}
+.note{margin-top:7px;padding:7px 10px;font-size:12px;line-height:1.5;border-radius:9px}
+.keyrow{padding:7px 11px;gap:10px;margin-bottom:5px;border-radius:10px}
+.keycap{width:34px;height:34px;font-size:15px;border-radius:9px}
+.keyname{font-size:13.5px}
+.keyhid{font-size:10.5px}
+.keybind{font-size:12.5px}
+.keygroup{margin:10px 2px 5px}
+.keysum{gap:7px;margin:2px 0 8px}
+.keysum .pill{font-size:11.5px;padding:2px 9px}
+.card{padding:12px 14px;border-radius:12px}
+.cards{gap:10px}
+
+
+/* ───── 按键映射页：左遥控器 + 右列表 ───── */
+.keys-layout{display:flex;gap:16px;align-items:flex-start}
+.remote-pane{flex:0 0 196px;display:flex;flex-direction:column;align-items:center;
+  padding:10px 8px 10px;border-radius:14px;background:var(--card,rgba(255,255,255,.72));
+  border:1px solid var(--line)}
+.remote-stage{position:relative;line-height:0}
+.remote-stage img{display:block;width:164px;height:auto;user-select:none;-webkit-user-drag:none}
+/* 热区：默认透明，选中/悬停时高亮 */
+.keyhit{position:absolute;border-radius:9px;box-sizing:border-box;cursor:pointer;
+  transition:background .12s,box-shadow .12s}
+.keyhit:hover{background:rgba(64,150,255,.16)}
+.keyhit.on{background:rgba(0,150,255,.30);box-shadow:0 0 0 2px rgba(0,150,255,.95) inset,
+  0 0 10px rgba(0,150,255,.55)}
+.remote-name{margin-top:8px;font-weight:700;font-size:14px}
+.remote-hint{margin-top:4px;font-size:12px;color:var(--blue);background:var(--blue-l);
+  padding:1px 10px;border-radius:99px}
+
+.keys-pane{flex:1;min-width:0}
+/* 行内缩略图：用 remote.png 当 sprite 裁出该键那一小块 */
+.keythumb{flex:0 0 34px;width:34px;height:34px;border-radius:9px;background-image:url(remote.png);
+  background-repeat:no-repeat;border:1px solid var(--line);
+  box-shadow:0 1px 3px rgba(20,28,40,.16)}
+.keyrow.sel .keythumb{box-shadow:0 0 0 2px rgba(0,150,255,.85)}
+.keybind-sym{min-width:78px;text-align:right;font-family:ui-monospace,Consolas,monospace;
+  font-size:13.5px;color:var(--txt1,#1e2633)}
+.keyrow.none .keybind-sym{color:var(--txt3,#98a4b6)}
+
+
+
+/* ───── 组合键编辑弹窗 ───── */
+.mask{position:fixed;inset:0;background:rgba(16,22,32,.42);backdrop-filter:blur(2px);
+  display:flex;align-items:center;justify-content:center;z-index:60}
+.mask.hide{display:none}
+.modal{width:min(560px,92vw);border-radius:16px;background:var(--bg1,#fff);
+  border:1px solid var(--line);box-shadow:0 24px 60px rgba(12,20,32,.34);overflow:hidden}
+.modal-head{display:flex;align-items:center;gap:12px;padding:14px 16px 12px;
+  border-bottom:1px solid var(--line)}
+.modal-thumb{flex:0 0 40px;width:40px;height:40px;border-radius:10px;
+  background-image:url(remote.png);background-repeat:no-repeat;border:1px solid var(--line)}
+.modal-title{font-weight:700;font-size:15px}
+.modal-sub{font-size:12.5px;color:var(--txt2);margin-top:2px;
+  font-family:ui-monospace,Consolas,monospace}
+.modal-x{margin-left:auto;width:28px;height:28px;border:0;border-radius:8px;cursor:pointer;
+  background:transparent;color:var(--txt2);font-size:20px;line-height:1}
+.modal-x:hover{background:var(--line)}
+.modal-body{padding:14px 16px 16px}
+.modal-body .combo-input{width:100%;box-sizing:border-box;padding:9px 12px;font-size:13px;
+  border-radius:10px;border:1px solid var(--line);background:var(--bg2,#f7f9fc);
+  color:var(--txt1,#1e2633);font-family:ui-monospace,Consolas,monospace}
+.modal-actions{display:flex;align-items:center;gap:8px;margin-top:11px}
+.modal-actions .grow{flex:1}
+
+
+/* ───── 配置组 Tab + 搜索 ───── */
+.grouptabs{display:flex;align-items:center;gap:6px;margin:0 0 12px}
+.gtabs{display:flex;gap:5px;flex-wrap:wrap}
+.gtab{padding:5px 12px;border-radius:9px 9px 0 0;font-size:12.5px;cursor:pointer;
+  border:1px solid var(--line);border-bottom:0;background:var(--bg2,#f4f7fb);color:var(--txt2)}
+.gtab.on{background:var(--bg1,#fff);color:var(--txt1);font-weight:700;
+  box-shadow:inset 0 -2px 0 var(--blue)}
+.gtab .n{opacity:.6;font-size:11px;margin-left:5px}
+.tabadd{width:26px;height:26px;border-radius:8px;border:1px solid var(--line);cursor:pointer;
+  background:var(--bg2,#f4f7fb);color:var(--txt2);font-size:15px;line-height:1}
+.tabadd:hover{background:var(--blue-l);color:var(--blue)}
+.gsearch{margin-left:auto;width:230px;padding:6px 11px;font-size:12.5px;border-radius:9px;
+  border:1px solid var(--line);background:var(--bg2,#fff);color:var(--txt1,#1e2633)}
+
+/* ───── 屏幕键盘（弹窗内）───── */
+.kb-mods{display:flex;gap:7px;margin-bottom:11px}
+.kb-mods .m{flex:1;padding:8px 0;text-align:center;font-size:13px;border-radius:10px;cursor:pointer;
+  border:1px solid var(--line);background:var(--bg2,#f4f7fb);color:var(--txt2);user-select:none}
+.kb-mods .m.on{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:700}
+.kb-main{display:flex;flex-direction:column;gap:5px;margin-bottom:11px}
+.kb-row{display:flex;gap:5px}
+.kb-key{
+  /* ★ 关键：flex:1 1 0 让每个键**等分**本行剩余宽度。
+     不写的话 flex 默认 0 1 auto，键宽由内容决定 —— Esc / Backspace / Enter 这类
+     文本长的键会把同行其它键挤变形（实测踩到：Esc 撑满整行、数字行被撕开）。 */
+  flex:1 1 0;min-width:0;
+  height:30px;border-radius:7px;border:1px solid var(--line);background:var(--bg2,#f7f9fc);
+  color:var(--txt1,#1e2633);font-size:11.5px;cursor:pointer;user-select:none;
+  display:flex;align-items:center;justify-content:center;overflow:hidden;
+  white-space:nowrap;text-overflow:ellipsis;padding:0 4px;
+}
+.kb-key:hover{background:var(--blue-l)}
+.kb-key.on{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:700}
+/* 宽度类：在等分基础上加权（1 个单位 = 一个普通字母键） */
+.kb-key.w15{flex:1.5 1 0}.kb-key.w2{flex:2 1 0}.kb-key.w25{flex:2.5 1 0}
+.kb-key.w3{flex:3 1 0}.kb-key.w5{flex:5 1 0}.kb-key.w7{flex:7 1 0}
+.kb-extra{display:flex;gap:6px;flex-wrap:wrap}
+.kb-foot{display:flex;align-items:center;gap:8px;margin-top:13px;
+  border-top:1px solid var(--line);padding-top:11px}
+.kb-foot .grow{flex:1}
+.kb-cur{font-size:12.5px;color:var(--txt2)}
+.kb-cur b{font-family:ui-monospace,Consolas,monospace;color:var(--blue);font-size:14px}
+
+/* 语音键：输入法预设 */
+.kb-preset{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px;
+  padding:8px 10px;border-radius:10px;background:var(--blue-l)}
+.kb-preset .pre-label{font-size:12px;color:var(--txt2)}
+.pre-btn{padding:4px 10px;font-size:12px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--blue);background:#fff;color:var(--blue)}
+.pre-btn:hover{background:var(--blue);color:#fff}

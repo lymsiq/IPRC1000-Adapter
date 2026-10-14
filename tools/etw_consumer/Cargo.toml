@@ -1,0 +1,8 @@
+[package]
+name = "etw_consumer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ferrisetw = "1.2"
+hound = "3.5"

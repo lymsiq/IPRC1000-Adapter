@@ -1,0 +1,63 @@
+# ── 构建产物 ──
+bin/
+obj/
+publish/
+target/
+.vs/
+*.user
+
+# ── 打包输出 ──
+IPRC1000_Adapter_v1.0/
+IPRC1000_Adapter_v1.0.zip
+*.zip
+
+# ── 第三方二进制（体积大 / 许可限制，请自行获取，见 README）──
+iprc1000_gui_dotnet/assets/winuhid/
+iprc1000_gui_dotnet/assets/VBCABLE_*.zip
+iprc1000_gui_dotnet/assets/etw_consumer.exe
+
+# ── 实验 / 抓包产物（工作区根目录里的临时文件）──
+*.etl
+*.btsnoop
+*.wav
+*.pcm
+*.pdf
+*.log
+/bth*
+/bt_*
+/diag_*
+/etw_*
+/baseline_check*
+/datasheet*
+/*capture*.txt
+/*_check*.txt
+
+# ── 临时截图 / 调试图 ──
+_*.png
+_*.json
+selftest*.json
+
+# ── 记忆目录（本地工作记录，不入库）──
+.workbuddy/
+
+
+*.key
+*.pem
+.env
+
+# ── 根目录兜底：只跟踪下面这几项 ──
+/*
+!README.md
+!LICENSE
+!.gitignore
+!iprc1000_gui_dotnet/
+!tools/
+
+# ── 凭据 / 备份：放在最后，覆盖上面的白名单 ──
+tools/ssh/
+*.pub
+*.key
+*.pem
+.env
+*.bak
+iprc1000_gui_dotnet/inject_*.json
