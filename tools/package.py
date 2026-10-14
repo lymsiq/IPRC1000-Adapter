@@ -50,10 +50,17 @@ def read_version():
 
 
 VERSION = read_version()
-PKG = os.path.join(ROOT, f"IPRC1000_Adapter_v{VERSION}")
+# ── 输出目录固定不带版本号 ──
+#
+# 用户的实际用法是：「一个固定文件夹 + 一次性建好的快捷方式，每次发版只更新里面的内容」。
+# 所以**打包目录固定叫 IPRC1000_Adapter**，压缩包再出两份：
+#   · IPRC1000_Adapter_v{版本}.zip  —— 带版本号，存档/回滚用
+#   · IPRC1000_Adapter.zip          —— 固定名，解压出来就是 IPRC1000_Adapter\ 文件夹
+# 后者配合 GitHub 的 /releases/latest/download/ 还能得到永久下载链接，
+# 于是"升级"就等于「下载固定名包 → 解压覆盖同一个文件夹」，快捷方式永远不用重建。
+PKG = os.path.join(ROOT, "IPRC1000_Adapter")
 ZP = os.path.join(ROOT, f"IPRC1000_Adapter_v{VERSION}.zip")
-# 固定名的包（不随版本变），用于"解压目录名固定 + 永久下载链接"，见 build() 里的说明
-LATEST_ZIP = os.path.join(ROOT, "IPRC1000_Adapter_latest.zip")
+FIXED_ZIP = os.path.join(ROOT, "IPRC1000_Adapter.zip")
 
 # 包里必须存在的功能关键字（改完代码若这里 ✗，说明打包漏了新文件）
 CHECKS = [
@@ -244,23 +251,28 @@ def build():
     with open(os.path.join(target, "升级说明.txt"), "w", encoding="utf-8") as f:
         f.write("IPRC1000 遥控器适配器 · 升级说明\n")
         f.write("=" * 46 + "\n\n")
-        f.write("【要点】程序放在一个**固定目录**里，以后升级只覆盖、不换地方，\n")
-        f.write("        桌面快捷方式就永远不用重建。\n\n")
+        f.write("【一句话】程序就放在一个固定文件夹里，以后升级只覆盖里面的文件，\n")
+        f.write("          位置不变 → 桌面快捷方式建一次就永远有效。\n\n")
+        f.write("【这个文件夹叫什么】\n")
+        f.write("  固定叫 IPRC1000_Adapter（不带版本号）。\n")
+        f.write("  发布时除了带版本号的存档包，还会出一个**同名压缩包**：\n")
+        f.write("      IPRC1000_Adapter.zip\n")
+        f.write("  它的文件名不带版本号，所以解压出来的文件夹永远叫 IPRC1000_Adapter，\n")
+        f.write("  不会每升一级就换目录。\n\n")
         f.write("【第一次】\n")
-        f.write("  1) 把压缩包解压到一个固定目录，例如：D:\\IPRC1000\n")
-        f.write("     （不要用 Windows 解压向导的默认目录 —— 它会按压缩包文件名建目录，\n")
-        f.write("       每个版本一个新目录，快捷方式就会跟着失效）\n")
-        f.write("  2) 双击目录里的「创建桌面快捷方式.cmd」，桌面会生成\n")
-        f.write("     「IPRC1000 遥控器」，并已设为「以管理员身份运行」。\n")
-        f.write("  3) 第一次还要部署环境：右键「以 PowerShell 运行」tools\\一键部署.ps1\n\n")
-        f.write("【以后升级】\n")
-        f.write("  1) 下载新版本（或直接用固定链接，见下）\n")
-        f.write("  2) 解压到**同一个** D:\\IPRC1000，覆盖同名文件\n")
-        f.write("  3) 完事 —— 快捷方式还是那个，点开就是新版\n\n")
-        f.write("【永久下载链接】永远指向最新版，不用每次找：\n")
-        f.write("  https://github.com/lymsiq/IPRC1000-Adapter/releases/latest/download/IPRC1000_Adapter_latest.zip\n\n")
-        f.write("【小技巧】把这个链接存成浏览器书签或下载工具的任务，升级就是\n")
-        f.write("        「下载 → 覆盖解压」两步。\n")
+        f.write("  1) 下载 IPRC1000_Adapter.zip，解压到一个固定位置，例如 D:\\\n")
+        f.write("     → 得到 D:\\IPRC1000_Adapter\\\n")
+        f.write("  2) 双击里面的「创建桌面快捷方式.cmd」\n")
+        f.write("     → 桌面出现「IPRC1000 遥控器」，已设为「以管理员身份运行」\n")
+        f.write("  3) 首次部署环境：右键「以 PowerShell 运行」tools\\一键部署.ps1\n\n")
+        f.write("【以后每次升级】两步，快捷方式不用动：\n")
+        f.write("  1) 下载 IPRC1000_Adapter.zip（同一个链接，永远是最新版）\n")
+        f.write("  2) 解压到 D:\\ ，选「全部覆盖」\n")
+        f.write("     完事 —— 点桌面那个快捷方式就是新版。\n\n")
+        f.write("【永久下载链接】永远指向最新版，不用再找 release 页面：\n")
+        f.write("  https://github.com/lymsiq/IPRC1000-Adapter/releases/latest/download/IPRC1000_Adapter.zip\n\n")
+        f.write("【小技巧】把这个链接存成浏览器书签，或加进下载工具的任务列表，\n")
+        f.write("        升级就是「下载 → 覆盖解压」两步。\n")
 
     with open(os.path.join(target, "版本.txt"), "w", encoding="utf-8") as f:
         f.write("IPRC1000 Adapter\n")
@@ -284,17 +296,17 @@ def build():
                 p = os.path.join(root, f)
                 z.write(p, os.path.relpath(p, target))
 
-    # ★ 再出一份**固定名**的包：IPRC1000_Adapter_latest.zip
+    # ★ 再出一份**固定名**的包：IPRC1000_Adapter.zip
     #
     # 为什么需要：Windows 的解压向导会**按压缩包文件名建目录**，
     # 于是 `IPRC1000_Adapter_v1.0.4.zip` 解压出 `IPRC1000_Adapter_v1.0.4\`、
     # 下个版本又是新目录 —— 桌面快捷方式每升一次级就失效一次。
     # 固定名的包解压出来的目录名永远一样，覆盖解压即可，快捷方式一劳永逸。
     # 配合 GitHub 的 /releases/latest/download/ 还能得到**永久下载链接**：
-    #   https://github.com/lymsiq/IPRC1000-Adapter/releases/latest/download/IPRC1000_Adapter_latest.zip
-    if os.path.exists(LATEST_ZIP):
-        os.remove(LATEST_ZIP)
-    shutil.copy2(ZP, LATEST_ZIP)
+    #   https://github.com/lymsiq/IPRC1000-Adapter/releases/latest/download/IPRC1000_Adapter.zip
+    if os.path.exists(FIXED_ZIP):
+        os.remove(FIXED_ZIP)
+    shutil.copy2(ZP, FIXED_ZIP)
     return target
 
 

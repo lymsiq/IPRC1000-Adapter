@@ -7,11 +7,13 @@ target/
 *.user
 
 # ── 打包输出（包名带版本号，用通配覆盖）──
+# 打包输出：目录名固定不带版本号（见 tools/package.py），压缩包再出带版本号的存档
+IPRC1000_Adapter/
 IPRC1000_Adapter_v*/
 IPRC1000_Adapter_v*.zip
 IPRC1000_Adapter_v*.zip.sha256
-IPRC1000_Adapter_latest.zip
-IPRC1000_Adapter_latest.zip.sha256
+IPRC1000_Adapter.zip
+IPRC1000_Adapter.zip.sha256
 *.zip
 
 # ── 第三方二进制（体积大 / 许可限制，请自行获取，见 README）──
