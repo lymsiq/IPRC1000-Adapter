@@ -39,7 +39,15 @@
       <div class="dev-hint" id="devHint">已检测：确认</div>
     </div>
 
-    <div class="rail-foot"><span class="dot" id="linkDot"></span><span id="linkText">等待遥控器连接</span></div>
+    <!-- 底部固定区：连接状态 + 版本。用包裹层承载 margin-top:auto，
+         否则 auto 外边距会把后加的版本行挤出可视区（.rail 是 overflow:hidden）。 -->
+    <div class="rail-bottom">
+      <div class="rail-foot">
+        <span class="dot" id="linkDot"></span><span id="linkText">等待遥控器连接</span>
+      </div>
+      <!-- 版本 + 构建时间：一眼确认手上跑的是哪一版（本项目反复吃过"是不是最新 exe"的亏） -->
+      <div class="rail-ver" id="railVer" title="程序版本与构建时间">—</div>
+    </div>
   </aside>
 
   <!-- ═══════════ 右侧内容 ═══════════ -->

@@ -8,6 +8,26 @@
 
 ---
 
+## 界面
+
+**按键映射** —— 左侧遥控器实体图（点键高亮），右侧每行是该键的缩略图 + 当前映射：
+
+![按键映射页](tools/docs/screenshots/keys.png)
+
+**屏幕键盘改键** —— 点任意一行弹出，支持修饰键组合；语音键另有豆包 / 微信输入法一键预设：
+
+![屏幕键盘](tools/docs/screenshots/modal.png)
+
+| 功能总览 | 环境设置（缺哪项点哪项）|
+|---|---|
+| ![功能总览](tools/docs/screenshots/overview.png) | ![环境设置](tools/docs/screenshots/env.png) |
+
+> 截图由 `ui/index.html` 的**浏览器预览模式**自动渲染（无需后端，带示例数据）：
+> `msedge --headless --screenshot=out.png "file:///…/ui/index.html?page=keys"`。
+> 支持 `?page=overview|keys|env` 与 `?modal=<按键id>`。
+
+---
+
 ## 亮点 / 踩过的坑
 
 这个项目解决了一串 Windows 上很隐蔽的问题，记录下来供参考：
@@ -91,7 +111,8 @@ tools\一键部署.ps1
 ③ VB-CABLE 声卡 ④ 启动主程序（其余自动化由程序完成）
 
 详细步骤与排障见 **[`tools/docs/SOP-部署与使用.md`](tools/docs/SOP-部署与使用.md)**，
-键位表见 **[`tools/docs/遥控器按键说明.md`](tools/docs/遥控器按键说明.md)**。
+键位表见 **[`tools/docs/遥控器按键说明.md`](tools/docs/遥控器按键说明.md)**，
+版本变更见 **[`CHANGELOG.md`](CHANGELOG.md)**。
 
 ---
 

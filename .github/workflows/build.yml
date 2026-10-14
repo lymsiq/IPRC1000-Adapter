@@ -1,0 +1,70 @@
+name: build
+
+# 只做一件事：确认代码能编译、且打包校验能过。
+# 目的很简单 —— 防止"推上去才发现编译不过"。本项目没有单元测试，
+# 真正的功能验证靠程序自带的 `--map-dump` / `--inject-test`（要真机与管理员权限，
+# CI 里跑不了），所以这里只守"能编译 + 打包脚本自检通过"这条底线。
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'LICENSE', '.gitignore']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 编译（Release）
+        working-directory: iprc1000_gui_dotnet
+        run: dotnet build -c Release --nologo
+
+      - name: 检查编译警告数（应为 0）
+        working-directory: iprc1000_gui_dotnet
+        shell: pwsh
+        run: |
+          $out = dotnet build -c Release --nologo -v q 2>&1 | Out-String
+          $warn = ([regex]::Matches($out, 'warning [A-Z]+\d+')).Count
+          Write-Host "警告数: $warn"
+          if ($warn -gt 0) { Write-Error "出现编译警告，请修掉"; exit 1 }
+
+      - name: 发布（单文件）
+        working-directory: iprc1000_gui_dotnet
+        run: >
+          dotnet publish -c Release -r win-x64 --self-contained false
+          -p:PublishSingleFile=true -o publish --nologo
+
+      - name: 校验发布产物完整
+        shell: pwsh
+        run: |
+          $need = @(
+            'iprc1000_gui_dotnet/publish/IPRC1000 Adapter.exe',
+            'iprc1000_gui_dotnet/publish/ui/app.js',
+            'iprc1000_gui_dotnet/publish/ui/index.html',
+            'iprc1000_gui_dotnet/publish/ui/style.css',
+            'iprc1000_gui_dotnet/publish/ui/remote.png'
+          )
+          $miss = $need | Where-Object { -not (Test-Path $_) }
+          if ($miss) { Write-Error "缺少产物: $($miss -join ', ')"; exit 1 }
+          Write-Host "产物完整 ✓"
+
+      - name: 跑打包脚本（含 24 项内容校验）
+        shell: pwsh
+        env:
+          IPRC1000_ROOT: ${{ github.workspace }}
+        run: python tools/package.py
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: IPRC1000-Adapter
+          path: IPRC1000_Adapter_v*/*
+          if-no-files-found: warn

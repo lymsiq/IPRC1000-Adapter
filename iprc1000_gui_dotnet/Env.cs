@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Security.Principal;
 using System.Text.Json;
 using System.Runtime.InteropServices;
@@ -378,6 +379,44 @@ internal static class Env
 
     public static string Json(object o) => JsonSerializer.Serialize(o, JsonOpts);
     public static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = false };
+
+    // ───────── 版本信息（唯一来源是 csproj 的 <Version> 与 BuildStamp）─────────
+
+    /// <summary>程序版本，如 "1.0.1"。取自程序集元数据（csproj 的 &lt;Version&gt;）。</summary>
+    public static string AppVersion { get; } = ReadVersion();
+
+    /// <summary>构建时间，如 "2026-10-14 15:40"。来自 csproj 注入的 AssemblyMetadata。</summary>
+    public static string BuildStamp { get; } = ReadBuildStamp();
+
+    /// <summary>"v1.0.1（构建于 2026-10-14 15:40）" —— 界面与日志直接用这个</summary>
+    public static string VersionLine => $"v{AppVersion}" +
+        (BuildStamp.Length > 0 ? $"（构建于 {BuildStamp}）" : "");
+
+    private static string ReadVersion()
+    {
+        try
+        {
+            var asm = typeof(Env).Assembly;
+            // 优先用 InformationalVersion（不含 SourceRevisionId 的干净版本号）
+            var info = asm.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
+                       ?.InformationalVersion;
+            if (!string.IsNullOrWhiteSpace(info))
+                return info.Split('+')[0].Trim();       // 去掉 +<git hash> 后缀
+            return asm.GetName().Version?.ToString(3) ?? "0.0.0";
+        }
+        catch { return "0.0.0"; }
+    }
+
+    private static string ReadBuildStamp()
+    {
+        try
+        {
+            return typeof(Env).Assembly
+                .GetCustomAttributes<System.Reflection.AssemblyMetadataAttribute>()
+                .FirstOrDefault(a => a.Key == "BuildStamp")?.Value ?? "";
+        }
+        catch { return ""; }
+    }
 
     /// <summary>
     /// 缩进版 JSON（给自检报告这类需要人读的场合）。

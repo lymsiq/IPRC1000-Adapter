@@ -133,6 +133,27 @@ internal sealed class MainForm : Form
         _web.CoreWebView2.SetVirtualHostNameToFolderMapping(
             "iprc1000.local", uiDir, CoreWebView2HostResourceAccessKind.Allow);
 
+        // ★★ 导航守卫（纵深防御）
+        //
+        // 为什么必要：OnWebMessage 是 **JS → 后端** 的桥，暴露了 40 多个方法，
+        // 其中含 reboot / installCable / installWinuhid / setDeviceDriver /
+        // relaunchAdmin / runSetup / applyRegistry 等**管理员级**动作，
+        // 而本程序是**以管理员身份运行**的。
+        // 界面目前全部是本地文件、没有任何外链，所以现状不可利用；
+        // 但只要页面被导航到外部 URL（加个外链、内容被注入），外部内容就能调到这些方法。
+        // 这里把"导航离开本地虚拟主机"和"开新窗口"一律拦掉，成本极低。
+        _web.CoreWebView2.NavigationStarting += (_, e) =>
+        {
+            if (IsLocalUi(e.Uri)) return;
+            e.Cancel = true;
+            Trace($"[nav-guard] 已拦截外部导航：{e.Uri}");
+        };
+        _web.CoreWebView2.NewWindowRequested += (_, e) =>
+        {
+            e.Handled = true;                     // 一律不开新窗口（外链交给系统浏览器走 openUrl）
+            Trace($"[nav-guard] 已拦截新窗口：{e.Uri}");
+        };
+
         if (_selftest)
         {
             Trace($"selftest 块已进入；报告路径={SelfTestPath}；AppDir={Env.AppDir}");
@@ -184,6 +205,16 @@ internal sealed class MainForm : Form
 
     /// <summary>自检报告路径（未指定就落在程序目录）</summary>
     private string SelfTestPath => _selftestOut ?? Path.Combine(Env.AppDir, "selftest.json");
+
+    /// <summary>
+    /// 是否是本程序的本地界面。
+    /// 只放行虚拟主机 `iprc1000.local` 与初始的 about:blank；
+    /// 其余（http/https 外站、file://、data: 等）一律视为外部导航而拦截
+    /// —— 尤其不放行 `data:`，它本身就是一种注入途径。
+    /// </summary>
+    private static bool IsLocalUi(string uri)
+        => uri.StartsWith("https://iprc1000.local/", StringComparison.OrdinalIgnoreCase)
+           || uri.Equals("about:blank", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// 自检轨迹。写到 `&lt;报告&gt;.trace.log` —— 报告本身出不来时，

@@ -12,15 +12,35 @@
 """
 import datetime
 import os
+import re
 import shutil
 import subprocess
 import time
 import zipfile
 
-ROOT = r"F:\vibe"
+# 仓库根目录。默认是本地路径；CI 里用环境变量覆盖：
+#   IPRC1000_ROOT=${{ github.workspace }} python tools/package.py
+ROOT = os.environ.get("IPRC1000_ROOT") or r"F:\vibe"
 PUB = os.path.join(ROOT, "iprc1000_gui_dotnet", "publish")
-PKG = os.path.join(ROOT, "IPRC1000_Adapter_v1.0")
-ZP = os.path.join(ROOT, "IPRC1000_Adapter_v1.0.zip")
+
+
+def read_version():
+    """从 csproj 的 <Version> 读版本号 —— 发布包名、Release tag 都从这里取。
+
+    单一来源，避免"csproj 写了 1.0.1 但包名还叫 v1.0"这种漂移。
+    改版本只需改 csproj 一处。
+    """
+    p = os.path.join(ROOT, "iprc1000_gui_dotnet", "IPRC1000Adapter.csproj")
+    try:
+        m = re.search(r"<Version>\s*([^<\s]+)\s*</Version>", open(p, encoding="utf-8").read())
+        return m.group(1) if m else "0.0.0"
+    except OSError:
+        return "0.0.0"
+
+
+VERSION = read_version()
+PKG = os.path.join(ROOT, f"IPRC1000_Adapter_v{VERSION}")
+ZP = os.path.join(ROOT, f"IPRC1000_Adapter_v{VERSION}.zip")
 
 # 包里必须存在的功能关键字（改完代码若这里 ✗，说明打包漏了新文件）
 CHECKS = [
@@ -150,9 +170,17 @@ def build():
     docsrc = os.path.join(ROOT, "tools", "docs")
     if os.path.isdir(docsrc):
         shutil.copytree(docsrc, os.path.join(target, "文档"), dirs_exist_ok=True)
-    shot = os.path.join(ROOT, "_ui_kb.png")
-    if os.path.exists(shot):
-        shutil.copy2(shot, os.path.join(target, "界面截图-按键映射.png"))
+    # 界面截图：用 docs/screenshots 里由浏览器预览模式渲染的那几张
+    # （原来读根目录的 _ui_kb.png —— 那是会过期的旧截图，曾把 mac 风格修饰键
+    #   Control/Option/Command 发进包里，而程序早已改成 Ctrl/Alt/Shift/Win）
+    shots = os.path.join(ROOT, "tools", "docs", "screenshots")
+    for src, dst in (("keys.png", "界面截图-按键映射.png"),
+                     ("modal.png", "界面截图-屏幕键盘.png"),
+                     ("overview.png", "界面截图-功能总览.png"),
+                     ("env.png", "界面截图-环境设置.png")):
+        p = os.path.join(shots, src)
+        if os.path.exists(p):
+            shutil.copy2(p, os.path.join(target, dst))
 
     # ★ 第三方声明必须随包发出：包内内置了 WinUHid（MIT），
     #   MIT 要求"本许可声明须随所有副本一同提供"。漏了就是许可不合规。

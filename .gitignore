@@ -6,9 +6,10 @@ target/
 .vs/
 *.user
 
-# ── 打包输出 ──
-IPRC1000_Adapter_v1.0/
-IPRC1000_Adapter_v1.0.zip
+# ── 打包输出（包名带版本号，用通配覆盖）──
+IPRC1000_Adapter_v*/
+IPRC1000_Adapter_v*.zip
+IPRC1000_Adapter_v*.zip.sha256
 *.zip
 
 # ── 第三方二进制（体积大 / 许可限制，请自行获取，见 README）──
@@ -49,8 +50,10 @@ selftest*.json
 /*
 !README.md
 !LICENSE
+!CHANGELOG.md
 !THIRD-PARTY-NOTICES.md
 !.gitignore
+!.github/
 !iprc1000_gui_dotnet/
 !tools/
 

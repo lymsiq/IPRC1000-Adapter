@@ -139,6 +139,15 @@ function renderOverview(s) {
   $('#devHint').textContent = conn ? '已检测：' + (d.lastKey || '已连接') : '已配对 · 休眠中';
   setDot('#linkDot', conn ? 'on' : 'warn');
   $('#linkText').textContent = conn ? '遥控器已连接' : '等待遥控器连接（按任意键唤醒）';
+
+  // 版本 + 构建时间（一眼确认手上跑的是哪一版）
+  const rv = $('#railVer');
+  if (rv) {
+    rv.textContent = s.versionLine || (s.version ? 'v' + s.version : '—');
+    rv.title = `程序版本 v${s.version || '?'}` +
+               (s.buildStamp ? `\n构建于 ${s.buildStamp}` : '') +
+               '\n\n提示：改了按键映射会立即生效；但**换了新的 exe 必须重启程序**。';
+  }
 }
 
 /* ───────── 渲染：按键映射 ───────── */
@@ -801,35 +810,87 @@ function boot() {
   }
 
   if (typeof QWebChannel === 'undefined' || !window.qt) {
-    // 浏览器预览模式：用假数据看版式
+    /* ── 浏览器预览模式 ──
+       直接用浏览器打开 ui/index.html 即可看版式（无需后端）。
+       下面是一份**部署完成后的典型快照**：数据与 Defaults.Plain() 的出厂映射一致，
+       缩略图坐标取自 Keys.Rects，所以预览里看到的就是真实界面。
+       加 ?page=overview|keys|env 可直接跳到某一页（截图/自检用）。 */
     const demo = {
-      admin: false,
+      admin: true,
+      // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
+      // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
+      version: '1.0.1',
+      buildStamp: '2026-10-14 15:37',
+      versionLine: 'v1.0.1（构建于 2026-10-14 15:37）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
                   bthenum: [{ id: 'BTHENUM\\Dev_20C0470A3483', online: true }], paired: true },
       },
-      keys: { configured: 19, total: 23, items: [] },
-      reg: { EtwDropLargeEvents: 0, EtwLogSensitiveData: 1, MaxEtwBytes: 8192, ok: true, needReboot: false, boot: '2026-10-13 15:34', regMtime: '2026-10-13 15:30' },
-      cable: { input: false, output: false, ready: false, defaultMic: false },
-      bridge: { running: true, frames: 0, samples: 0, hint: '正在监听 BthPort ETW（高通 70 Hz）' },
+      keys: { configured: 22, total: 23, items: [] },
+      reg: { EtwDropLargeEvents: 0, EtwLogSensitiveData: 1, MaxEtwBytes: 8192, ok: true,
+             needReboot: false, boot: '2026-10-14 09:12', regMtime: '2026-10-13 15:30' },
+      cable: { input: true, output: true, ready: true, defaultMic: true, version: '4.5' },
+      bridge: { running: true, frames: 18422, samples: 5895040, seconds: 368,
+                hint: '正在监听 BthPort ETW' },
       inject: true,
-      router: { online: true, packets: 0, bytes: 0, error: null, session: false, device: 'CABLE Input (VB-Audio Virtual Cable)' },
-      swallow: { running: true, deviceSeen: true, swallowed: 128, passed: 46, lastButton: '语音', pressed: true },
+      router: { online: true, packets: 1152, bytes: 4423680, error: null, session: true,
+                device: 'CABLE Input (VB-Audio Virtual Cable)' },
+      swallow: { running: true, deviceSeen: true, swallowed: 128, passed: 46,
+                 lastButton: '语音', pressed: true, spuriousLeaked: 0 },
+      keysource: {
+        mode: 'etw', stillKeyboard: false, logPath: 'key-events.log',
+        etw: { online: true, port: 31681, events: 512, lastButton: '语音', lastUsage: '0x10',
+               pressed: false, avgLatencyMs: 13, maxLatencyMs: 41, latencySamples: 480, error: null },
+      },
+      winuhid: { ready: true, driverVersion: 1, dllFound: true, error: null },
+      setup: { ready: true,
+        cable: { ok: true }, mic: { ok: true }, winuhid: { ok: true },
+        device: { ok: true }, bridge: { ok: true } },
+      stuckGuard: { watchdogMs: 800, unlockCount: 0, lastUnlock: null },
+      autoStart: true, autoRun: true, startMinimized: true, autoSwitchDriver: true,
+      driverNote: '设备已是非键盘模式',
+      groups: { active: 0, items: [
+        { name: '默认配置组 1', configured: 22 },
+        { name: 'WorkBuddy 快捷键', configured: 21 } ] },
     };
-    const names = [['power','电源','0x17'],['back','返回','0x09'],['menu','菜单','0x11'],['exit','退出 / Home','0x07'],
-      ['info','信息','0x0b'],['ok','确认','0x28'],['up','上','0x52'],['down','下','0x51'],['left','左','0x50'],
-      ['right','右','0x4f'],['favorite','收藏','0x08'],['voice','语音','0x10'],['account','账户','0x0d'],
-      ['play_pause','播放/暂停','0x31'],['fast_forward','快进','0x19'],['rewind','快退','0x36'],
-      ['channel_up','频道+','0x04'],['channel_down','频道-','0x05'],['volume_up','音量+','0x1f'],
-      ['volume_down','音量-','0x20'],['mute','静音','0x0a'],['last','上一频道','0x06'],['square','方块键','0x16']];
-    demo.keys.items = names.map(([id, name, hid], i) => ({
-      id, name, hid, cap: name.slice(0, 2),
-      vks: i < 19 ? [13] : [], binding: i < 19 ? (i === 5 ? 'Return' : 'Ctrl+') + (i % 9 + 1) : '',
+    // [id, 遥控器标注, 中文名, HID, 注入的组合键, 缩略图中心x, 中心y, 宽, 高]
+    const rows = [
+      ['power','pwr','电源','0x17','Win+L',140,47,44,46],
+      ['back','back','返回','0x09','Backspace',39,147,44,44],
+      ['menu','menu','菜单','0x11','菜单键',139,147,44,44],
+      ['exit','exit','退出 / Home','0x07','Esc',39,252,44,44],
+      ['info','info','信息','0x0b','Ctrl+enter',139,252,44,44],
+      ['ok','ok','确认','0x28','enter',91,200,48,44],
+      ['up','▲','上','0x52','↑',91,147,48,44],
+      ['down','▼','下','0x51','↓',91,252,48,44],
+      ['left','‹','左','0x50','←',39,200,44,44],
+      ['right','›','右','0x4f','→',139,200,44,44],
+      ['favorite','♡','收藏','0x08','Win+Shift+S',39,318,44,44],
+      ['voice','🎤','语音','0x10','RAlt',91,318,48,44],
+      ['account','👤','账户','0x0d','Win+E',139,318,44,44],
+      ['play_pause','⏯','播放 / 暂停','0x31','播放/暂停',91,372,48,44],
+      ['fast_forward','▶▶','快进','0x19','Alt+Esc',139,372,44,44],
+      ['rewind','◀◀','快退','0x36','Win+D',39,372,44,44],
+      ['channel_up','ch▲','频道 +','0x04','PgUp',142,428,46,30],
+      ['channel_down','ch▼','频道 -','0x05','PgDn',142,478,46,30],
+      ['volume_up','vol+','音量 +','0x1f','音量+',39,428,46,30],
+      ['volume_down','vol−','音量 -','0x20','音量-',39,478,46,30],
+      ['mute','🔇','静音','0x0a','静音',91,428,42,42],
+      ['last','last','上一频道','0x06','Alt+Tab',105,478,48,42],
+      ['square','▭','方块键','0x16','',90,617,46,36],
+    ];
+    const IMG = { w: 179, h: 663 };
+    demo.keys.items = rows.map(([id, label, name, hid, sym, cx, cy, w, h]) => ({
+      id, name, label, hid, cap: label, sym, vks: [],
+      binding: sym, rect: { cx, cy, w, h }, img: IMG,
     }));
     state = demo;
     renderOverview(demo); renderKeys(demo); renderEnv(demo);
     if (qp) goto(qp);
+    // ?modal=<按键id> → 预览时直接弹出该键的屏幕键盘（截图用，如 ?page=keys&modal=ok）
+    const md = new URLSearchParams(location.search).get('modal');
+    if (md) { try { selectKey(md); } catch (_) {} }
     return;
   }
   new QWebChannel(qt.webChannelTransport, (ch) => {

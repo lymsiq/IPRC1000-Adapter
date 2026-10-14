@@ -169,7 +169,6 @@ internal sealed class Backend : IDisposable
 
     // ───────── 状态 ─────────
 
-    private volatile bool _probing;
     private Thread? _probeThread;
     private volatile bool _disposed;
 
@@ -291,6 +290,10 @@ internal sealed class Backend : IDisposable
         var state = new JsonObject
         {
             ["admin"] = Env.IsAdmin(),
+            // 版本与构建时间：界面右下角显示，用来一眼确认"手上跑的是哪一版"
+            ["version"] = Env.AppVersion,
+            ["buildStamp"] = Env.BuildStamp,
+            ["versionLine"] = Env.VersionLine,
             ["device"] = new JsonObject
             {
                 ["connected"] = connected,
@@ -770,6 +773,11 @@ internal sealed class Backend : IDisposable
 
     public void Dispose()
     {
+        // ★ 必须先置位：探测线程用 `while (!_disposed)` 做退出条件，
+        //   漏了这一步线程永远不会停（每 8 秒扫一次注册表），
+        //   也正是编译警告 CS0649「从未对 _disposed 赋值」的根源。
+        _disposed = true;
+        try { _probeThread?.Join(600); } catch { }      // 给它一点时间自己退出
         StopBridge();
         _router.Dispose();
     }

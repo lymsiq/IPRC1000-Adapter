@@ -20,7 +20,30 @@
     <DebugType>none</DebugType>
     <AllowedReferenceRelatedFileExtensions>none</AllowedReferenceRelatedFileExtensions>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!-- ── 版本信息 ──
+         改版本只需要改下面这一个 <Version>：程序内显示、exe 文件属性、
+         发布包文件名（package.py 会读它）都从这里取，避免多处各写一份而漂移。 -->
+    <Version>1.0.1</Version>
+    <FileVersion>1.0.1.0</FileVersion>
+    <AssemblyVersion>1.0.1.0</AssemblyVersion>
+    <Product>IPRC1000 遥控器适配器</Product>
+    <Company>IPRC1000 Adapter contributors</Company>
+    <Copyright>MIT License</Copyright>
   </PropertyGroup>
+
+  <!-- 把构建时间写进程序集元数据：界面显示"构建于 …"，
+       用来一眼判断手上的 exe 是不是刚编译的那个（本项目反复吃过这个亏）。 -->
+  <PropertyGroup>
+    <BuildStamp>$([System.DateTime]::Now.ToString("yyyy-MM-dd HH:mm"))</BuildStamp>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>BuildStamp</_Parameter1>
+      <_Parameter2>$(BuildStamp)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
 
   <ItemGroup>
     <!-- 用系统 WebView2（Edge），不打包 Chromium —— 这就是体积只有 MB 级的原因 -->
