@@ -40,6 +40,10 @@ CHECKS = [
     ("一键部署脚本",       "tools/一键部署.ps1", "一键部署"),
     ("SOP 文档",          "文档/SOP-部署与使用.md", "SOP"),
     ("遥控器说明",         "文档/遥控器按键说明.md", "语音键"),
+    # ★ 许可合规：包内内置 WinUHid(MIT)，MIT 要求许可声明随副本提供
+    ("第三方声明",         "THIRD-PARTY-NOTICES.md", "WinUHid"),
+    ("MIT 许可全文",       "THIRD-PARTY-NOTICES.md", "Cameron Gutman"),
+    ("项目 LICENSE",      "LICENSE", "MIT License"),
 ]
 
 # 源码级「反向校验」：(标签, 相对仓库根的路径, 禁止出现的子串)
@@ -150,6 +154,13 @@ def build():
     if os.path.exists(shot):
         shutil.copy2(shot, os.path.join(target, "界面截图-按键映射.png"))
 
+    # ★ 第三方声明必须随包发出：包内内置了 WinUHid（MIT），
+    #   MIT 要求"本许可声明须随所有副本一同提供"。漏了就是许可不合规。
+    for n in ("LICENSE", "THIRD-PARTY-NOTICES.md"):
+        p = os.path.join(ROOT, n)
+        if os.path.exists(p):
+            shutil.copy2(p, os.path.join(target, n))
+
     with open(os.path.join(target, "版本.txt"), "w", encoding="utf-8") as f:
         f.write("IPRC1000 Adapter\n")
         f.write("打包时间：" + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "\n")
@@ -161,7 +172,8 @@ def build():
                 "  · 卡键三层防护（设备移除即时 / 800ms 看门狗 / 独立守卫）\n"
                 "  · 媒体键走 SendInput、启动自动切非键盘驱动\n"
                 "\n首次部署：右键「以 PowerShell 运行」tools\\一键部署.ps1\n"
-                "文档：文档\\SOP-部署与使用.md · 文档\\遥控器按键说明.md\n")
+                "文档：文档\\SOP-部署与使用.md · 文档\\遥控器按键说明.md\n"
+                "许可：LICENSE（MIT）· THIRD-PARTY-NOTICES.md（内置第三方组件声明）\n")
 
     if os.path.exists(ZP):
         os.remove(ZP)

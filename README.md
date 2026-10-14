@@ -117,4 +117,8 @@ tools\一键部署.ps1
 
 ## License
 
-MIT
+本项目以 **MIT** 发布，见 [`LICENSE`](LICENSE)。
+
+发布包内置了若干第三方组件（WinUHid、VB-CABLE 等），各自的版权与许可见
+**[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)** —— 其中 WinUHid 为 MIT 许可，
+该声明文件按许可要求随包一同分发。
