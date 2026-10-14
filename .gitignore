@@ -49,6 +49,7 @@ selftest*.json
 /*
 !README.md
 !LICENSE
+!THIRD-PARTY-NOTICES.md
 !.gitignore
 !iprc1000_gui_dotnet/
 !tools/
