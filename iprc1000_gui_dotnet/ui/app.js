@@ -465,18 +465,36 @@ function renderEnv(s) {
   /* 语音桥 */
   const rt = s.router || {};
   setDot('#d-bridge', !a ? 'err' : (b.running && rt.online ? 'on' : 'warn'));
+  // 「最近收到音频」是判断"断在哪儿"最关键的一格：
+  //   说话时它应该一直是几百毫秒以内；如果一路涨到几千毫秒，说明**帧根本没来**
+  //   （遥控器/BT/ETW 侧的问题），而不是声卡写不进去。
+  const silent = (b.silentMs === undefined || b.silentMs === null) ? -1 : b.silentMs;
+  const silentTxt = silent < 0 ? '尚未收到'
+    : silent < 1200 ? `${silent} ms 前 ✓`
+    : `${(silent / 1000).toFixed(1)} s 前 ← 已断流`;
+  const silentCls = silent < 0 ? '' : (silent < 1200 ? 'ok' : 'bad');
   $('#bridgeKv').innerHTML =
-    kvItem('运行状态', b.running ? '运行中' : '已停止', b.running ? 'ok' : '') +
+    kvItem('运行状态', b.zombie ? '僵死（进程在但已停止上报）' : (b.running ? '运行中' : '已停止'),
+           b.zombie ? 'bad' : (b.running ? 'ok' : '')) +
     kvItem('虚拟声卡通道', rt.online ? '已就绪' : (rt.error || '未启动'), rt.online ? 'ok' : 'bad') +
-    kvItem('音频帧', b.frames) +
+    kvItem('音频帧', b.frames || 0) +
+    kvItem('16k 样本', (b.samples || 0) + (b.seconds ? `（${b.seconds} s）` : '')) +
+    kvItem('最近收到音频', silentTxt, silentCls) +
+    kvItem('会话 / 空档', `${b.sessions || 0} / ${b.gaps || 0}` +
+                        ((b.maxGapMs || 0) > 0 ? `（最长 ${b.maxGapMs} ms）` : '')) +
+    kvItem('ETW 丢帧', b.lostCont || 0, (b.lostCont || 0) > 0 ? 'bad' : 'ok') +
     kvItem('写入 CABLE', (rt.packets || 0) + ' 包') +
-    kvItem('16k 样本', b.samples + (b.seconds ? `（${b.seconds} s）` : '')) +
     kvItem('管理员权限', a ? '已具备' : '缺失', a ? 'ok' : 'bad');
   $('#bridgeNote').className = 'note' + (a ? '' : ' warn');
   $('#bridgeNote').innerHTML = a
-    ? '语音桥从 BthPort ETW 取完整音频帧（每帧 320 样本 @16 kHz），可选高通去低频漂移，' +
-      '再以 48 kHz 写入 <b>CABLE Input</b>。<b>按住遥控器语音键说话即可。</b>' +
-      (rt.device ? `<br>输出设备：${rt.device}` : '')
+    ? (b.zombie
+        ? '<b>语音桥僵死</b>：进程还在但已停止上报统计 —— 这种状态靠"进程是否存活"看不出来，' +
+          '会自动重启；若反复出现，看 <code>bridge.log</code>。'
+        : '语音桥从 BthPort ETW 取完整音频帧（每帧 320 样本 @16 kHz），可选高通去低频漂移，' +
+          '再以 48 kHz 写入 <b>CABLE Input</b>。<b>按住遥控器语音键说话即可。</b>') +
+      (rt.device ? `<br>输出设备：${rt.device}` : '') +
+      `<br><span class="dim">排查用：「最近收到音频」说话时应始终 &lt;1 秒；` +
+      `一直涨 = 帧没来（遥控器/BT/ETW）；「ETW 丢帧」&gt;0 = 缓冲区不够。</span>`
     : '语音桥需要<b>管理员权限</b>才能创建 ETW 会话（<code>StartTrace</code> 要求 Administrators）。' +
       '请点下面的「以管理员身份重启本程序」。';
 
@@ -831,8 +849,11 @@ function boot() {
       reg: { EtwDropLargeEvents: 0, EtwLogSensitiveData: 1, MaxEtwBytes: 8192, ok: true,
              needReboot: false, boot: '2026-10-14 09:12', regMtime: '2026-10-13 15:30' },
       cable: { input: true, output: true, ready: true, defaultMic: true, version: '4.5' },
-      bridge: { running: true, frames: 18422, samples: 5895040, seconds: 368,
-                hint: '正在监听 BthPort ETW' },
+      bridge: { running: true, zombie: false,
+                frames: 18422, samples: 5895040, seconds: 368.4,
+                silentMs: 180, sessions: 3, gaps: 1, maxGapMs: 820,
+                lostCont: 0, truncatedFirst: 0, udpPackets: 18422, uptimeSec: 421,
+                hint: '正在监听 BthPort ETW（180 ms 前收到音频）' },
       inject: true,
       router: { online: true, packets: 1152, bytes: 4423680, error: null, session: true,
                 device: 'CABLE Input (VB-Audio Virtual Cable)' },

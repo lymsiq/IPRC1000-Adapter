@@ -36,9 +36,14 @@ use ferrisetw::EventRecord;
 const BTHPORT_GUID: &str = "8a1f9517-3a8c-4a9e-a018-4f17a200f277";
 const FRAME_LEN: usize = 653; // L2CAP 负载
 const HDR: usize = 13; // 帧头
-const SAMPLES: usize = 320; // 每帧样本（16 kHz）
-const FRAME_MS: u64 = 20; // 每帧时长
-const IDLE_END_MS: u64 = 250; // 无帧多久发 END
+const SAMPLES: usize = 320; // 每帧样本（16 kHz → 320 样本 = 20 ms）
+/// 无帧多久发 END。
+///
+/// ⚠ 曾经是 250 ms —— 蓝牙链路正常抖动（RF 干扰、SCO 重传）很容易超过它，
+/// 于是**一次正常抖动就被判成"会话结束"**：桥发 END → 应用侧关掉 CABLE 流，
+/// 紧接着下一帧又发 CLEAR 重新开流。开开关关既有断音，也容易把 WASAPI 设备搞到打不开。
+/// 放宽到 600 ms：仍能在真正松手后 ~0.6 s 关流，但不会被抖动误触发。
+const IDLE_END_MS: u64 = 600;
 /// ── 强制 ETW 刷新的"填缓冲"机制 ──
 ///
 /// 背景：ferrisetw 的 `flush_timer` 最小只能取整到 **1 秒**（API 限制），而空闲时蓝牙流量
@@ -59,9 +64,7 @@ const FLUSH_FEED_WARM_MS: u64 = 50;
 const FLUSH_FEED_COLD_MS: u64 = 200;
 const FEED_HOT_WINDOW_MS: u64 = 3_000;
 const FEED_WARM_WINDOW_MS: u64 = 60_000;
-/// 兼容旧名（日志里用）
-const FLUSH_FEED_MS: u64 = FLUSH_FEED_WARM_MS;
-/// 每次填的负载大小（4 KB = ETW 最小缓冲一页）
+/// 每次填的负载大小（2 KB —— 必须**小于缓冲** 4 KB，否则 EventWrite 返回 234 ERROR_MORE_DATA）
 // 注意：负载必须**小于缓冲**（4KB），否则 EventWrite 返回 234（ERROR_MORE_DATA）。
 // 取 2KB → 两个事件即可填满一页 4KB 缓冲，从而逼出一次刷新。
 const FLUSH_FEED_BYTES: usize = 2048;
@@ -94,6 +97,88 @@ struct Stats {
     lat_n: u64,
     lat_sum: u64,
     lat_max: u64,
+
+    // ── 以下为"音频为什么断"定位用（2026-10-14 加）──
+    /// 音频帧之间的空档（毫秒）：>IDLE_END_MS 记一次
+    gaps: u64,
+    /// 最长一次空档（毫秒）—— 长录音里"说着说着没声了"看这个
+    max_gap_ms: u64,
+    /// 最近一次收到音频帧的 Unix 毫秒（0=从未）
+    last_frame_ms: u64,
+    /// 会话计数：每次 CLEAR 前自增
+    sessions: u64,
+    /// 被 ETW 丢掉的续片数（= 丢失的音频帧数）—— 缓冲区不够时会出现
+    lost_cont: u64,
+    /// UDP 发送失败次数
+    udp_err: u64,
+}
+
+// ───────────────────────── 运行统计落盘（定位"音频为什么断"） ─────────────────────────
+//
+// 背景：语音桥的输出以前直接丢弃（应用用 CreateNoWindow 启动且不重定向），
+// 而统计只在**退出时**打印一次 —— 桥以 --seconds 86400 常驻，等于永远看不到。
+// 结果："说着说着没声音了"到底断在 **ETW（帧根本没来）** 还是
+// **声卡侧（帧来了但没进 CABLE）**，完全无法判断。
+//
+// 现在：每 2 秒把统计写进 %APPDATA%\IPRC1000 Adapter\bridge-stats.json，
+// 关键事件（会话开始/结束、长空档）追加到 bridge.log。应用侧读这个文件显示真实帧数。
+
+mod diag {
+    use std::io::Write;
+    use std::sync::{Mutex, OnceLock};
+
+    static LOG: OnceLock<Mutex<Option<std::fs::File>>> = OnceLock::new();
+
+    /// %APPDATA%\IPRC1000 Adapter\ —— 与应用配置同目录（应用读得到）
+    pub fn app_dir() -> Option<std::path::PathBuf> {
+        let base = std::env::var("APPDATA").ok()?;
+        let d = std::path::PathBuf::from(base).join("IPRC1000 Adapter");
+        let _ = std::fs::create_dir_all(&d);
+        Some(d)
+    }
+
+    fn log_file() -> &'static Mutex<Option<std::fs::File>> {
+        LOG.get_or_init(|| {
+            let f = app_dir().and_then(|d| {
+                std::fs::OpenOptions::new().create(true).append(true)
+                    .open(d.join("bridge.log")).ok()
+            });
+            Mutex::new(f)
+        })
+    }
+
+    /// 追加一行带时间戳的日志到 bridge.log
+    pub fn log(msg: &str) {
+        let ts = now_ms();
+        if let Ok(mut g) = log_file().lock() {
+            if let Some(f) = g.as_mut() {
+                let _ = writeln!(f, "{}  {}", hms(ts), msg);
+                let _ = f.flush();
+            }
+        }
+    }
+
+    /// 原子写统计文件（先写 .tmp 再 rename，读侧不会看到半个文件）
+    pub fn write_stats(json: &str) {
+        let Some(d) = app_dir() else { return };
+        let tmp = d.join("bridge-stats.json.tmp");
+        let dst = d.join("bridge-stats.json");
+        if std::fs::write(&tmp, json).is_ok() {
+            let _ = std::fs::rename(&tmp, &dst);
+        }
+    }
+
+    pub fn now_ms() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
+
+    fn hms(ms: u64) -> String {
+        let s = (ms / 1000) % 86400;
+        format!("{:02}:{:02}:{:02}.{:03}", s / 3600, (s / 60) % 60, s % 60, ms % 1000)
+    }
 }
 
 // ───────────────────────── 一阶高通（级联 2 次 = 二阶） ─────────────────────────
@@ -350,6 +435,12 @@ impl Bridge {
         // ── 音频：首片(344) + 续片(313) ──
         if flag == 2 && dlen == 344 {
             if acl.len() >= 344 {
+                // ★ 上一个首片还没等到续片，新首片就来了 → 那条续片被 ETW 丢了
+                //   （缓冲区不够大 / 消费跟不上时 ETW 会直接丢事件）
+                //   这就是"音频丢帧"的直接量化指标。
+                if self.pending.is_some() {
+                    self.stats.lock().unwrap().lost_cont += 1;
+                }
                 self.pending = Some(acl[..344].to_vec());
             } else {
                 self.pending = None;
@@ -412,6 +503,18 @@ impl Bridge {
         if p.len() != FRAME_LEN {
             return;
         }
+        // ── 帧间空档统计：长录音里"说着说着没声"就是靠这个定位 ──
+        if let Some(t) = self.last_frame_at {
+            let gap = t.elapsed().as_millis() as u64;
+            {
+                let mut s = self.stats.lock().unwrap();
+                if gap > s.max_gap_ms { s.max_gap_ms = gap; }
+                if gap >= IDLE_END_MS {
+                    s.gaps += 1;
+                    diag::log(&format!("音频空档 {gap} ms（>= IDLE_END_MS {IDLE_END_MS}），会触发 END→CLEAR"));
+                }
+            }
+        }
         let body = &p[HDR..HDR + SAMPLES * 2];
         let mut s16 = [0i16; SAMPLES];
         for (i, c) in body.chunks_exact(2).enumerate() {
@@ -441,6 +544,8 @@ impl Bridge {
                 u.cmd(b"CLEAR");
                 self.in_session = true;
                 self.have_prev = false;
+                self.stats.lock().unwrap().sessions += 1;
+                diag::log("会话开始（CLEAR）");
             }
             // 16k → 48k：与 voice_pcm::push_16k 一致的三点线性内插
             let mut prev = if self.have_prev { self.prev } else { s16[0] };
@@ -458,11 +563,14 @@ impl Bridge {
             }
             self.prev = s16[SAMPLES - 1];
             self.have_prev = true;
-            u.pcm(&out);
+            if !u.pcm(&out) {
+                self.stats.lock().unwrap().udp_err += 1;
+            }
         }
 
         self.samples16 += SAMPLES as u64;
         self.last_frame_at = Some(Instant::now());
+        self.stats.lock().unwrap().last_frame_ms = diag::now_ms();
     }
 
     /// 空闲检测：超过 IDLE_END_MS 没有帧就发 END，让 router 关掉 CABLE 流
@@ -476,6 +584,10 @@ impl Bridge {
                     u.cmd(b"END");
                 }
                 self.in_session = false;
+                diag::log(&format!(
+                    "会话结束（END）—— 已静默 {} ms",
+                    t.elapsed().as_millis()
+                ));
             }
         }
     }
@@ -592,9 +704,47 @@ fn cleanup_stale_session() {
     }
 }
 
+/// 单实例保护。
+///
+/// 为什么需要：`cleanup_stale_session()` 在启动时无条件执行
+/// `logman stop Iprc1000AudioBridge -ets`。若已有桥在跑，第二个实例会把它的
+/// ETW 会话停掉 —— **老进程从此收不到任何事件：进程活着、看起来一切正常，但永久静音**。
+/// 应用侧靠"进程是否存活"判断桥的状态，完全看不出这种僵死。
+#[cfg(target_os = "windows")]
+fn acquire_single_instance() -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateMutexW(attr: *const std::ffi::c_void, owner: i32, name: *const u16) -> isize;
+        fn GetLastError() -> u32;
+    }
+    const ERROR_ALREADY_EXISTS: u32 = 183;
+    unsafe {
+        let name: Vec<u16> = std::ffi::OsStr::new("Global\\Iprc1000AudioBridge_SingleInstance")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let h = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
+        if h == 0 {
+            return true; // 建不出来就不挡路
+        }
+        // 句柄故意泄漏：它要活到进程结束，才能一直占住这个互斥体
+        GetLastError() != ERROR_ALREADY_EXISTS
+    }
+}
+#[cfg(not(target_os = "windows"))]
+fn acquire_single_instance() -> bool {
+    true
+}
+
 fn main() {
     let args = parse_args();
     let stats = Arc::new(Mutex::new(Stats::default()));
+
+    if !args.replay.is_some() && !acquire_single_instance() {
+        eprintln!("[!] 已有语音桥在运行，本实例直接退出（避免掐掉正在用的 ETW 会话）。");
+        return;
+    }
 
     let udp = match args.udp.as_deref() {
         Some(addr) => match UdpSink::new(addr) {
@@ -628,6 +778,68 @@ fn main() {
 
     let wav = args.wav.as_deref().and_then(|p| make_wav(p, args.rate));
     let bridge = Arc::new(Mutex::new(Bridge::new(args.hp, udp, wav, key_sink, Arc::clone(&stats))));
+
+    // ★ 每 2 秒把统计写盘。
+    //
+    // 桥以 --seconds 86400 常驻，而统计原来**只在退出时**打印一次 —— 等于永远看不到。
+    // 应用侧读这个文件显示真实的「音频帧」，我们排查"说着说着没声了"也靠它区分：
+    //   frames 不涨      → 帧根本没来（遥控器/BT/ETW 丢事件）→ 看 lostCont / gaps / silentMs
+    //   frames 在涨      → 帧来了，问题在 UDP / CABLE 路由 / WASAPI 这一侧
+    // 注意**无论有没有变化都要写**（内含 heartbeat），否则"活着但聋了"和"死了"分不出来。
+    {
+        let st = Arc::clone(&stats);
+        let br = Arc::clone(&bridge);
+        let t0 = Instant::now();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(2000));
+            let json = {
+                let Ok(s) = st.lock() else { continue };
+                let Ok(g) = br.lock() else { continue };
+                let (sent, bytes) = g
+                    .udp
+                    .as_ref()
+                    .map(|u| (u.sent, u.pcm_bytes))
+                    .unwrap_or((0, 0));
+                let now = diag::now_ms();
+                let silent: i64 = if s.last_frame_ms == 0 {
+                    -1 // 从未收到过音频帧
+                } else {
+                    (now.saturating_sub(s.last_frame_ms)) as i64
+                };
+                format!(
+                    concat!(
+                        "{{\"pid\":{},\"uptimeSec\":{},\"heartbeatMs\":{},",
+                        "\"frames\":{},\"samples16\":{},\"seconds16\":{:.2},",
+                        "\"udpPackets\":{},\"udpBytes\":{},",
+                        "\"sessions\":{},\"gaps\":{},\"maxGapMs\":{},",
+                        "\"lostCont\":{},\"truncatedFirst\":{},\"udpErr\":{},",
+                        "\"hidReports\":{},\"keyEvents\":{},\"otherEvents\":{},",
+                        "\"silentMs\":{},\"inSession\":{}}}"
+                    ),
+                    std::process::id(),
+                    t0.elapsed().as_secs(),
+                    now,
+                    s.frames,
+                    g.samples16,
+                    g.samples16 as f64 / 16000.0,
+                    sent,
+                    bytes,
+                    s.sessions,
+                    s.gaps,
+                    s.max_gap_ms,
+                    s.lost_cont,
+                    s.truncated_first,
+                    s.udp_err,
+                    s.hid_reports,
+                    s.key_events,
+                    s.other,
+                    silent,
+                    if g.in_session { 1 } else { 0 }
+                )
+            };
+            diag::write_stats(&json);
+        });
+    }
 
     if let Some(path) = args.replay.clone() {
         replay_mode(&path, Arc::clone(&bridge), args.realtime, Arc::clone(&stats));
@@ -683,7 +895,7 @@ fn main() {
                     return;
                 }
                 let dlen = u16::from_le_bytes([data[2], data[3]]) as usize;
-                let flag = (((u16::from_le_bytes([data[0], data[1]]) >> 12) & 0x3) as u8);
+                let flag = ((u16::from_le_bytes([data[0], data[1]]) >> 12) & 0x3) as u8;
                 let acl = data[4..].to_vec();
                 {
                     let mut g = bridge_cb.lock().unwrap();
@@ -854,11 +1066,14 @@ fn replay_mode(path: &str, bridge: Arc<Mutex<Bridge>>, realtime: bool, stats: Ar
         }
     }
     println!("[i] 回放记录 {n} 条");
-    // 收尾：跑一小段 tick 让 END 发出去
-    for _ in 0..12 {
+    // 收尾：先跑几轮 tick，再**显式 finish()** 把 END 发出去。
+    // 以前只靠 tick 的 12×50ms=600ms 等空闲超时，而 IDLE_END_MS 从 250 提到 600 之后
+    // 正好卡在边界上 —— END 可能发不出去，下游就一直保持会话不关。
+    for _ in 0..6 {
         std::thread::sleep(Duration::from_millis(50));
         bridge.lock().unwrap().tick();
     }
+    bridge.lock().unwrap().finish();
     report(&stats, &bridge);
 }
 

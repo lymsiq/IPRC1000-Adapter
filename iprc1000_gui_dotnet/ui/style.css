@@ -155,6 +155,8 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
 .note{margin-top:13px;font-size:12.5px;color:var(--txt2);background:#f7fafe;
   border-left:3px solid var(--blue);border-radius:0 8px 8px 0;padding:9px 13px;line-height:1.65}
 .note.warn{border-left-color:var(--amber);background:#fffaf0;color:#8a5a00}
+/* 说明里的小字（排查提示之类），比正文再淡一档 */
+.dim{color:var(--txt3)}
 .panel-actions{display:flex;gap:9px;margin-top:15px;flex-wrap:wrap}
 
 /* 按钮 */

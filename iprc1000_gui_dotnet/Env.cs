@@ -15,6 +15,21 @@ internal static class Env
     public const int PcmPort = 31680;
     public const string RemoteMac = "20c0470a3483";
 
+    /// <summary>
+    /// `%APPDATA%\IPRC1000 Adapter` —— 配置、日志、语音桥统计都放这里。
+    /// 语音桥（Rust）也按同一个约定写 bridge.log / bridge-stats.json。
+    /// </summary>
+    public static string ConfigDir
+    {
+        get
+        {
+            var d = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), AppName);
+            try { Directory.CreateDirectory(d); } catch { }
+            return d;
+        }
+    }
+
     private const uint DN_STARTED = 0x0000_0008;
 
     [System.Runtime.InteropServices.DllImport("cfgmgr32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]

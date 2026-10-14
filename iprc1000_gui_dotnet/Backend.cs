@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -252,10 +253,14 @@ internal sealed class Backend : IDisposable
     /// <summary>环境就绪就自动把语音桥拉起来（每 10 秒最多试一次）</summary>
     private void MaybeAutoStartBridge()
     {
-        if (!AutoStartBridge || BridgeRunning) return;
+        if (!AutoStartBridge) return;
+        // ★ 僵死也要重启：进程还在但已停止上报（例如被另一个实例掐掉了 ETW 会话）。
+        //   以前只判 "!HasExited"，这种"活着但聋了"的状态永远不会被拉起。
+        if (BridgeRunning && !BridgeZombie) return;
         if (!Env.IsAdmin() || !_cableReady) return;
         if ((DateTime.UtcNow - _lastAutoStart).TotalSeconds < 10) return;
         _lastAutoStart = DateTime.UtcNow;
+        if (BridgeRunning) StopBridge();      // 先清掉僵死的那个
         StartBridge();
     }
 
@@ -316,14 +321,7 @@ internal sealed class Backend : IDisposable
             },
             ["reg"] = JsonSerializer.SerializeToNode(Env.RegState()),
             ["cable"] = JsonSerializer.SerializeToNode(_cableCache),
-            ["bridge"] = new JsonObject
-            {
-                ["running"] = BridgeRunning,
-                ["frames"] = 0,
-                ["samples"] = 0,
-                ["seconds"] = BridgeRunning ? (int)(DateTime.UtcNow - _bridgeStart).TotalSeconds : 0,
-                ["hint"] = BridgeRunning ? "正在监听 BthPort ETW" : "待启动",
-            },
+            ["bridge"] = BridgeStatus(),
             ["router"] = JsonSerializer.SerializeToNode(_router.Status()),
             ["inject"] = _filter?.InjectEnabled ?? false,
             ["winuhid"] = JsonSerializer.SerializeToNode(WinUhidInjector.Status()),
@@ -487,10 +485,22 @@ internal sealed class Backend : IDisposable
                 {
                     UseShellExecute = false,
                     CreateNoWindow = true,
+                    // ★ 必须重定向并主动读走：否则桥的输出被丢弃（CreateNoWindow 下没有控制台），
+                    //   而"音频为什么断"的线索全在桥的 stdout 里。顺带避免子进程写满管道被阻塞。
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
                     Arguments = $"--udp 127.0.0.1:{Env.PcmPort} --hp 70 --seconds 86400",
                 };
-                _bridge = Process.Start(psi);
+                var proc = Process.Start(psi);
+                if (proc == null)
+                {
+                    _bridge = null;
+                    return Env.Json(new { ok = false, message = "启动语音桥失败：进程未创建。" });
+                }
+                _bridge = proc;
                 _bridgeStart = DateTime.UtcNow;
+                PumpToLog(proc.StandardOutput, "out");
+                PumpToLog(proc.StandardError, "err");
                 return Env.Json(new { ok = true, message = "语音桥已启动。按住遥控器语音键说话即可。" });
             }
             catch (Exception e)
@@ -512,9 +522,114 @@ internal sealed class Backend : IDisposable
         }
     }
 
+    /// <summary>把语音桥的 stdout/stderr 追加到 bridge.log（后台线程读到底）。</summary>
+    private static void PumpToLog(StreamReader? r, string tag)
+    {
+        if (r == null) return;
+        var path = Path.Combine(Env.ConfigDir, "bridge.log");
+        new Thread(() =>
+        {
+            try
+            {
+                string? line;
+                while ((line = r.ReadLine()) != null)
+                {
+                    try
+                    {
+                        // 桥（Rust）输出是 UTF-8。Windows 记事本/PowerShell 的 Get-Content
+                        // 默认按 ANSI 代码页解，会显示成乱码 —— 所以**首次创建时写一个 BOM**，
+                        // 让系统按 UTF-8 识别（后续追加不能再写 BOM，否则文件中间会插空字符）。
+                        var isNew = !File.Exists(path);
+                        var body = $"{DateTime.Now:HH:mm:ss.fff} [{tag}] {line}\n";
+                        if (isNew) File.WriteAllText(path, body, new UTF8Encoding(true));
+                        else File.AppendAllText(path, body, new UTF8Encoding(false));
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        })
+        { IsBackground = true, Name = "bridge-log" }.Start();
+    }
+
+    /// <summary>读语音桥每 2 秒刷新的 bridge-stats.json。读不到返回 null。</summary>
+    private static JsonObject? ReadBridgeStats()
+    {
+        try
+        {
+            var p = Path.Combine(Env.ConfigDir, "bridge-stats.json");
+            if (!File.Exists(p)) return null;
+            return JsonNode.Parse(File.ReadAllText(p)) as JsonObject;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// 语音桥是否"僵死"：**进程还在，但已不再上报统计**。
+    ///
+    /// 这是最危险的一种故障 —— 靠"进程是否存活"完全看不出来，界面显示一切正常，
+    /// 实际永久静音。典型成因：另一个桥实例启动时 `logman stop` 掐掉了它的 ETW 会话。
+    /// 判定：统计文件超过 10 秒没刷新（正常 2 秒一刷）。
+    /// </summary>
+    private bool BridgeZombie
+    {
+        get
+        {
+            if (!BridgeRunning) return false;
+            if ((DateTime.UtcNow - _bridgeStart).TotalSeconds < 10) return false; // 刚启动，还没写第一份
+            var st = ReadBridgeStats();
+            if (st == null) return false;                                        // 老版本桥没有统计文件
+            var hb = st["heartbeatMs"]?.GetValue<long>() ?? 0;
+            if (hb <= 0) return false;
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            // 统计文件里的 pid 必须是当前这个桥的，否则是上一个实例留下的
+            if ((st["pid"]?.GetValue<int>() ?? -1) != SafePid()) return false;
+            return now - hb > 10_000;
+        }
+    }
+
+    private int SafePid()
+    {
+        try { return _bridge?.Id ?? -1; } catch { return -1; }
+    }
+
+    /// <summary>语音桥状态（真实统计来自 bridge-stats.json，以前这里是硬编码 0）</summary>
+    private JsonObject BridgeStatus()
+    {
+        var st = ReadBridgeStats();
+        var running = BridgeRunning;
+        var zombie = BridgeZombie;
+        // 统计文件里带 pid，只认当前这个桥的，避免读到上一个实例的残留
+        if (st != null && (st["pid"]?.GetValue<int>() ?? -1) != SafePid()) st = null;
+        long L(string k) { try { return st?[k]?.GetValue<long>() ?? 0; } catch { return 0; } }
+        double D(string k) { try { return st?[k]?.GetValue<double>() ?? 0; } catch { return 0; } }
+        var silentMs = st == null ? -1 : L("silentMs");
+        return new JsonObject
+        {
+            ["running"] = running,
+            ["zombie"] = zombie,
+            ["frames"] = L("frames"),
+            ["samples"] = L("samples16"),
+            ["seconds"] = Math.Round(D("seconds16"), 1),
+            ["uptimeSec"] = L("uptimeSec"),
+            ["sessions"] = L("sessions"),
+            ["gaps"] = L("gaps"),
+            ["maxGapMs"] = L("maxGapMs"),
+            ["silentMs"] = silentMs,
+            ["lostCont"] = L("lostCont"),
+            ["truncatedFirst"] = L("truncatedFirst"),
+            ["udpPackets"] = L("udpPackets"),
+            ["udpBytes"] = L("udpBytes"),
+            ["hint"] = !running ? "待启动"
+                : zombie ? "语音桥僵死：进程在但已停止上报 —— 会自动重启"
+                : st == null ? "正在监听 BthPort ETW（统计文件还没生成）"
+                : silentMs < 0 ? "正在监听 BthPort ETW（尚未收到音频）"
+                : $"正在监听 BthPort ETW（{silentMs} ms 前收到音频）",
+        };
+    }
+
     /// <summary>真的按一次右 Alt 并读回状态，验证注入链路</summary>
     public string TestInject() => KeyFilter.InjectSelfTest();
-
     /// <summary>清空卡住的按键状态（释放 held 集合 + 放掉注入键）</summary>
     public string ClearKeys()
     {

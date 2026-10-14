@@ -92,6 +92,9 @@ SRC_FORBIDDEN = [
      "iprc1000_gui_dotnet/MainForm.cs", "ToJsonString(new JsonSerializerOptions"),
     # 默认值只能有一个来源：Defaults。Keys.Table 的 Btn 不许再带 Default 字段。
     ("Btn 未恢复 Default 字段", "iprc1000_gui_dotnet/Keys.cs", "string Hid, int[] Default"),
+    # 收到 CLEAR 就 ClearBuffer() 会丢掉已缓冲的真实音频 → 每次会话切换都断一下。
+    # （会话是"松手 END → 再按 CLEAR"反复建立的，环里往往还压着上一次的真实音频）
+    ("CLEAR 不再清缓冲", "iprc1000_gui_dotnet/CableRouter.cs", "ClearBuffer()"),
 ]
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
@@ -103,6 +106,14 @@ SRC_REQUIRED = [
     ("自检有硬看门狗", "iprc1000_gui_dotnet/MainForm.cs", "hard-timeout-35s"),
     ("自检有轨迹日志", "iprc1000_gui_dotnet/MainForm.cs", "trace.log"),
     ("界面显示版本号", "iprc1000_gui_dotnet/ui/app.js", "railVer"),
+    # 「音频为什么断」的定位能力（2026-10-14 加，见 CHANGELOG 1.0.3）
+    ("桥统计已重定向捕获", "iprc1000_gui_dotnet/Backend.cs", "RedirectStandardOutput = true"),
+    ("应用读真实桥统计", "iprc1000_gui_dotnet/Backend.cs", "bridge-stats.json"),
+    ("僵死桥会被重启", "iprc1000_gui_dotnet/Backend.cs", "BridgeZombie"),
+    ("收到音频即算会话中", "iprc1000_gui_dotnet/CableRouter.cs", "_inSession = true;"),
+    ("声卡侧有日志", "iprc1000_gui_dotnet/CableRouter.cs", "router.log"),
+    ("桥侧写运行统计", "tools/etw_consumer/src/main.rs", "bridge-stats.json"),
+    ("桥有单实例保护", "tools/etw_consumer/src/main.rs", "acquire_single_instance"),
 ]
 
 # 包内「不应出现」的路径：(标签, 子串)。用来防体积膨胀与误打包。
