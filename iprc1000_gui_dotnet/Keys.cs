@@ -1,46 +1,50 @@
 namespace Iprc1000Adapter;
 
-/// <summary>按键表与映射存储（与 src-tauri/.../iprc1000/bridge.rs 的 BUTTON_TABLE 一致，已三源校验）。</summary>
+/// <summary>
+/// 按键表：**只描述按键本身**（id / 遥控器上印的字符 / 中文说明 / HID usage）。
+///
+/// ★ 这里**刻意不再保存"默认映射"**。曾经 `Btn` 上有个 `Default` 字段，
+///   和 <see cref="Defaults"/> 里的出厂映射各写一份 —— 两份数据一定会漂移，
+///   而"同一个东西有多个来源"正是本程序历史上最难查的那类 bug 的成因。
+///   现在出厂映射**只有 <see cref="Defaults"/> 一个权威来源**。
+/// </summary>
 internal static class Keys
 {
     /// <summary>
-/// 一个遥控器按键。
-///   Id      — 内部标识
-///   Label   — **遥控器上实际印的字符/图标**（界面按它显示，不用中文）
-///   Name    — 中文说明（仅作悬停提示/无障碍用）
-/// </summary>
-public record Btn(string Id, string Label, string Name, string Hid, int[] Default);
+    /// 一个遥控器按键。
+    ///   Id      — 内部标识
+    ///   Label   — **遥控器上实际印的字符/图标**（界面按它显示，不用中文）
+    ///   Name    — 中文说明（仅作悬停提示/无障碍用）
+    ///   Hid     — HID usage（ETW 上报的原始值，排查用）
+    /// </summary>
+    public record Btn(string Id, string Label, string Name, string Hid);
 
     public static readonly Btn[] Table =
     {
-        // ★ 推荐默认（依据 Windows Media Center 官方遥控器键位表 + 现代 Windows 习惯）：
-        //   方向键→方向键 · 确认→Enter · 清除/退出→Esc · 返回→Alt+←（不比退格破坏文本）
-        //   频道±→PageUp/PageDown（官方就是 PageUp/Down）· 音量/静音→系统媒体音量键
-        //   播放/快进/快退→媒体键 · 收藏→Ctrl+D · 信息→（默认留空）· 上一频道→Alt+Tab
-        //   菜单→菜单键 · 账户→Win · 方块键→F11(全屏) · 语音→右 Alt（豆包长按模式）
-        new("power", "pwr", "电源", "0x17", Array.Empty<int>()),                 // 故意留空，避免误触关机
-        new("back", "back", "返回", "0x09", new[] { 0x12, 0x25 }),                 // Alt+←
-        new("menu", "menu", "菜单", "0x11", new[] { 0x5D }),                       // 菜单键（右键菜单）
-        new("exit", "exit", "退出 / Home", "0x07", new[] { 0x1B }),                // Esc
-        new("info", "info", "信息", "0x0b", Array.Empty<int>()),                 // 默认不映射（见 Defaults.Plain）
-        new("ok", "ok", "确认", "0x28", new[] { 0x0D }),                         // Enter
-        new("up", "▲", "上", "0x52", new[] { 0x26 }),
-        new("down", "▼", "下", "0x51", new[] { 0x28 }),
-        new("left", "‹", "左", "0x50", new[] { 0x25 }),
-        new("right", "›", "右", "0x4f", new[] { 0x27 }),
-        new("favorite", "♡", "收藏", "0x08", new[] { 0x11, 0x44 }),             // Ctrl+D
-        new("voice", "🎤", "语音", "0x10", new[] { 0xA5 }),                      // 右 Alt
-        new("account", "👤", "账户", "0x0d", new[] { 0x5B }),                    // Win
-        new("play_pause", "⏯", "播放 / 暂停", "0x31", new[] { 0xB3 }),
-        new("fast_forward", "▶▶", "快进", "0x19", new[] { 0xB0 }),               // 下一曲
-        new("rewind", "◀◀", "快退", "0x36", new[] { 0xB1 }),                     // 上一曲
-        new("channel_up", "ch▲", "频道 +", "0x04", new[] { 0x21 }),               // PageUp（修正原来错配的 PageDown）
-        new("channel_down", "ch▼", "频道 -", "0x05", new[] { 0x22 }),             // PageDown
-        new("volume_up", "vol+", "音量 +", "0x1f", new[] { 0xAF }),
-        new("volume_down", "vol−", "音量 -", "0x20", new[] { 0xAE }),
-        new("mute", "🔇", "静音", "0x0a", new[] { 0xAD }),
-        new("last", "last", "上一频道", "0x06", new[] { 0x12, 0x09 }),             // Alt+Tab
-        new("square", "▭", "方块键", "0x16", new[] { 0x7A }),                   // F11（全屏）
+        // 出厂默认映射见 Defaults.Plain() / Defaults.WorkBuddy() —— 本表不再重复记录。
+        new("power", "pwr", "电源", "0x17"),
+        new("back", "back", "返回", "0x09"),
+        new("menu", "menu", "菜单", "0x11"),
+        new("exit", "exit", "退出 / Home", "0x07"),
+        new("info", "info", "信息", "0x0b"),
+        new("ok", "ok", "确认", "0x28"),
+        new("up", "▲", "上", "0x52"),
+        new("down", "▼", "下", "0x51"),
+        new("left", "‹", "左", "0x50"),
+        new("right", "›", "右", "0x4f"),
+        new("favorite", "♡", "收藏", "0x08"),
+        new("voice", "🎤", "语音", "0x10"),
+        new("account", "👤", "账户", "0x0d"),
+        new("play_pause", "⏯", "播放 / 暂停", "0x31"),
+        new("fast_forward", "▶▶", "快进", "0x19"),
+        new("rewind", "◀◀", "快退", "0x36"),
+        new("channel_up", "ch▲", "频道 +", "0x04"),
+        new("channel_down", "ch▼", "频道 -", "0x05"),
+        new("volume_up", "vol+", "音量 +", "0x1f"),
+        new("volume_down", "vol−", "音量 -", "0x20"),
+        new("mute", "🔇", "静音", "0x0a"),
+        new("last", "last", "上一频道", "0x06"),
+        new("square", "▭", "方块键", "0x16"),
     };
 
     /// <summary>虚拟键码 → 显示名。也用于「当前操作」判断遥控器按键。</summary>

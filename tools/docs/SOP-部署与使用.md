@@ -112,20 +112,34 @@
 & "IPRC1000 Adapter.exe" --map-dump "$env:TEMP\map.txt"; notepad "$env:TEMP\map.txt"
 ```
 
-它会打印**每个键实际注入的组合键**和**界面显示的**，两列应当完全一致：
+它会打印**每个键的三列**：`实际注入` / `界面显示` / `出厂默认`。
 
 ```
-menu          0x11    Win+X                 Win+X                 OK
-back          0x09    Backspace             Backspace             OK
+menu          0x11   菜单键            菜单键            菜单键            OK        OK
+back          0x09   Backspace         Backspace         Backspace         OK        OK
 ```
 
-- 两列**一致** → 程序读到了你的配置。那么"没反应"通常是**目标程序里这个组合键本来就没有功能**
+- 前两列**一致** → 程序读到了你的配置。那么"没反应"通常是**目标程序里这个组合键本来就没有功能**
   （例：`Ctrl+Enter`、`/` 在多数程序里无动作；且需要先点进一个输入框）。
-  换个有全局效果的键验证：`pwr`（Win+L 锁屏）、`menu`（Win+X 快捷菜单）—— 这两个按下去一定有反应。
-- 两列**不一致** → 报告这个表格，是程序 bug。
+  换个有全局效果的键验证：`pwr`（Win+L 锁屏）、`menu`（右键菜单）—— 这两个按下去一定有反应。
+- 第三列标 `≠` → 该键与出厂默认不同（你自己改过，属正常；除非你要把当前值冻结成默认）。
+- 出现 `★不一致★` → 报告这个表格，是程序 bug（说明注入与界面读了不同的数据源）。
 
 > **必须重启程序**：映射在程序启动时读一次、常驻内存；改完配置（或换了新 exe）后
 > 要**右键托盘退出**再重新打开，否则跑的还是旧映射。
+
+### 发布前测试套件
+
+```bash
+bash tools/run_tests.sh
+```
+
+覆盖四层共 11 项：映射一致性（两组）、出厂默认冻结（两组）、注入通路（虚拟 HID + SendInput）、
+单键注入（菜单键 / 右 Alt / Ctrl / Alt）。
+
+> ⚠ `--selftest`（全量自检）**不在此脚本内** —— 它要开 WebView2 界面，
+> 必须在有交互桌面的会话里手动跑。无桌面环境下 WebView2 起不来，
+> 自检会如实把 `source`/`jsProbe` 记为错误（这是设计好的降级，不是崩溃）。
 
 **日志**：`%APPDATA%\IPRC1000 Adapter\key-events.log`（按键全过程）· `stuck-guard.log`（卡键救援）
 
@@ -150,8 +164,12 @@ back          0x09    Backspace             Backspace             OK
 | `stuck_key_guard.py` | 独立卡键守卫（`--install` 加开机自启、`--once` 单次检查）|
 | `Run-Guard.cmd` | 守卫的提权启动器 |
 | `check_stuck_key.py` | 卡键根因检查（读系统键盘状态 + 设备是否在线）|
-| `package.py` | 开发用：一键打包 + 校验包内容 |
-| `IPRC1000 Adapter.exe --map-dump <文件>` | 打印「实际注入」与「界面显示」两列映射，核对是否一致（排障用）|
+| `package.py` | 开发用：一键打包 + 校验包内容（打包前自动重新编译，共 21 项校验）|
+| `run_tests.sh` | 开发用：发布前测试套件（映射一致性 / 出厂默认冻结 / 注入通路 / 单键注入）|
+| `IPRC1000 Adapter.exe --map-dump <文件> [组号]` | 打印「实际注入 / 界面显示 / 出厂默认」三列，核对是否一致（排障首选）|
+| `IPRC1000 Adapter.exe --inject-test <文件>` | 注入自检：虚拟 HID 与 SendInput 两条通路 |
+| `IPRC1000 Adapter.exe --inject-verify <十六进制VK>` | 单键注入验证：按住时读 `GetAsyncKeyState` 判断系统是否收到 |
+| `IPRC1000 Adapter.exe --selftest <文件>` | 全量自检（**需交互桌面**；无桌面环境下 WebView2 起不来）|
 
 ---
 

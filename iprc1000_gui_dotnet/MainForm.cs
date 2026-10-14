@@ -63,7 +63,34 @@ internal sealed class MainForm : Form
         {
             // 句柄此刻已就绪，再装 Raw Input + 键盘钩子
             _filter.Start(Handle);
-            BeginInvoke(new Action(async () => await InitWebView()));
+            // ⚠ InitWebView 是 async void 语义：**必须自己 try/catch**，
+            //   否则它内部任何异常都会掀翻进程（0xE0434352），且不留任何痕迹。
+            BeginInvoke(new Action(async () =>
+            {
+                try { await InitWebView(); }
+                catch (Exception e)
+                {
+                    Trace($"InitWebView 异常 {e.GetType().Name}: {e.Message}");
+                    if (_selftest)
+                    {
+                        try
+                        {
+                            File.WriteAllText(SelfTestPath, Env.JsonPretty(new JsonObject
+                            {
+                                ["error"] = "WebView2 初始化失败：" + e.Message,
+                                ["type"] = e.GetType().Name,
+                                ["detail"] = e.ToString().Replace("\r", "").Replace("\n", " | "),
+                            }));
+                        }
+                        catch { }
+                        FinishSelfTest();
+                    }
+                    else
+                    {
+                        MessageBox.Show($"界面初始化失败：{e.Message}", Env.AppName);
+                    }
+                }
+            }));
         };
 
         // ★ 窗口显示之后再在后台做重活：探针 → 自动切驱动（约 1~2 秒）→ 拉起语音桥。
@@ -108,8 +135,10 @@ internal sealed class MainForm : Form
 
         if (_selftest)
         {
+            Trace($"selftest 块已进入；报告路径={SelfTestPath}；AppDir={Env.AppDir}");
             _web.CoreWebView2.NavigationCompleted += async (_, _) =>
             {
+                Trace("NavigationCompleted 触发");
                 // 启动即打开指定页（IPRC1000_START_PAGE=overview|keys|env）—— 便于验证与固化首页
                 var startPage = Environment.GetEnvironmentVariable("IPRC1000_START_PAGE");
                 if (!string.IsNullOrWhiteSpace(startPage))
@@ -121,18 +150,78 @@ internal sealed class MainForm : Form
                     }
                     catch { }
                 }
-                if (await RunSelfTest()) Close();
+                var ok = await RunSelfTest();
+                Trace($"RunSelfTest 返回 {ok}");
+                if (ok) FinishSelfTest();
             };
-            // 兜底：页面没加载出来也要出报告，否则只能干等到超时
+            // 兜底①：页面没加载出来也要出报告（18 s）
             var t = new System.Windows.Forms.Timer { Interval = 18000 };
             t.Tick += async (_, _) =>
             {
                 t.Stop();
-                if (await RunSelfTest(true)) Close();
+                Trace("兜底计时器①(18s)触发");
+                var ok = await RunSelfTest(true);
+                Trace($"RunSelfTest(fallback) 返回 {ok}");
+                if (ok) FinishSelfTest();
             };
             t.Start();
+
+            // 兜底②：**硬看门狗**（35 s）。上面两步都可能被卡住（例如
+            //   ExecuteScriptAsync 永不返回、或 NavigationCompleted 压根没触发），
+            //   这里保证无论如何都出一份报告并退出，不会静默挂死。
+            var hard = new System.Windows.Forms.Timer { Interval = 35000 };
+            hard.Tick += (_, _) =>
+            {
+                hard.Stop();
+                Trace("硬看门狗(35s)触发");
+                EnsureReportWritten("hard-timeout-35s");
+                FinishSelfTest();
+            };
+            hard.Start();
         }
         _web.CoreWebView2.Navigate("https://iprc1000.local/index.html");
+    }
+
+    /// <summary>自检报告路径（未指定就落在程序目录）</summary>
+    private string SelfTestPath => _selftestOut ?? Path.Combine(Env.AppDir, "selftest.json");
+
+    /// <summary>
+    /// 自检轨迹。写到 `&lt;报告&gt;.trace.log` —— 报告本身出不来时，
+    /// 靠它才能知道到底走到了哪一步（自检是"出了事没处问"的场景，必须有轨迹）。
+    /// </summary>
+    private void Trace(string msg)
+    {
+        if (!_selftest) return;
+        try
+        {
+            File.AppendAllText(SelfTestPath + ".trace.log",
+                $"{DateTime.Now:HH:mm:ss.fff}  {msg}\n");
+        }
+        catch { }
+    }
+
+    /// <summary>报告还没落盘就补一份"为什么没写出来"的最小报告。</summary>
+    private void EnsureReportWritten(string reason)
+    {
+        try
+        {
+            if (File.Exists(SelfTestPath)) return;
+            File.WriteAllText(SelfTestPath,
+                $"{{\"error\":\"selftest 未在预期时间内完成\",\"reason\":\"{reason}\"," +
+                $"\"time\":\"{DateTime.Now:yyyy-MM-dd HH:mm:ss}\"}}");
+        }
+        catch { }
+    }
+
+    /// <summary>收尾：关窗 + 兜底强退（WebView2 的宿主进程有时会把 Application.Run 拖住）。</summary>
+    private void FinishSelfTest()
+    {
+        try { Close(); } catch { }
+        // Close() 后消息循环若仍不退出（WebView2 组合进程常见），直接结束进程 ——
+        // 自检是一次性任务，报告已经落盘，强退无副作用。
+        var t = new System.Windows.Forms.Timer { Interval = 1200 };
+        t.Tick += (_, _) => { t.Stop(); Environment.Exit(0); };
+        t.Start();
     }
 
     private bool _selfTestDone;
@@ -202,22 +291,27 @@ internal sealed class MainForm : Form
 
     private async Task<bool> RunSelfTest(bool fallback = false)
     {
+        Trace($"RunSelfTest 进入（fallback={fallback}, done={_selfTestDone}）");
         if (_selfTestDone) return false;
         _selfTestDone = true;
+        var errs = new JsonArray();
+
+        // ⚠ 每段各自 try/catch：任何一段出问题都**照常出报告**并把出错段落记进去。
+        //   以前整个方法共用一个 try —— 一个 NRE 就让报告只剩 {"error": "..."}，
+        //   连"是哪个环节"都看不出来，等于白跑。
         try
         {
             await Task.Delay(fallback ? 200 : 2500);
+            Trace("延迟结束，开始采集");
+
             var js = "JSON.stringify({title:document.title," +
                      "cards:document.querySelectorAll('.card').length," +
                      "keyrows:document.querySelectorAll('.keyrow').length," +
                      "panels:document.querySelectorAll('.panel').length," +
                      "navbtns:document.querySelectorAll('.nav-btn').length," +
-                     // 验证键位标注渲染：读前 6 行与分组标题
                      "labels:[...document.querySelectorAll('.keyrow .keyname')].slice(0,6).map(e=>e.textContent)," +
                      "groups:[...document.querySelectorAll('.keygroup')].map(e=>e.textContent)," +
-                     "caps:[...document.querySelectorAll('.keyrow .keycap')].slice(0,6).map(e=>e.textContent)," +
                      "backend:!!B," +
-                     // 新增按键映射页的验证项：遥控器热区数 / 行内缩略图数 / 缩略图的 sprite 定位 / 组合键符号
                      "hits:document.querySelectorAll('#remoteStage .keyhit').length," +
                      "thumbs:document.querySelectorAll('.keythumb').length," +
                      "thumbBg:(document.querySelector('.keythumb')||{}).getAttribute?.('style')||''," +
@@ -226,35 +320,86 @@ internal sealed class MainForm : Form
                      "modal:!!document.querySelector('#comboMask .modal')," +
                      "rectOk:(()=>{const h=document.querySelector('#remoteStage .keyhit[data-id=ok]');" +
                      "return h?h.style.top+'/'+h.style.left:'(none)';})()})";
+
+            // ★ 这一步是 async，不能套进 SafeNode（那会拿到 Task 而不是字符串），
+            //   而且 **ExecuteScriptAsync 有可能永远不返回**（页面正在导航/被对话框挡住时），
+            //   所以必须加超时 —— 否则整个自检会静默卡死，连报告都出不来。
             var probe = "";
-            try { probe = await _web.CoreWebView2.ExecuteScriptAsync(js); }
-            catch (Exception e) { probe = $"\"<error: {e.Message}>\""; }
+            try
+            {
+                var exec = _web.CoreWebView2.ExecuteScriptAsync(js);
+                var done = await Task.WhenAny(exec, Task.Delay(6000));
+                probe = done == exec
+                    ? await exec
+                    : "\"<timeout: ExecuteScriptAsync 6s 未返回>\"";
+            }
+            catch (Exception e) { probe = $"\"<error: {e.GetType().Name}: {e.Message}>\""; }
+
+            JsonNode SafeNode(string name, Func<JsonNode> f)
+            {
+                try { return f(); }
+                catch (Exception e)
+                {
+                    var where = new System.Diagnostics.StackTrace(e, false).GetFrames()
+                        ?.Select(fr => fr.GetMethod()?.Name)
+                        .FirstOrDefault(n => n is not null && n != "SafeNode") ?? "?";
+                    errs.Add($"{name}: {e.GetType().Name} @{where}() — {e.Message}");
+                    return new JsonObject { ["error"] = e.Message };
+                }
+            }
+
             var report = new JsonObject
             {
                 ["dotnet"] = Environment.Version.ToString(),
                 ["fallback"] = fallback,
-                ["source"] = _web.CoreWebView2.Source,
-                ["resources"] = new JsonObject
+                ["source"] = SafeNode("source", () => _web.CoreWebView2.Source),
+                ["resources"] = SafeNode("resources", () => new JsonObject
                 {
                     ["VBCABLE_Driver_Pack45.zip"] = Env.FindAsset("VBCABLE_Driver_Pack45.zip") != null,
                     ["configure-xiaomi-audio.ps1"] = Env.FindAsset("configure-xiaomi-audio.ps1") != null,
                     ["etw_consumer.exe"] = Env.FindAsset("etw_consumer.exe") != null,
                     ["uiIndexHtml"] = Env.FindAsset("index.html") != null,
-                },
+                }),
                 ["jsProbe"] = probe,
-                ["state"] = JsonNode.Parse(_backend.GetState()),
+                ["state"] = SafeNode("getState",
+                    () => JsonNode.Parse(_backend.GetState()) ?? new JsonObject()),
+                ["errors"] = errs,
             };
-            File.WriteAllText(_selftestOut ?? Path.Combine(Env.AppDir, "selftest.json"),
-                report.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(SelfTestPath, Env.JsonPretty(report));
+            Trace($"报告已写入 {SelfTestPath}（{new FileInfo(SelfTestPath).Length} 字节）");
         }
         catch (Exception ex)
         {
+            Trace($"采集异常 {ex.GetType().Name}: {ex.Message}");
             try
             {
-                File.WriteAllText(_selftestOut ?? "selftest.json",
-                    $"{{\"error\":\"{ex.Message.Replace("\"", "'")}\"}}");
+                // ⚠ errs 已经挂在 report 上了（JsonNode 有父指针），
+                //   直接复用会抛「The node already has a parent」→ 错误报告也写不出去，
+                //   最后连"为什么失败"都看不到。所以这里必须**深拷贝**一份。
+                var errs2 = new JsonArray();
+                foreach (var n in errs) errs2.Add(n?.DeepClone());
+
+                File.WriteAllText(SelfTestPath, Env.JsonPretty(new JsonObject
+                {
+                    ["error"] = ex.Message,
+                    ["type"] = ex.GetType().Name,
+                    ["errors"] = errs2,
+                    ["detail"] = ex.ToString().Replace("\r", "").Replace("\n", " | "),
+                }));
+                Trace("错误报告已写入");
             }
-            catch { }
+            catch (Exception e2)
+            {
+                // 连 JSON 都写不出来时，退化成纯文本 —— 无论如何都要留下线索
+                Trace($"错误报告也写不进去: {e2.GetType().Name}: {e2.Message}");
+                try
+                {
+                    File.WriteAllText(SelfTestPath,
+                        "{\"error\":\"" + ex.Message.Replace("\"", "'") + "\"}");
+                    Trace("已退化为纯文本报告");
+                }
+                catch { }
+            }
         }
         return true;
     }

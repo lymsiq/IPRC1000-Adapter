@@ -50,12 +50,23 @@ SRC_FORBIDDEN = [
     #    Keys.Load() 读的是旧扁平格式，遇到多配置组的 keymap.json 会反序列化失败并
     #    **静默回落到出厂默认** → 界面显示一套、实际注入另一套，用户怎么改都没反应。
     ("注入未回退到 Keys.Load()", "iprc1000_gui_dotnet/KeyFilter.cs", "Keys.Load("),
+    # 单文件发布下 `JsonNode.ToJsonString(new JsonSerializerOptions{...})` 会抛
+    # InvalidOperationException（缺 TypeInfoResolver）→ 自检报告永远写不出来。
+    # 必须用 Env.JsonPretty()（静态 options + JsonSerializer.Serialize）。
+    ("未使用裸 ToJsonString(options)",
+     "iprc1000_gui_dotnet/MainForm.cs", "ToJsonString(new JsonSerializerOptions"),
+    # 默认值只能有一个来源：Defaults。Keys.Table 的 Btn 不许再带 Default 字段。
+    ("Btn 未恢复 Default 字段", "iprc1000_gui_dotnet/Keys.cs", "string Hid, int[] Default"),
 ]
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
     ("注入走 Keymaps.Get()", "iprc1000_gui_dotnet/KeyFilter.cs", "Keymaps.Get(bid)"),
     ("映射自检入口 --map-dump", "iprc1000_gui_dotnet/Program.cs", "--map-dump"),
+    ("缩进 JSON 走 Env.JsonPretty", "iprc1000_gui_dotnet/Env.cs", "JsonOptsPretty"),
+    ("按组恢复出厂默认", "iprc1000_gui_dotnet/Keymaps.cs", "FactoryOf"),
+    ("自检有硬看门狗", "iprc1000_gui_dotnet/MainForm.cs", "hard-timeout-35s"),
+    ("自检有轨迹日志", "iprc1000_gui_dotnet/MainForm.cs", "trace.log"),
 ]
 
 
@@ -128,7 +139,7 @@ def build():
 
     os.makedirs(os.path.join(target, "tools"), exist_ok=True)
     for f in ("check_stuck_key.py", "stuck_key_guard.py", "Run-Guard.cmd",
-              "一键部署.ps1", "SetHidDriver/publish/SetHidDriver.exe"):
+              "一键部署.ps1", "run_tests.sh", "SetHidDriver/publish/SetHidDriver.exe"):
         src = os.path.join(ROOT, "tools", f)
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(target, "tools", os.path.basename(f)))

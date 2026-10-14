@@ -31,11 +31,26 @@ internal static class Keymaps
     public sealed class Group
     {
         public string Name { get; set; } = "配置组";
+
+        /// <summary>
+        /// 该组对应的**出厂映射**，决定「恢复默认」按钮恢复成什么：
+        ///   "plain"     → <see cref="Defaults.Plain"/>     （Windows 日常）
+        ///   "workbuddy" → <see cref="Defaults.WorkBuddy"/> （WorkBuddy 快捷键）
+        ///   "custom"    → 同 plain（用户自己复制/新建的组，没有专属出厂映射）
+        ///
+        /// 没有这个字段之前，`ResetCurrent()` 一律恢复成 Plain() ——
+        /// 于是用户在 WorkBuddy 组点「恢复默认」会拿到 Windows 日常映射，明显不合预期。
+        /// </summary>
+        public string Kind { get; set; } = "plain";
+
         public Dictionary<string, int[]> Map { get; set; } = new();
     }
 
-    /// <summary>存档版本：<2 表示还是旧的「Codex 编程」组，需要升级成 WorkBuddy 映射</summary>
-    private const int Ver_ = 8;
+    /// <summary>
+    /// 存档版本。每加一段迁移就 +1。
+    ///   9 = **出厂映射定稿**：Defaults 已按用户逐键实测确认后的最终键位冻结。
+    /// </summary>
+    private const int Ver_ = 9;
 
     private sealed class Store
     {
@@ -136,6 +151,21 @@ internal static class Keymaps
                         s.Ver = 8;
                         Save(s);
                     }
+                    if (s.Ver < 9)
+                    {
+                        // Ver 9：出厂映射定稿（Defaults 冻结为实测确认的最终键位）+ 记录每组的 Kind。
+                        // ★ 刻意**不动任何按键** —— 新默认与用户当前配置本就逐键一致，
+                        //   若强写一遍反而会覆盖其它机器上的个性化设置。
+                        //   冻结默认值只影响新装用户与「恢复默认」，存量映射原样保留。
+                        foreach (var g in s.Groups)
+                        {
+                            if (g.Kind != "workbuddy" &&
+                                g.Name.Contains("WorkBuddy", StringComparison.OrdinalIgnoreCase))
+                                g.Kind = "workbuddy";
+                        }
+                        s.Ver = 9;
+                        Save(s);
+                    }
                     return s;
                 }
             }
@@ -149,8 +179,8 @@ internal static class Keymaps
             Active = 0,
             Groups = new List<Group>
             {
-                new() { Name = "默认配置组 1", Map = Defaults.Plain() },
-                new() { Name = "WorkBuddy 快捷键", Map = Defaults.WorkBuddy() },
+                new() { Name = "默认配置组 1", Kind = "plain", Map = Defaults.Plain() },
+                new() { Name = "WorkBuddy 快捷键", Kind = "workbuddy", Map = Defaults.WorkBuddy() },
             },
         };
 
@@ -195,6 +225,10 @@ internal static class Keymaps
     public static int[] Get(string id)
         => Current.Map.TryGetValue(id, out var v) ? v : Array.Empty<int>();
 
+    /// <summary>取指定组的映射（自检用：不切换当前组、不写盘）</summary>
+    public static Dictionary<string, int[]> MapOf(int idx)
+        => idx >= 0 && idx < _s.Groups.Count ? _s.Groups[idx].Map : Current.Map;
+
     /// <summary>设置某个按键在当前配置组里的映射（空数组 = 不执行）</summary>
     public static void Set(string id, int[] vks)
     {
@@ -224,7 +258,8 @@ internal static class Keymaps
     {
         var src = _s.Groups[_s.Active];
         var name = $"配置组 {_s.Groups.Count + 1}";
-        var g = new Group { Name = name, Map = new Dictionary<string, int[]>(src.Map) };
+        // 复制出来的组没有专属出厂映射 → Kind=custom（「恢复默认」时按 plain 处理）
+        var g = new Group { Name = name, Kind = "custom", Map = new Dictionary<string, int[]>(src.Map) };
         _s.Groups.Insert(_s.Active + 1, g);
         _s.Active += 1;
         Save();
@@ -251,11 +286,20 @@ internal static class Keymaps
         return (true, "已删除该配置组。");
     }
 
+    /// <summary>某一组对应的出厂映射（由 <see cref="Group.Kind"/> 决定）</summary>
+    public static Dictionary<string, int[]> FactoryOf(Group g)
+        => g.Kind == "workbuddy" ? Defaults.WorkBuddy() : Defaults.Plain();
+
+    /// <summary>指定组的出厂映射（自检用）</summary>
+    public static Dictionary<string, int[]> FactoryOf(int idx)
+        => FactoryOf(idx >= 0 && idx < _s.Groups.Count ? _s.Groups[idx] : Current);
+
     public static string ResetCurrent()
     {
-        _s.Groups[_s.Active].Map = Defaults.Plain();
+        var g = _s.Groups[_s.Active];
+        g.Map = FactoryOf(g);          // ★ 按该组自己的出厂映射恢复，而不是一律 Plain()
         Save();
-        return _s.Groups[_s.Active].Name;
+        return g.Name;
     }
 
     // ─────────── 导入导出（只作用于当前组）───────────
@@ -280,6 +324,7 @@ internal static class Keymaps
             }
             if (d.Count == 0) return (false, "map 里没有有效按键。");
             _s.Groups[_s.Active].Map = d;
+            _s.Groups[_s.Active].Kind = "custom";   // 导入进来的不是出厂默认了
             if (n["name"]?.GetValue<string>() is { Length: > 0 } nm)
                 _s.Groups[_s.Active].Name = nm;
             Save();
@@ -289,24 +334,32 @@ internal static class Keymaps
     }
 }
 
-/// <summary>两套出厂默认映射（按规格给出，键码为 Windows 虚拟键码）</summary>
+/// <summary>
+/// 两套**出厂默认**映射 —— 这是默认值的**唯一权威来源**（<see cref="Keys.Table"/> 不再存默认值）。
+///
+/// ★ 冻结版本（Ver 9）：以下键位是用户逐键实测确认后的**最终定稿**，
+///   与 `%APPDATA%\IPRC1000 Adapter\keymap.json` 里当时的内容逐键一致。
+///   改动前请先确认这是有意的，不要顺手"优化"。
+/// </summary>
 internal static class Defaults
 {
     // 虚拟键码速查：Ctrl=0x11 Alt=0x12 Shift=0x10 Win=0x5B
-    //               ←=0x25 ↑=0x26 →=0x27 ↓=0x28 Return=0x0D Esc=0x1B Space=0x20 Tab=0x09
+    //               ←=0x25 ↑=0x26 →=0x27 ↓=0x28 Enter=0x0D Esc=0x1B Space=0x20 Tab=0x09
+    //               菜单键=0x5D  PgUp=0x21 PgDn=0x22  Backspace=0x08
+    //               [ =0xDB  ] =0xDD
     //               媒体：下一曲=0xB0 上一曲=0xB1 播放暂停=0xB3 静音=0xAD 音量-=0xAE 音量+=0xAF
     //               右 Alt=0xA5（豆包长按说话）
 
-    /// <summary>默认配置组：日常使用（Windows 化后的等价动作）</summary>
+    /// <summary>第一组：默认配置组 1（Windows 日常）</summary>
     public static Dictionary<string, int[]> Plain() => new()
     {
         // 遥控器按键        注入的键
-        ["power"] = new[] { 0x5B, 0x4C },              // Win+L  锁屏（走虚拟 HID，系统热键能正常触发）
+        ["power"] = new[] { 0x5B, 0x4C },              // Win+L  锁屏
         ["back"] = new[] { 0x08 },                     // Backspace（浏览器/资源管理器=后退）
-        ["menu"] = new[] { 0x5B, 0x58 },               // Win+X  快捷菜单（开始按钮右键菜单）
+        ["menu"] = new[] { 0x5D },                     // 菜单键（右键菜单，多数程序都认）
         ["exit"] = new[] { 0x1B },                     // Esc
-        ["info"] = Array.Empty<int>(),                 // ★ 默认不映射（原 Alt+Enter / Ctrl+Enter 在多数场景无感，交给用户自定）
-        ["ok"] = new[] { 0x0D },                       // Enter
+        ["info"] = new[] { 0x11, 0x0D },               // Ctrl+Enter
+        ["ok"] = new[] { 0x0D },                       // enter 确认
         ["up"] = new[] { 0x26 },
         ["down"] = new[] { 0x28 },
         ["left"] = new[] { 0x25 },
@@ -314,7 +367,7 @@ internal static class Defaults
         ["favorite"] = new[] { 0x5B, 0x10, 0x53 },     // Win+Shift+S  区域截图
         ["voice"] = new[] { 0xA5 },                    // ★ 右 Alt —— 豆包「长按模式」说话
         ["account"] = new[] { 0x5B, 0x45 },            // Win+E  资源管理器
-        ["play_pause"] = new[] { 0xB3 },
+        ["play_pause"] = new[] { 0xB3 },               // 播放/暂停
         ["fast_forward"] = new[] { 0x12, 0x1B },       // Alt+Esc  按任务栏顺序切换窗口
         ["rewind"] = new[] { 0x5B, 0x44 },             // Win+D  显示桌面
         ["channel_up"] = new[] { 0x21 },               // PageUp
@@ -339,8 +392,8 @@ internal static class Defaults
         ["back"]         = new[] { 0x11, 0x50 },         // Ctrl+P        打开文件搜索
         ["menu"]         = new[] { 0x11, 0x4F },         // Ctrl+O        全局搜索
         ["exit"]         = new[] { 0x1B },               // Esc           停止生成
-        ["info"]         = Array.Empty<int>(),           // ★ 默认不映射（/ 与 Ctrl+Enter 在 WorkBuddy 里都无感）
-        ["ok"]           = new[] { 0x0D },               // Enter         发送消息
+        ["info"]         = Array.Empty<int>(),           // 不映射
+        ["ok"]           = new[] { 0x0D },               // enter         发送消息
         ["up"]           = new[] { 0x26 },               // ↑             光标上移
         ["down"]         = new[] { 0x28 },               // ↓             光标下移
         ["left"]         = new[] { 0x25 },               // ←             光标左移

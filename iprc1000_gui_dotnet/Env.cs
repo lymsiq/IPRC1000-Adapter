@@ -378,4 +378,17 @@ internal static class Env
 
     public static string Json(object o) => JsonSerializer.Serialize(o, JsonOpts);
     public static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = false };
+
+    /// <summary>
+    /// 缩进版 JSON（给自检报告这类需要人读的场合）。
+    ///
+    /// ⚠ 必须用**静态实例 + JsonSerializer.Serialize**，不要用
+    /// `jsonNode.ToJsonString(new JsonSerializerOptions{...})` ——
+    /// 后者在单文件发布下会抛
+    /// `InvalidOperationException: JsonSerializerOptions instance must specify a
+    /// TypeInfoResolver setting before being marked as read-only.`
+    /// （曾导致自检报告永远写不出来，只剩一个空报告）。
+    /// </summary>
+    public static readonly JsonSerializerOptions JsonOptsPretty = new() { WriteIndented = true };
+    public static string JsonPretty(object o) => JsonSerializer.Serialize(o, JsonOptsPretty);
 }

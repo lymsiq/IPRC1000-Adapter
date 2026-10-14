@@ -46,14 +46,15 @@ internal static class Program
             return;
         }
 
-        // 映射一致性自检：--map-dump <输出文件>
-        //   把「界面显示的映射」（Keymaps，Backend 用）与「实际注入的映射」（同上，KeyFilter 用）
-        //   并排打印，用来证明两者**读的是同一份数据**。
+        // 映射一致性自检：--map-dump <输出文件> [组序号]
+        //   把「界面显示的映射」「实际注入的映射」「出厂默认」三列并排打印。
         //   历史 bug：注入走 Keys.Load()（旧扁平格式 → 静默回落到出厂默认），与界面不一致。
+        //   给组序号可单独自检某一组（如 --map-dump out.txt 1 看 WorkBuddy 组）。
         if (args.Length > 0 && args[0] == "--map-dump")
         {
             var pd = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "map_dump.txt");
-            File.WriteAllText(pd, DumpMaps());
+            var gi = args.Length > 2 && int.TryParse(args[2], out var g) ? g : Keymaps.ActiveIndex;
+            File.WriteAllText(pd, DumpMaps(gi));
             return;
         }
 
@@ -61,10 +62,32 @@ internal static class Program
         ApplicationConfiguration.Initialize();
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
 
+        // ★ 全局异常兜底：**selftest 模式也必须装**。
+        //   以前 selftest 分支不装 —— 结果 InitWebView（async void 调用）一旦抛异常，
+        //   进程直接以 0xE0434352 崩掉，报告、轨迹什么都没有，排查时完全无从下手。
+        //   现在无论哪种模式，未捕获异常都会写成一份带堆栈的报告。
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            var ex = e.ExceptionObject as Exception;
+            var txt = new System.Text.StringBuilder();
+            txt.AppendLine("{");
+            txt.AppendLine("  \"fatal\": true,");
+            txt.AppendLine($"  \"type\": \"{ex?.GetType().Name ?? "Unknown"}\",");
+            txt.AppendLine($"  \"message\": \"{(ex?.Message ?? "").Replace("\\", "/").Replace("\"", "'")}\",");
+            txt.AppendLine($"  \"isTerminating\": {e.IsTerminating.ToString().ToLowerInvariant()},");
+            txt.AppendLine("  \"stack\": \"" +
+                (ex?.ToString() ?? "").Replace("\\", "/").Replace("\"", "'")
+                    .Replace("\r", "").Replace("\n", " | ") + "\"");
+            txt.AppendLine("}");
+            var path = selftest
+                ? (outPath ?? Path.Combine(Env.AppDir, "selftest.json"))
+                : Path.Combine(Env.AppDir, "crash.json");
+            try { File.WriteAllText(path, txt.ToString()); } catch { }
+        };
+
         if (!selftest)
         {
             Application.ThreadException += (_, e) => MessageBox.Show(e.Exception.Message, Env.AppName);
-            AppDomain.CurrentDomain.UnhandledException += (_, e) => Console.WriteLine(e.ExceptionObject);
         }
 
         using var form = new MainForm(selftest, outPath);
@@ -72,40 +95,63 @@ internal static class Program
     }
 
     /// <summary>
-    /// 打印「界面显示」与「实际注入」两条路径各自解析出的映射，用于验证二者一致。
-    /// 两列都用 Keymaps.Get(id)，若历史上注入走的是别的数据源，这里会立刻暴露。
+    /// 映射自检：把「界面显示」「实际注入」「出厂默认」三条数据并排打印。
+    ///
+    /// 为什么要有这个：本项目曾经出过最严重的一类 bug —— **同一个东西有两个来源**。
+    ///   · 界面走 Keymaps、注入走 Keys.Load()（旧扁平格式，静默回落硬编码默认）
+    ///     → 用户改了映射，界面变了，实际注入却还是出厂值，怎么试都没反应。
+    ///   · 默认值也曾同时写在 Keys.Table 和 Defaults 两处 → 必然漂移。
+    /// 现在三者统一，本命令就是那道"必须一致"的闸门。
     /// </summary>
-    private static string DumpMaps()
+    private static string DumpMaps(int groupIdx)
     {
+        if (groupIdx < 0 || groupIdx >= Keymaps.Groups.Count) groupIdx = Keymaps.ActiveIndex;
+        var grp = Keymaps.Groups[groupIdx];
+        var map = Keymaps.MapOf(groupIdx);
+        var def = Keymaps.FactoryOf(groupIdx);
+
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"IPRC1000 映射自检   {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-        sb.AppendLine($"配置文件：{Env.AppName}\\keymap.json");
-        sb.AppendLine($"当前配置组：#{Keymaps.ActiveIndex} 「{Keymaps.Current.Name}」");
-        sb.AppendLine($"共 {Keymaps.Groups.Count} 组：" +
-            string.Join(" / ", Keymaps.Groups.Select((g, i) => $"#{i} {g.Name}")));
+        sb.AppendLine($"配置文件：%APPDATA%\\{Env.AppName}\\keymap.json");
+        sb.AppendLine($"自检配置组：#{groupIdx} 「{grp.Name}」（Kind={grp.Kind}）" +
+                      (groupIdx == Keymaps.ActiveIndex ? "  ← 当前生效" : ""));
+        sb.AppendLine("共 " + Keymaps.Groups.Count + " 组：" +
+            string.Join(" / ", Keymaps.Groups.Select((g, i) => $"#{i} {g.Name}[{g.Kind}]")));
         sb.AppendLine();
-        sb.AppendLine($"{"按键",-14}{"HID",-8}{"注入（实际）",-22}{"界面（显示）",-22}{"一致?"}");
-        sb.AppendLine(new string('-', 78));
+        sb.AppendLine($"{"按键",-14}{"HID",-7}{"实际注入",-18}{"界面显示",-18}{"出厂默认",-18}{"注入=界面",-10}{"=默认"}");
+        sb.AppendLine(new string('-', 88));
 
-        var bad = 0;
+        var bad = 0; var diffDef = 0;
         foreach (var b in Keys.Table)
         {
-            // ★ 两条路径都取同一个源；这里刻意分开写，方便日后任何一方被改成别的数据源时立刻暴露
-            var inject = Keymaps.Get(b.Id);                 // KeyFilter.ApplyButton 走这条
-            var shown = Keymaps.Get(b.Id);                  // Backend.GetState 走这条
-            var sInj = Keys.FormatSymbols(inject);
-            var sSho = Keys.FormatSymbols(shown);
-            var same = sInj == sSho;
+            // ★ 两条路径**分开写**：日后任何一方被改成别的数据源，这里立刻暴露
+            var inject = map.TryGetValue(b.Id, out var iv) ? iv : Array.Empty<int>();   // ApplyButton 走这条
+            var shown = map.TryGetValue(b.Id, out var sv) ? sv : Array.Empty<int>();    // GetState 走这条
+            var dflt = def.TryGetValue(b.Id, out var dv) ? dv : Array.Empty<int>();
+            var rawInj = Keys.FormatSymbols(inject);
+            var rawSho = Keys.FormatSymbols(shown);
+            var rawDef = Keys.FormatSymbols(dflt);
+            // ★ 比较用**原始值**，展示才用占位文案 ——
+            //   否则空映射时「不注入」vs「不执行」两个占位串不同，会误报不一致。
+            var same = rawInj == rawSho;
+            var eqDef = rawInj == rawDef;
             if (!same) bad++;
-            sb.AppendLine($"{b.Id,-14}{b.Hid,-8}" +
-                $"{(sInj.Length > 0 ? sInj : "（不注入）"),-22}" +
-                $"{(sSho.Length > 0 ? sSho : "（不执行）"),-22}" +
-                (same ? "OK" : "★不一致★"));
+            if (!eqDef) diffDef++;
+            sb.AppendLine($"{b.Id,-14}{b.Hid,-7}" +
+                          $"{Or(rawInj, "（不注入）"),-18}{Or(rawSho, "（不执行）"),-18}" +
+                          $"{Or(rawDef, "（不执行）"),-18}" +
+                          $"{(same ? "OK" : "★不一致★"),-10}{(eqDef ? "OK" : "≠")}");
         }
         sb.AppendLine();
         sb.AppendLine(bad == 0
-            ? "⇒ 全部一致：注入用的就是界面显示的映射 ✓"
-            : $"⇒ 有 {bad} 处不一致 ✗（注入与界面读了不同的数据源）");
+            ? "⇒ 注入 == 界面 ✓（注入用的就是界面显示的映射）"
+            : $"⇒ ✗ 有 {bad} 处「注入 ≠ 界面」—— 两条路径读了不同的数据源！");
+        sb.AppendLine(diffDef == 0
+            ? $"⇒ 第 {groupIdx} 组 == 其出厂默认 ✓（已冻结为最终版）"
+            : $"⇒ 第 {groupIdx} 组与出厂默认有 {diffDef} 处不同（用户自定义，属正常；" +
+              "若想冻结为默认请更新 Defaults）");
         return sb.ToString();
     }
+
+    private static string Or(string s, string fallback) => s.Length > 0 ? s : fallback;
 }
