@@ -256,10 +256,34 @@ internal static class WinUhidInjector
         };
     }
 
-    /// <summary>把一组虚拟键码作为**一个报告**提交（修饰键 + 最多 6 个键）。</summary>
+    /// <summary>
+    /// 提交一组虚拟键码（修饰键 + 最多 6 个键）。
+    ///
+    /// ★ 组合键要**分两帧发**：先只发修饰键，再发"修饰键 + 主键"。
+    ///
+    /// 为什么：`Win+X`、`Win+L` 这类**系统热键**由 Explorer/系统注册，判定条件是
+    /// "主键按下时修饰键**已经处于按下状态**"。如果把修饰键和主键塞进同一帧 HID 报告，
+    /// 系统在**同一时刻**看到两者，热键会漏判 —— 表现就是这个键"没反应"
+    /// （而 Ctrl/Alt 类的普通组合键在同一帧里通常也能工作，所以以前没暴露）。
+    /// </summary>
     public static bool Send(IReadOnlyList<int> vks)
     {
         if (!EnsureReady()) return false;
+
+        // ① 若含修饰键且不止一个键：先单独发一帧"只有修饰键"的报告
+        var modFrame = new byte[8];
+        var hasMod = false;
+        foreach (var vk in vks)
+        {
+            var bit = ModifierBit(vk);
+            if (bit.HasValue) { modFrame[0] |= bit.Value; hasMod = true; }
+        }
+        if (hasMod && vks.Count > 1)
+        {
+            SubmitFrame(modFrame);
+            Thread.Sleep(12);        // 让系统先"看到"修饰键按下，再收主键（12ms 用户无感）
+        }
+
         var report = new byte[8];
         var keys = new List<byte>();
         foreach (var vk in vks)
@@ -271,6 +295,12 @@ internal static class WinUhidInjector
         }
         for (var i = 0; i < keys.Count; i++) report[2 + i] = keys[i];
 
+        return SubmitFrame(report);
+    }
+
+    /// <summary>提交一帧 8 字节键盘报告</summary>
+    private static bool SubmitFrame(byte[] report)
+    {
         var buf = Marshal.AllocHGlobal(8);
         try
         {
