@@ -91,6 +91,16 @@ SRC_REQUIRED = [
     ("按组恢复出厂默认", "iprc1000_gui_dotnet/Keymaps.cs", "FactoryOf"),
     ("自检有硬看门狗", "iprc1000_gui_dotnet/MainForm.cs", "hard-timeout-35s"),
     ("自检有轨迹日志", "iprc1000_gui_dotnet/MainForm.cs", "trace.log"),
+    ("界面显示版本号", "iprc1000_gui_dotnet/ui/app.js", "railVer"),
+]
+
+# 包内「不应出现」的路径：(标签, 子串)。用来防体积膨胀与误打包。
+ZIP_FORBIDDEN = [
+    # 截图已在包顶层以中文名放了一份，文档目录里不该再有第二份
+    ("截图未重复打包", "文档/screenshots/"),
+    # 这些永远不该进发布包
+    ("无工作记录目录", ".workbuddy/"),
+    ("无构建中间产物", "obj/"),
 ]
 
 
@@ -169,7 +179,10 @@ def build():
             shutil.copy2(src, os.path.join(target, "tools", os.path.basename(f)))
     docsrc = os.path.join(ROOT, "tools", "docs")
     if os.path.isdir(docsrc):
-        shutil.copytree(docsrc, os.path.join(target, "文档"), dirs_exist_ok=True)
+        # ★ 排除 screenshots/：它下面就是那 4 张界面截图，已经以中文名放到包顶层了
+        #   （见下面 shots 那段）。不排除的话同一批图会存两份，白白多出近 2 MB。
+        shutil.copytree(docsrc, os.path.join(target, "文档"), dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("screenshots"))
     # 界面截图：用 docs/screenshots 里由浏览器预览模式渲染的那几张
     # （原来读根目录的 _ui_kb.png —— 那是会过期的旧截图，曾把 mac 风格修饰键
     #   Control/Option/Command 发进包里，而程序早已改成 Ctrl/Alt/Shift/Win）
@@ -229,6 +242,13 @@ def verify():
             print(f"  {'✓' if ok else '✗'} {label}")
         exe = z.getinfo("IPRC1000 Adapter.exe")
         print(f"  主程序 {exe.file_size:,} 字节 · 时间 {exe.date_time}")
+
+        # ── 包内不应出现的路径（防止重复打包把体积撑大）──
+        for label, bad in ZIP_FORBIDDEN:
+            hit = [n for n in names if bad in n]
+            ok = not hit
+            ok_all &= ok
+            print(f"  {'✓' if ok else '✗'} {label}" + ("" if ok else f"  ← {hit[:3]}"))
 
     # ── 源码级正/反向校验（针对注入链路，防回归）──
     print("  ── 源码检查 ──")
