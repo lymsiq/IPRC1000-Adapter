@@ -550,6 +550,58 @@ internal sealed class KeyFilter : IDisposable
     /// <summary>释放：与按下走同一条路（虚拟键盘发全零报告）</summary>
     public static void InjectUp(int[] vks) => InjectRelease(vks);
 
+    /// <summary>查询系统当前是否认为该键处于「按下」（高位置 1）—— 用于验证注入是否被系统接受</summary>
+    public static short AsyncState(int vk) => GetAsyncKeyState(vk);
+
+    /// <summary>
+    /// 注入验证：按下 → 用 GetAsyncKeyState 看系统是否真的认为它按下了 → 释放。
+    ///
+    /// 这是排查「某些键注入无效」的关键手段：如果按住时高位置 1，说明**系统收到了**，
+    /// 问题在应用层（热键判定/时序）；如果一直不置位，说明**注入链路本身**没送出去。
+    /// </summary>
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr h, System.Text.StringBuilder t, int n);
+
+    private static string ForeTitle()
+    {
+        var sb = new System.Text.StringBuilder(256);
+        GetWindowText(GetForegroundWindow(), sb, 256);
+        return sb.ToString();
+    }
+
+    /// <summary>组合键验证：按住组合键一段时间再释放，并报告前台窗口标题变化（用于验证 Win+R 之类的系统热键）。</summary>
+    public static string InjectComboVerify(IEnumerable<int> vks)
+    {
+        var list = vks.ToArray();
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("组合键 VK = " + string.Join(",", list.Select(v => $"0x{v:X2}")));
+        sb.AppendLine("注入前前台窗口: " + ForeTitle());
+        try { InjectPress(list); } catch (Exception e) { sb.AppendLine("异常: " + e.Message); }
+        Thread.Sleep(600);
+        sb.AppendLine("按住中前台窗口: " + ForeTitle());
+        try { InjectRelease(list); } catch { }
+        Thread.Sleep(700);
+        sb.AppendLine("释放后前台窗口: " + ForeTitle() + "   ← 若弹出了系统窗口说明组合键生效");
+        return sb.ToString();
+    }
+
+    public static string InjectVerify(int vk)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"目标 VK = 0x{vk:X2}");
+        sb.AppendLine($"注入前   GetAsyncKeyState = 0x{AsyncState(vk):X4}");
+        try { InjectPress(new[] { vk }); } catch (Exception e) { sb.AppendLine("注入异常: " + e.Message); }
+        Thread.Sleep(400);
+        sb.AppendLine($"按住中   GetAsyncKeyState = 0x{AsyncState(vk):X4}   ← 高位=1 表示系统已收到");
+        try { InjectRelease(new[] { vk }); } catch { }
+        Thread.Sleep(300);
+        sb.AppendLine($"释放后   GetAsyncKeyState = 0x{AsyncState(vk):X4}");
+        return sb.ToString();
+    }
+
+
     private static void InjectRelease(int[] vks)
     {
         if (vks.Length > 0 && vks.Any(IsMedia))

@@ -252,6 +252,20 @@ internal static class WinUhidInjector
             0x2D => 0x49,   // Insert
             0x2E => 0x4C,   // Delete
             0x5D => 0x65,   // 菜单键
+            // ★ OEM 符号键（之前整组缺失 —— 导致 Ctrl+[ / Ctrl+] / / 等被静默丢弃，
+            //   表现为"按下去没反应"。HID usage 见 HID Usage Tables 0x2D~0x38）
+            0xBD => 0x2D,   // -
+            0xBB => 0x2E,   // =
+            0xDB => 0x2F,   // [
+            0xDD => 0x30,   // ]
+            0xDC => 0x31,   // \
+            0xE2 => 0x64,   // \ (102 键盘）
+            0xBA => 0x33,   // ;
+            0xDE => 0x34,   // '
+            0xC0 => 0x35,   // `
+            0xBC => 0x36,   // ,
+            0xBE => 0x37,   // .
+            0xBF => 0x38,   // /
             _ => null,
         };
     }

@@ -28,6 +28,24 @@ internal static class Program
             return;
         }
 
+        // 注入验证：--inject-verify <VK十六进制> <输出文件>
+        if (args.Length > 1 && args[0] == "--inject-verify")
+        {
+            var p2 = args.Length > 2 ? args[2] : Path.Combine(Env.AppDir, "inject_verify.txt");
+            var vk = Convert.ToInt32(args[1], 16);
+            File.WriteAllText(p2, KeyFilter.InjectVerify(vk));
+            return;
+        }
+
+        // 组合键验证：--inject-combo <5B,52> <输出文件>
+        if (args.Length > 1 && args[0] == "--inject-combo")
+        {
+            var pc = args.Length > 2 ? args[2] : Path.Combine(Env.AppDir, "inject_combo.txt");
+            var vks = args[1].Split(',').Select(x => Convert.ToInt32(x, 16)).ToArray();
+            File.WriteAllText(pc, KeyFilter.InjectComboVerify(vks));
+            return;
+        }
+
         // WebView2 需要显式 STA + 现代 WinForms 初始化
         ApplicationConfiguration.Initialize();
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
