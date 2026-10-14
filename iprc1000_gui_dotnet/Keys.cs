@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace Iprc1000Adapter;
 
 /// <summary>按键表与映射存储（与 src-tauri/.../iprc1000/bridge.rs 的 BUTTON_TABLE 一致，已三源校验）。</summary>
@@ -116,17 +114,7 @@ public record Btn(string Id, string Label, string Name, string Hid, int[] Defaul
         return outp.ToArray();
     }
 
-    // ───────── 存储 ─────────
-
-    private static string Dir
-    {
-        get
-        {
-            var d = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), Env.AppName);
-            Directory.CreateDirectory(d);
-            return d;
-        }
-    }
+    // ───────── 显示 / 解析辅助 ─────────
 
     /// <summary>
     /// 每个按键在 `remote.png`（179×663）里的位置（中心点 + 裁剪尺寸）。
@@ -200,89 +188,28 @@ public record Btn(string Id, string Label, string Name, string Hid, int[] Defaul
     public static string LabelOf(string? id)
         => Table.FirstOrDefault(b => b.Id == id)?.Label ?? (id ?? "");
 
-    private static string File_ => Path.Combine(Dir, "keymap.json");
+    // ═══════════════════════════════════════════════════════════════════════
+    //  ★★ 注意：这里**曾经**有一套「扁平 keymap.json」的读写实现（Load/Save/Reset）。
+    //
+    //  它和 Keymaps（多配置组）**写同一个文件** %APPDATA%\IPRC1000 Adapter\keymap.json，
+    //  但格式不同：本类要 Dictionary<string,int[]>，Keymaps 写的是 {Ver,Active,Groups:[…]}。
+    //  于是 JsonSerializer.Deserialize 必然抛异常，被 catch 吞掉后**静默回落到出厂默认** ——
+    //  界面显示用户配置、实际注入硬编码默认，改什么都不生效（back/menu/info 全中招）。
+    //
+    //  该实现已**删除**，配置一律走 Keymaps（唯一数据源）。下面的 Load() 仅作兼容转发。
+    // ═══════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// 推荐默认的版本。变更默认键位时 +1；老配置（版本更低或缺失）会在下次加载时
-    /// **自动升级到最新推荐默认**（用户的旧自定义会被覆盖，故升版本要谨慎）。
+    /// 【已废弃】请改用 <see cref="Keymaps.Get"/>。
+    ///
+    /// 保留此方法只是为了让老调用点编译通过，并**保证不再返回错误数据**：
+    /// 它现在直接转发到当前配置组，返回值一定与界面显示一致。
     /// </summary>
-    public const int DefaultsVersion = 2;
-
-    private static string VersionFile => Path.Combine(Dir, "keymap.version");
-
-    private static int ReadVersion()
-    {
-        try { return File.Exists(VersionFile) ? int.Parse(File.ReadAllText(VersionFile).Trim()) : 0; }
-        catch { return 0; }
-    }
-
-    private static void WriteVersion(int v)
-    {
-        try { File.WriteAllText(VersionFile, v.ToString()); } catch { }
-    }
-
-    /// <summary>是否刚刚从旧版本升级到了推荐默认（界面提示用）</summary>
-    public static bool JustMigrated { get; private set; }
-
-    /// <summary>
-    /// 内存缓存。**按键路径上不要读磁盘** —— ApplyButton 每次按键都会取映射，
-    /// 原来每按一次就读一次 keymap.json，连按时会带来可见的延迟。
-    /// 任何写入都会清缓存。
-    /// </summary>
-    private static Dictionary<string, int[]>? _cache;
-
-    public static void InvalidateCache() => _cache = null;
-
+    [Obsolete("请改用 Keymaps.Get(id) —— 本方法读的是已废弃的扁平格式，曾导致注入用错映射。")]
     public static Dictionary<string, int[]> Load()
-    {
-        if (_cache != null) return _cache;
+        => Table.ToDictionary(b => b.Id, b => Keymaps.Get(b.Id));
 
-        // 老配置 → 升级到最新推荐默认
-        if (ReadVersion() < DefaultsVersion)
-        {
-            var fresh = Table.ToDictionary(b => b.Id, b => (int[])b.Default.Clone());
-            try
-            {
-                File.WriteAllText(File_, JsonSerializer.Serialize(fresh,
-                    new JsonSerializerOptions { WriteIndented = true }));
-            }
-            catch { }
-            WriteVersion(DefaultsVersion);
-            JustMigrated = ReadVersion() > 0;
-            return _cache = fresh;
-        }
-        return _cache = LoadFromDisk();
-    }
-
-    private static Dictionary<string, int[]> LoadFromDisk()
-    {
-        var map = Table.ToDictionary(b => b.Id, b => (int[])b.Default.Clone());
-        try
-        {
-            if (File.Exists(File_))
-            {
-                var saved = JsonSerializer.Deserialize<Dictionary<string, int[]>>(File.ReadAllText(File_));
-                if (saved != null)
-                    foreach (var (k, v) in saved)
-                        if (map.ContainsKey(k)) map[k] = v;
-            }
-        }
-        catch { /* 忽略损坏的配置 */ }
-        return map;
-    }
-
-    public static void Save(Dictionary<string, int[]> map)
-    {
-        File.WriteAllText(File_, JsonSerializer.Serialize(map, new JsonSerializerOptions { WriteIndented = true }));
-        WriteVersion(DefaultsVersion);
-        InvalidateCache();
-    }
-
-    public static void Reset()
-    {
-        File.WriteAllText(File_,
-            JsonSerializer.Serialize(Table.ToDictionary(b => b.Id, b => b.Default),
-                new JsonSerializerOptions { WriteIndented = true }));
-        InvalidateCache();
-    }
+    /// <summary>【已废弃】改用 <see cref="Keymaps.ResetCurrent"/>。</summary>
+    [Obsolete("请改用 Keymaps.ResetCurrent()。")]
+    public static void Reset() => Keymaps.ResetCurrent();
 }

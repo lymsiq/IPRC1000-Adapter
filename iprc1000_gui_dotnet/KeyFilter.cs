@@ -455,11 +455,27 @@ internal sealed class KeyFilter : IDisposable
     public void ApplyButton(string bid, bool pressed, string src = "rawinput")
     {
         try { OnButton?.Invoke(bid, pressed); } catch { }
+
+        // ★★ 关键修复：注入必须用**当前配置组**（Keymaps），不能用 Keys.Load()。
+        //
+        // 历史 bug：这里原来调的是 `Keys.Load()` —— 那是**旧版扁平格式**的读取器，
+        // 它把 keymap.json 里的多配置组结构 {Ver,Active,Groups:[…]} 反序列化成
+        // Dictionary<string,int[]> 会抛异常，然后 catch 里**静默回落到 Keys.Table 的出厂默认**。
+        // 结果：界面（走 Keymaps）显示的是用户配置，实际注入（走 Keys）却是硬编码默认，
+        // 两套数据源共用同一个文件路径却各读各的 → 用户怎么改都不生效。
+        // 现象：back 配 Backspace 却注入 Alt+←、menu 配 Win+X 却注入菜单键、info 配 Ctrl+Enter 却注入 Alt+Enter。
+        var vks = Keymaps.Get(bid);
+        if (vks.Length == 0)
+        {
+            // 记录"按下了但没映射"，否则日志里这一键完全消失，看不出是没配置还是没识别
+            if (pressed) EtwKeySource.AppendLog($"APPLY  {bid}  DOWN  来源={src}  映射=（未设置）");
+            return;
+        }
         if (!InjectEnabled) return;
-        var map = Keys.Load();
-        if (!map.TryGetValue(bid, out var vks) || vks.Length == 0) return;
+
         EtwKeySource.AppendLog($"APPLY  {bid}  {(pressed ? "DOWN" : "UP")}  来源={src}" +
-            $"  映射={Keys.Format(vks)}");
+            $"  映射={Keys.Format(vks)}  组={Keymaps.Current.Name}");
+
         if (pressed)
         {
             InjectPress(vks);
@@ -467,7 +483,10 @@ internal sealed class KeyFilter : IDisposable
         }
         else
         {
-            InjectRelease(vks);
+            // ★ 释放**按下时记录的那组键**，而不是重新读一遍配置 ——
+            //   否则按住期间切了配置组/改了映射，就会放掉错的键，把原键卡在按下状态。
+            var rel = _injectedNow is { Length: > 0 } ? _injectedNow : vks;
+            InjectRelease(rel);
             _injectedNow = Array.Empty<int>();
         }
     }

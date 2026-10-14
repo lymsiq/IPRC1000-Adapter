@@ -42,6 +42,22 @@ CHECKS = [
     ("遥控器说明",         "文档/遥控器按键说明.md", "语音键"),
 ]
 
+# 源码级「反向校验」：(标签, 相对仓库根的路径, 禁止出现的子串)
+# 这类检查针对**注入链路** —— 曾经出过的大 bug 都是"注入读了另一份数据源"。
+# 放在源码上（而不是 zip 里）是因为 publish 只有 exe，没有 .cs。
+SRC_FORBIDDEN = [
+    # ★★ 最重要的一条：注入必须走 Keymaps.Get()，绝不能再用 Keys.Load()。
+    #    Keys.Load() 读的是旧扁平格式，遇到多配置组的 keymap.json 会反序列化失败并
+    #    **静默回落到出厂默认** → 界面显示一套、实际注入另一套，用户怎么改都没反应。
+    ("注入未回退到 Keys.Load()", "iprc1000_gui_dotnet/KeyFilter.cs", "Keys.Load("),
+]
+
+# 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
+SRC_REQUIRED = [
+    ("注入走 Keymaps.Get()", "iprc1000_gui_dotnet/KeyFilter.cs", "Keymaps.Get(bid)"),
+    ("映射自检入口 --map-dump", "iprc1000_gui_dotnet/Program.cs", "--map-dump"),
+]
+
 
 def kill_busy():
     out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"],
@@ -55,6 +71,46 @@ def kill_busy():
                 pass
     subprocess.run(["logman", "stop", "Iprc1000AudioBridge", "-ets"], capture_output=True)
     time.sleep(1.2)
+
+
+def publish_fresh():
+    """打包前强制重新编译发布 —— 否则可能把上一次的 publish 打进包。
+
+    以前踩过两次坑：
+      ① 改完代码直接跑 package.py，publish 还是旧的 → 用户拿到旧程序，"改了没效果"。
+      ② **更隐蔽**：csproj 里 `ui\\**\\*` 是 CopyToOutputDirectory=PreserveNewest，
+         输出目录已存在时 MSBuild 的增量判断会**整个跳过 ui 的复制** →
+         publish\\ui 里只剩 icon.ico，界面文件全丢。
+         所以这里先 `rmtree(PUB)` 再 publish，强制全量复制。
+    """
+    print("=== 重新编译发布 ===")
+    # ★ 必须先清空：见上面 ②，否则 ui/ 会被增量逻辑跳过
+    if os.path.exists(PUB):
+        shutil.rmtree(PUB, ignore_errors=True)
+    cmd = ["dotnet", "publish", "-c", "Release", "-r", "win-x64",
+           "--self-contained", "false", "-p:PublishSingleFile=true",
+           "-o", PUB, "--nologo", "-v", "quiet"]
+    r = subprocess.run(cmd, cwd=os.path.join(ROOT, "iprc1000_gui_dotnet"),
+                       capture_output=True, text=True, errors="replace")
+    if r.returncode != 0:
+        print("  ✗ 编译失败：")
+        print("   " + (r.stdout or r.stderr)[-1500:].replace("\n", "\n   "))
+        raise SystemExit(1)
+    for f in os.listdir(PUB):
+        if f.endswith(".xml"):
+            try: os.remove(os.path.join(PUB, f))
+            except OSError: pass
+    exe = os.path.join(PUB, "IPRC1000 Adapter.exe")
+    print(f"  ✓ {exe}  {os.path.getsize(exe):,} 字节  "
+          f"{datetime.datetime.fromtimestamp(os.path.getmtime(exe)):%H:%M:%S}")
+    # 立刻自检 ui 是否真的复制过来了（这是坑 ② 的哨兵）
+    uip = os.path.join(PUB, "ui")
+    need = ["app.js", "index.html", "style.css", "remote.png"]
+    miss = [n for n in need if not os.path.exists(os.path.join(uip, n))]
+    if miss:
+        print(f"  ✗ publish\\ui 缺少 {miss} —— 增量复制又被跳过了")
+        raise SystemExit(1)
+    print(f"  ✓ publish\\ui 完整（{', '.join(need)}）")
 
 
 def build():
@@ -122,13 +178,40 @@ def verify():
             print(f"  {'✓' if ok else '✗'} {label}")
         exe = z.getinfo("IPRC1000 Adapter.exe")
         print(f"  主程序 {exe.file_size:,} 字节 · 时间 {exe.date_time}")
+
+    # ── 源码级正/反向校验（针对注入链路，防回归）──
+    print("  ── 源码检查 ──")
+    for label, rel, bad in SRC_FORBIDDEN:
+        p = os.path.join(ROOT, rel)
+        try:
+            txt = open(p, encoding="utf-8", errors="replace").read()
+        except OSError:
+            txt = ""
+        # 注释里提到是允许的（本文件顶部就有一段说明），只看非注释行
+        hit = any(bad in ln and not ln.strip().startswith(("//", "*", "/*"))
+                  for ln in txt.splitlines())
+        ok = not hit
+        ok_all &= ok
+        print(f"  {'✓' if ok else '✗'} {label}" + ("" if ok else f"  ← 仍含 {bad}"))
+
+    for label, rel, need in SRC_REQUIRED:
+        p = os.path.join(ROOT, rel)
+        try:
+            txt = open(p, encoding="utf-8", errors="replace").read()
+        except OSError:
+            txt = ""
+        ok = need in txt
+        ok_all &= ok
+        print(f"  {'✓' if ok else '✗'} {label}")
+
     print(f"  ZIP 时间 {datetime.datetime.fromtimestamp(os.path.getmtime(ZP)):%Y-%m-%d %H:%M:%S}")
-    print("  ⇒ " + ("全部通过，包是新的 ✓" if ok_all else "★ 有关键字缺失，包可能不完整 ✗"))
+    print("  ⇒ " + ("全部通过，包是新的 ✓" if ok_all else "★ 有检查未通过 ✗"))
     return ok_all
 
 
 if __name__ == "__main__":
     kill_busy()
+    publish_fresh()          # ★ 打包前先重新编译，杜绝"包里是旧程序"
     tgt = build()
     verify()
     print(f"\n包目录：{tgt}\n压缩包：{ZP}")
