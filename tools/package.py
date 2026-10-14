@@ -52,6 +52,8 @@ def read_version():
 VERSION = read_version()
 PKG = os.path.join(ROOT, f"IPRC1000_Adapter_v{VERSION}")
 ZP = os.path.join(ROOT, f"IPRC1000_Adapter_v{VERSION}.zip")
+# 固定名的包（不随版本变），用于"解压目录名固定 + 永久下载链接"，见 build() 里的说明
+LATEST_ZIP = os.path.join(ROOT, "IPRC1000_Adapter_latest.zip")
 
 # 包里必须存在的功能关键字（改完代码若这里 ✗，说明打包漏了新文件）
 CHECKS = [
@@ -75,6 +77,10 @@ CHECKS = [
     ("第三方声明",         "THIRD-PARTY-NOTICES.md", "WinUHid"),
     ("MIT 许可全文",       "THIRD-PARTY-NOTICES.md", "Cameron Gutman"),
     ("项目 LICENSE",      "LICENSE", "MIT License"),
+    # 固定快捷方式相关（见「升级说明.txt」）
+    ("快捷方式生成器",      "创建桌面快捷方式.cmd", "IPRC1000 遥控器"),
+    ("快捷方式在 tools 里", "tools/创建桌面快捷方式.cmd", "管理员身份运行"),
+    ("升级说明",           "升级说明.txt", "永久下载链接"),
 ]
 
 # 源码级「反向校验」：(标签, 相对仓库根的路径, 禁止出现的子串)
@@ -199,10 +205,16 @@ def build():
 
     os.makedirs(os.path.join(target, "tools"), exist_ok=True)
     for f in ("check_stuck_key.py", "stuck_key_guard.py", "Run-Guard.cmd",
-              "一键部署.ps1", "SetHidDriver/publish/SetHidDriver.exe"):
+              "一键部署.ps1", "SetHidDriver/publish/SetHidDriver.exe",
+              "创建桌面快捷方式.cmd"):
         src = os.path.join(ROOT, "tools", f)
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(target, "tools", os.path.basename(f)))
+    # ★ 快捷方式生成器也放到包**顶层**：用户最自然的动作是"解压后一眼看到它"，
+    #   埋在 tools/ 里容易被忽略。两处都放，成本只有一个几 KB 的文件。
+    sc = os.path.join(ROOT, "tools", "创建桌面快捷方式.cmd")
+    if os.path.exists(sc):
+        shutil.copy2(sc, os.path.join(target, "创建桌面快捷方式.cmd"))
     docsrc = os.path.join(ROOT, "tools", "docs")
     if os.path.isdir(docsrc):
         # ★ 排除 screenshots/：它下面就是那 4 张界面截图，已经以中文名放到包顶层了
@@ -228,6 +240,28 @@ def build():
         if os.path.exists(p):
             shutil.copy2(p, os.path.join(target, n))
 
+    # ★ 固定快捷方式：告诉用户"解压到同一个目录"，这样桌面快捷方式永远不用重建
+    with open(os.path.join(target, "升级说明.txt"), "w", encoding="utf-8") as f:
+        f.write("IPRC1000 遥控器适配器 · 升级说明\n")
+        f.write("=" * 46 + "\n\n")
+        f.write("【要点】程序放在一个**固定目录**里，以后升级只覆盖、不换地方，\n")
+        f.write("        桌面快捷方式就永远不用重建。\n\n")
+        f.write("【第一次】\n")
+        f.write("  1) 把压缩包解压到一个固定目录，例如：D:\\IPRC1000\n")
+        f.write("     （不要用 Windows 解压向导的默认目录 —— 它会按压缩包文件名建目录，\n")
+        f.write("       每个版本一个新目录，快捷方式就会跟着失效）\n")
+        f.write("  2) 双击目录里的「创建桌面快捷方式.cmd」，桌面会生成\n")
+        f.write("     「IPRC1000 遥控器」，并已设为「以管理员身份运行」。\n")
+        f.write("  3) 第一次还要部署环境：右键「以 PowerShell 运行」tools\\一键部署.ps1\n\n")
+        f.write("【以后升级】\n")
+        f.write("  1) 下载新版本（或直接用固定链接，见下）\n")
+        f.write("  2) 解压到**同一个** D:\\IPRC1000，覆盖同名文件\n")
+        f.write("  3) 完事 —— 快捷方式还是那个，点开就是新版\n\n")
+        f.write("【永久下载链接】永远指向最新版，不用每次找：\n")
+        f.write("  https://github.com/lymsiq/IPRC1000-Adapter/releases/latest/download/IPRC1000_Adapter_latest.zip\n\n")
+        f.write("【小技巧】把这个链接存成浏览器书签或下载工具的任务，升级就是\n")
+        f.write("        「下载 → 覆盖解压」两步。\n")
+
     with open(os.path.join(target, "版本.txt"), "w", encoding="utf-8") as f:
         f.write("IPRC1000 Adapter\n")
         f.write("打包时间：" + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "\n")
@@ -249,6 +283,18 @@ def build():
             for f in files:
                 p = os.path.join(root, f)
                 z.write(p, os.path.relpath(p, target))
+
+    # ★ 再出一份**固定名**的包：IPRC1000_Adapter_latest.zip
+    #
+    # 为什么需要：Windows 的解压向导会**按压缩包文件名建目录**，
+    # 于是 `IPRC1000_Adapter_v1.0.4.zip` 解压出 `IPRC1000_Adapter_v1.0.4\`、
+    # 下个版本又是新目录 —— 桌面快捷方式每升一次级就失效一次。
+    # 固定名的包解压出来的目录名永远一样，覆盖解压即可，快捷方式一劳永逸。
+    # 配合 GitHub 的 /releases/latest/download/ 还能得到**永久下载链接**：
+    #   https://github.com/lymsiq/IPRC1000-Adapter/releases/latest/download/IPRC1000_Adapter_latest.zip
+    if os.path.exists(LATEST_ZIP):
+        os.remove(LATEST_ZIP)
+    shutil.copy2(ZP, LATEST_ZIP)
     return target
 
 
@@ -260,10 +306,19 @@ def verify():
         print(f"  {os.path.getsize(ZP)/1024/1024:.2f} MB · {len(names)} 个文件")
         for label, member, kw in CHECKS:
             try:
-                txt = z.read(member).decode("utf-8", "replace")
-                ok = kw in txt
+                raw = z.read(member)
+                # ★ 包内文本有两种编码：多数是 UTF-8，而 .cmd 用 GBK
+                #   （中文 Windows 的 cmd 控制台默认 cp936，UTF-8 的 .cmd 会乱码）。
+                #   校验要两种都试，否则 GBK 文件会被按 UTF-8 解成乱码而误判为"缺内容"。
+                txt = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                try:
+                    txt = raw.decode("gbk")
+                except Exception:
+                    txt = raw.decode("utf-8", "replace")
             except KeyError:
-                ok = False
+                txt = None
+            ok = txt is not None and kw in txt
             ok_all &= ok
             print(f"  {'✓' if ok else '✗'} {label}")
         exe = z.getinfo("IPRC1000 Adapter.exe")

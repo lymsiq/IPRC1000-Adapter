@@ -60,10 +60,7 @@ const IDLE_END_MS: u64 = 600;
 ///   · 冷（一直没用）                          → 200 ms → 延迟 ≤200 ms，流量仅 ~10 KB/s
 /// 遥控器**不在线**时完全停填（没必要为不存在的设备刷缓冲）。
 const FLUSH_FEED_HOT_MS: u64 = 10;
-const FLUSH_FEED_WARM_MS: u64 = 50;
 const FLUSH_FEED_COLD_MS: u64 = 200;
-const FEED_HOT_WINDOW_MS: u64 = 3_000;
-const FEED_WARM_WINDOW_MS: u64 = 60_000;
 /// 每次填的负载大小（2 KB —— 必须**小于缓冲** 4 KB，否则 EventWrite 返回 234 ERROR_MORE_DATA）
 // 注意：负载必须**小于缓冲**（4KB），否则 EventWrite 返回 234（ERROR_MORE_DATA）。
 // 取 2KB → 两个事件即可填满一页 4KB 缓冲，从而逼出一次刷新。
@@ -327,8 +324,6 @@ struct Activity {
     last_event_ms: std::sync::atomic::AtomicU64,
     /// 遥测：各档填了多少次
     n_hot: std::sync::atomic::AtomicU64,
-    n_warm: std::sync::atomic::AtomicU64,
-    n_cold: std::sync::atomic::AtomicU64,
     n_skip: std::sync::atomic::AtomicU64,
 }
 
@@ -337,8 +332,6 @@ impl Activity {
         Self {
             last_event_ms: std::sync::atomic::AtomicU64::new(0),
             n_hot: std::sync::atomic::AtomicU64::new(0),
-            n_warm: std::sync::atomic::AtomicU64::new(0),
-            n_cold: std::sync::atomic::AtomicU64::new(0),
             n_skip: std::sync::atomic::AtomicU64::new(0),
         }
     }
@@ -965,7 +958,7 @@ fn main() {
     } else {
         match feed.as_ref() {
             Some(_) => println!(
-                "[i] 填缓冲自适应：热 {FLUSH_FEED_HOT_MS}ms / 温 {FLUSH_FEED_WARM_MS}ms / 冷 {FLUSH_FEED_COLD_MS}ms，每次 {FLUSH_FEED_BYTES} 字节；遥控器不在线时停填"),
+                "[i] 填缓冲：遥控器在线时恒定 {FLUSH_FEED_HOT_MS}ms 一格，每次 {FLUSH_FEED_BYTES} 字节；不在线时停填"),
             None => eprintln!("[!] 填缓冲提供者注册失败（按键延迟会维持在 ~1 秒）"),
         }
     }
@@ -990,20 +983,21 @@ fn main() {
                     }
 
                     let idle = if last == 0 { u64::MAX } else { now.saturating_sub(last) };
-                    // 本轮到下次清空的间隔 = 这一档下的延迟上限
+                    // ★ 遥控器在线时**始终用热档（10 ms）**，不再按空闲时长降档。
+                    //
+                    // 原因：ETW 缓冲只有在被填满或到 flush_timer 时才刷新，而降档到"冷"
+                    // （200 ms）后，用户按下语音键产生的**头几批音频事件最多要等 200 ms**
+                    // 才被投递出去 —— 这正好落在"按住键立刻说话"的第一个字上。
+                    // 遥控器在线就说明用户随时可能开口，用 10 ms 换来"按键即出声"值得；
+                    // 设备不在线时仍然基本停填（那时也不会有音频）。
                     let interval = if !present {
                         act.n_skip.fetch_add(1, Ordering::Relaxed);
                         FLUSH_FEED_COLD_MS * 5          // 设备不在：基本停填
-                    } else if idle <= FEED_HOT_WINDOW_MS {
-                        act.n_hot.fetch_add(1, Ordering::Relaxed);
-                        FLUSH_FEED_HOT_MS               // 热 10 ms
-                    } else if idle <= FEED_WARM_WINDOW_MS {
-                        act.n_warm.fetch_add(1, Ordering::Relaxed);
-                        FLUSH_FEED_WARM_MS              // 温 50 ms
                     } else {
-                        act.n_cold.fetch_add(1, Ordering::Relaxed);
-                        FLUSH_FEED_COLD_MS              // 冷 200 ms
+                        act.n_hot.fetch_add(1, Ordering::Relaxed);
+                        FLUSH_FEED_HOT_MS               // 在线：恒定 10 ms
                     };
+                    let _ = idle;                       // 保留统计，不再用于选档
 
                     if present {
                         if let Some(fd) = f.as_ref() { fd.feed(); }

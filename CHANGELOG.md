@@ -5,6 +5,45 @@
 
 ---
 
+## [1.0.5] - 2026-10-14
+
+修「按住语音键立刻说话，第一个字识别不出来」；并提供**固定快捷方式**方案。
+
+### 修复
+
+- **声卡打开的开销落在关键路径上**。原来流程是「第一个音频包到了才去打开 CABLE Input」，
+  而打开声卡实测要 **80.5 ms**（其中**枚举设备找 CABLE Input 占 71.3 ms**、
+  `WasapiOut.Init+Play` 占 9.3 ms）—— 这段时间到达的音频被直接丢掉。
+  三处改动：
+  1. **语音键按下的瞬间就预热声卡**（`KeyFilter.VoiceKeyDown` → `CableRouter.WarmUp()`），
+     把开声卡提前到音频到达之前；
+  2. **缓存 CABLE Input 设备对象**，省掉每次重开都要做的整轮设备枚举（71 ms）；
+  3. 声卡关闭阈值 3 秒 → **30 秒**，语音交互基本不再碰到冷启动。
+- **语音桥的空闲降档会拖慢首帧**。填缓冲原来随空闲时长从 10 ms 降到 200 ms，
+  于是"闲了一会儿再按语音键"时，头几批音频事件最多要等 200 ms 才被投递。
+  改为**遥控器在线时恒定 10 ms**（设备不在线时仍基本停填）。
+
+### 新增
+
+- **固定快捷方式方案**：
+  - 每次发布额外产出**固定名**的包 `IPRC1000_Adapter_latest.zip`
+    （Windows 解压向导按压缩包文件名建目录，版本号命名的包每升一级就换个目录，
+    桌面快捷方式随之失效；固定名解压出来目录名永远一样，覆盖解压即可）。
+    配合 GitHub 得到**永久下载链接**：
+    `https://github.com/lymsiq/IPRC1000-Adapter/releases/latest/download/IPRC1000_Adapter_latest.zip`
+  - 包内新增 **`创建桌面快捷方式.cmd`**：双击一次生成桌面快捷方式，
+    并**自动置上「以管理员身份运行」标志**（本程序需要管理员权限，省掉每次右键）。
+  - 包内新增 **`升级说明.txt`**：固定目录 + 覆盖解压的做法。
+
+- `router.log` 新增延迟记录：`[LAT] 语音键按下 → 首包音频到达 N ms（声卡已就绪=…）`，
+  用来量化"按键到出声"里我们这一侧占多少。
+
+### 变更
+
+- 打包脚本校验时同时兼容 UTF-8 与 GBK 文本（`.cmd` 必须用 GBK，否则中文 cmd 控制台乱码）。
+
+---
+
 ## [1.0.4] - 2026-10-14
 
 针对「录音启动失败」补上诊断与一个**检测逻辑的实错**。
@@ -135,6 +174,7 @@ WinUHid（MIT）、VB-CABLE（VB-Audio Donationware）、语音桥 `etw_consumer
 
 ---
 
+[1.0.5]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.5
 [1.0.4]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.4
 [1.0.3]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.3
 [1.0.2]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.2

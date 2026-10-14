@@ -48,6 +48,10 @@ internal sealed class Backend : IDisposable
     {
         _filter = f;
         _filter.InjectEnabled = true;
+        // 语音键按下 → 立刻预热音频链路（提前打开 CABLE Input）。
+        // 见 KeyFilter.VoiceKeyDown 的说明：不预热会丢掉"按住后立刻说的第一个字"。
+        KeyFilter.VoiceKeyDown -= WarmAudio;   // 防重复订阅
+        KeyFilter.VoiceKeyDown += WarmAudio;
         // ETW 按键来源常驻监听（被动、无副作用）；是否真正生效由按键来源模式决定
         StartProbeThread();
         _etwKeys = new EtwKeySource(EtwKeySource.DefaultPort, OnUsage);
@@ -302,6 +306,12 @@ internal sealed class Backend : IDisposable
         _lastAutoStart = DateTime.UtcNow;
         if (BridgeRunning) StopBridge();      // 先清掉僵死的那个
         StartBridge();
+    }
+
+    /// <summary>语音键按下时预热声卡（由 KeyFilter.VoiceKeyDown 回调）</summary>
+    private void WarmAudio()
+    {
+        try { _router.WarmUp(); } catch { }
     }
 
     public string GetState()

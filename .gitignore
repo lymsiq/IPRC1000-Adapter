@@ -10,6 +10,8 @@ target/
 IPRC1000_Adapter_v*/
 IPRC1000_Adapter_v*.zip
 IPRC1000_Adapter_v*.zip.sha256
+IPRC1000_Adapter_latest.zip
+IPRC1000_Adapter_latest.zip.sha256
 *.zip
 
 # ── 第三方二进制（体积大 / 许可限制，请自行获取，见 README）──

@@ -23,6 +23,15 @@ internal sealed class CableRouter : IDisposable
     private volatile bool _inSession;
     private DateTime _lastEnd = DateTime.MinValue;
 
+    // 声卡开关要加锁：预热是从**按键线程**调的，而正常开关在**路由线程**里，
+    // 两个线程同时 EnsureSink 会各自 new 出一个 WasapiOut（后一个泄漏）。
+    private readonly object _sinkLock = new();
+    // 缓存 CABLE Input 设备对象：原来每轮 EnsureSink 都要重新枚举全部渲染端点（数十毫秒），
+    // 而这段开销正好落在"按键→出声"的关键路径上。
+    private MMDevice? _cable;
+    // 语音键按下的时刻，用来量「按键 → 第一包音频到达」到底花了多久
+    private DateTime _voiceDownAt = DateTime.MinValue;
+
     public string? Error { get; private set; }
     public string? Device { get; private set; }
     public bool Online => _running && Error == null;
@@ -59,53 +68,85 @@ internal sealed class CableRouter : IDisposable
         _thread.Start();
     }
 
-    private static MMDevice? FindCable()
+    private MMDevice? FindCable()
     {
+        if (_cable != null) return _cable;          // 命中缓存，省掉整轮设备枚举
         try
         {
             using var en = new MMDeviceEnumerator();
-            return en.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
+            _cable = en.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
                 .FirstOrDefault(d => d.FriendlyName.ToLowerInvariant().Contains("cable input"));
+            return _cable;
         }
         catch (Exception e) { Console.WriteLine(e.Message); return null; }
     }
 
+    /// <summary>
+    /// 预热：**语音键按下的瞬间**就把 CABLE Input 打开。
+    ///
+    /// 为什么必须做：打开声卡要「枚举设备 → new WasapiOut → Init → Play」，约 100~300 ms。
+    /// 而原来的流程是"第一个音频包到了才去开声卡"，于是这段时间到达的音频被
+    /// `if (EnsureSink()) _buf!.AddSamples(...)` 直接丢掉 ——
+    /// 用户看到的现象就是**按住语音键立刻说话、第一个字识别不出来**。
+    /// 现在把开声卡提前到按键时刻（音频还要 100~200 ms 才到），关键路径上就没有这段开销了。
+    /// </summary>
+    public void WarmUp()
+    {
+        _voiceDownAt = DateTime.UtcNow;
+        if (!_running) return;
+        var t0 = DateTime.UtcNow;
+        if (EnsureSink())
+        {
+            var ms = (DateTime.UtcNow - t0).TotalMilliseconds;
+            if (ms > 30) Log($"[LAT] 语音键预热：打开声卡用了 {ms:F0} ms");
+        }
+    }
+
     private bool EnsureSink()
     {
-        if (_out != null) return true;
-        var dev = FindCable();
-        if (dev == null)
+        lock (_sinkLock)
         {
-            Error = "未找到 CABLE Input 播放设备";
-            Log("[!] " + Error + " —— 音频来了也写不进去");
-            return false;
-        }
-        try
-        {
-            _buf = new BufferedWaveProvider(new WaveFormat(48000, 16, 1))
+            if (_out != null) return true;
+            var dev = FindCable();
+            if (dev == null)
             {
-                DiscardOnBufferOverflow = true,
-                BufferDuration = TimeSpan.FromSeconds(1),
-                ReadFully = true,
-            };
-            _out = new WasapiOut(dev, AudioClientShareMode.Shared, false, 50);
-            _out.Init(_buf);
-            _out.Play();
-            Device = dev.FriendlyName;
-            Error = null;
-            Log($"[+] 已打开输出设备：{Device}");
-            return true;
-        }
-        catch (Exception e)
-        {
-            Error = $"打开 CABLE Input 失败：{e.Message}";
-            Log("[!] " + Error);
-            CloseSink();
-            return false;
+                Error = "未找到 CABLE Input 播放设备";
+                Log("[!] " + Error + " —— 音频来了也写不进去");
+                return false;
+            }
+            try
+            {
+                _buf = new BufferedWaveProvider(new WaveFormat(48000, 16, 1))
+                {
+                    DiscardOnBufferOverflow = true,
+                    BufferDuration = TimeSpan.FromSeconds(1),
+                    ReadFully = true,
+                };
+                _out = new WasapiOut(dev, AudioClientShareMode.Shared, false, 50);
+                _out.Init(_buf);
+                _out.Play();
+                Device = dev.FriendlyName;
+                Error = null;
+                Log($"[+] 已打开输出设备：{Device}");
+                return true;
+            }
+            catch (Exception e)
+            {
+                Error = $"打开 CABLE Input 失败：{e.Message}";
+                Log("[!] " + Error);
+                _cable = null;                  // 设备对象可能已失效，清掉缓存下次重枚举
+                CloseSinkLocked();
+                return false;
+            }
         }
     }
 
     private void CloseSink()
+    {
+        lock (_sinkLock) CloseSinkLocked();
+    }
+
+    private void CloseSinkLocked()
     {
         if (_out == null) return;
         try { _out.Stop(); } catch { }
@@ -154,8 +195,16 @@ internal sealed class CableRouter : IDisposable
                         // ★ 收到音频本身就说明"在会话中"。
                         //   UDP 不可靠，CLEAR 有可能丢包；若只认 CLEAR，丢一次就会被下面的
                         //   超时判断当成"会话已结束"而把声卡关掉 —— 表现为说话中途突然静音。
+                        var first = !_inSession;
                         _inSession = true;
-                        if (EnsureSink()) _buf!.AddSamples(asm, 0, n);
+                        var ok = EnsureSink();
+                        if (first && _voiceDownAt != DateTime.MinValue)
+                        {
+                            var ms = (DateTime.UtcNow - _voiceDownAt).TotalMilliseconds;
+                            Log($"[LAT] 语音键按下 → 首包音频到达 {ms:F0} ms（声卡已就绪={ok}）");
+                            _voiceDownAt = DateTime.MinValue;
+                        }
+                        if (ok) _buf!.AddSamples(asm, 0, n);
                     }
                 }
             }
@@ -163,10 +212,11 @@ internal sealed class CableRouter : IDisposable
             catch (Exception e) { if (Error == null) Error = e.Message; }
 
             // 彻底静默一段时间后再关声卡。
-            // 以前是 0.6 秒 —— 蓝牙抖动或一句中间的换气就会让它反复关/开 WASAPI 设备，
-            // 既费时又容易打开失败。3 秒足够"用完就放"，也不会被正常停顿触发。
+            // 以前是 0.6 秒 → 后来 3 秒，都会被正常停顿触发，每次重开 WASAPI 又要 100~300 ms，
+            // 而这段开销正好吃掉"按住后立刻说的第一个字"。放宽到 30 秒：
+            // 相当于一直保持温热，语音交互几乎不会再碰到冷启动。
             if (!_inSession && _out != null && _lastEnd != DateTime.MinValue
-                && (DateTime.UtcNow - _lastEnd).TotalSeconds > 3.0)
+                && (DateTime.UtcNow - _lastEnd).TotalSeconds > 30.0)
             {
                 if (_buf == null || _buf.BufferedBytes == 0) CloseSink();
             }

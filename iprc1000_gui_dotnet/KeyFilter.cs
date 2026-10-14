@@ -167,6 +167,14 @@ internal sealed class KeyFilter : IDisposable
     public event Action<string, bool>? OnButton;
     /// <summary>任意按键回调（用于「当前操作」显示）</summary>
     public event Action<ushort>? OnAnyKey;
+
+    /// <summary>
+    /// **语音键按下**时的回调（在注入按键之前触发）—— 用来预热音频链路。
+    ///
+    /// 开 CABLE Input 要 100~300 ms，而音频在按键后 100~200 ms 就到了；
+    /// 不预热的话这段音频会被丢掉，用户看到的就是"按住后立刻说的第一个字识别不出来"。
+    /// </summary>
+    public static event Action? VoiceKeyDown;
     /// <summary>最近一次失败原因（Raw Input 注册 / 装钩子）</summary>
     public string? LastError { get; private set; }
 
@@ -453,8 +461,7 @@ internal sealed class KeyFilter : IDisposable
     /// 处理一次按键事件（**Raw Input 与 ETW 两条来源共用**）：通知订阅者 + 按映射注入快捷键。
     /// </summary>
     public void ApplyButton(string bid, bool pressed, string src = "rawinput")
-    {
-        try { OnButton?.Invoke(bid, pressed); } catch { }
+    {        try { OnButton?.Invoke(bid, pressed); } catch { }
 
         // ★★ 关键修复：注入必须用**当前配置组**（Keymaps），不能用 Keys.Load()。
         //
@@ -478,6 +485,10 @@ internal sealed class KeyFilter : IDisposable
 
         if (pressed)
         {
+            // ★ 语音键按下 → 先预热音频链路（把 CABLE Input 提前打开），再注入按键。
+            //   顺序很重要：开声卡要 100~300 ms，而音频随后就到 —— 要先开声卡再注入，
+            //   否则那段时间的音频会被丢掉，表现为"按住后立刻说的第一个字识别不出来"。
+            if (bid == "voice") { try { VoiceKeyDown?.Invoke(); } catch { } }
             InjectPress(vks);
             _injectedNow = vks;
         }
