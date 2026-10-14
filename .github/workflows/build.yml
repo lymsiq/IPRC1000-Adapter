@@ -69,6 +69,8 @@ jobs:
         shell: pwsh
         env:
           IPRC1000_ROOT: ${{ github.workspace }}
+          # 脚本里已强制 stdout 为 UTF-8，这里再加一道保险
+          PYTHONIOENCODING: utf-8
         run: python tools/package.py
 
       - name: 上传构建产物

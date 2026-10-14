@@ -15,8 +15,19 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 import zipfile
+
+# ★ Windows 上 Python 的 stdout 编码默认跟随控制台代码页：
+#   中文机器是 cp936（能打中文）、而英文/西欧 runner 是 cp1252（打中文直接
+#   UnicodeEncodeError 崩掉）。本脚本到处 print 中文，必须强制 UTF-8。
+#   （CI 上就是栽在这里：本地复现不出来，因为本机是 cp936。）
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 # 仓库根目录。默认是本地路径；CI 里用环境变量覆盖：
 #   IPRC1000_ROOT=${{ github.workspace }} python tools/package.py

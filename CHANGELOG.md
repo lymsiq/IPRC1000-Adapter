@@ -24,6 +24,12 @@
   警告数 **22 → 0**，发布包同时瘦身 **86 KB**（2,589,799 → 2,503,806 字节）。
 - CI 的「零警告」门禁在 1.0.1 上确实失败了 —— 不是门禁误报，是真实问题，
   已按上述方式根治（而不是放宽门禁）。
+- **`tools/package.py` 在英文/西欧语系机器上会崩**（`UnicodeEncodeError`）。
+  Windows 上 Python 的 stdout 编码跟随控制台代码页：中文机器是 cp936（能打中文），
+  而 CI runner 是 **cp1252**，脚本里满屏中文 `print` 直接 `UnicodeEncodeError` 退出。
+  已在脚本开头强制 `sys.stdout/stderr.reconfigure(encoding="utf-8")`，
+  CI 侧另加 `PYTHONIOENCODING=utf-8` 兜底。
+  > 这个 bug 本地**复现不出来**（本机是 cp936），只能靠 CI 抓 —— 也说明 CI 值得加。
 
 ---
 
