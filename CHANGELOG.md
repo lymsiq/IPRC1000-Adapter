@@ -6,6 +6,27 @@
 
 ---
 
+## [1.0.2] - 2026-10-14
+
+构建卫生修复。**功能与 1.0.1 完全一致**，只是把编译警告清零、发布包瘦身。
+
+> 1.0.1 发布后 15 分钟内撤回（下载数 0）：那个提交在 CI 上跑不过 ——
+> 见下方「修复」。CI 门禁本身是对的，它抓出了这个真实的构建问题。
+
+### 修复
+
+- **消除 22 条 `MSB3277` 编译警告**（WindowsBase 版本冲突）。
+  根因：`Microsoft.Web.WebView2` 包的 `lib_manual` 目标是 `net5.0-windows10.0.17763.0`，
+  与 `net8.0-windows` 匹配，于是**用不到的 WPF 版程序集也被引用进来**；
+  它引用 WindowsBase 5.0，而 WinForms 用 4.0，两者冲突。
+  本程序只用 WinForms 版，故在 `ResolveAssemblyReferences` **之前**把
+  `Microsoft.Web.WebView2.Wpf` 从引用列表移除。
+  警告数 **22 → 0**，发布包同时瘦身 **86 KB**（2,589,799 → 2,503,806 字节）。
+- CI 的「零警告」门禁在 1.0.1 上确实失败了 —— 不是门禁误报，是真实问题，
+  已按上述方式根治（而不是放宽门禁）。
+
+---
+
 ## [1.0.1] - 2026-10-14
 
 ### 新增
@@ -77,5 +98,6 @@
 
 ---
 
+[1.0.2]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.2
 [1.0.1]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.1
 [1.0.0]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.0

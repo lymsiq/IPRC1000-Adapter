@@ -27,14 +27,23 @@ jobs:
         working-directory: iprc1000_gui_dotnet
         run: dotnet build -c Release --nologo
 
-      - name: 检查编译警告数（应为 0）
+      - name: 检查编译警告数（应为 0，含 MSBuild 警告）
         working-directory: iprc1000_gui_dotnet
         shell: pwsh
         run: |
-          $out = dotnet build -c Release --nologo -v q 2>&1 | Out-String
-          $warn = ([regex]::Matches($out, 'warning [A-Z]+\d+')).Count
-          Write-Host "警告数: $warn"
-          if ($warn -gt 0) { Write-Error "出现编译警告，请修掉"; exit 1 }
+          dotnet build -c Release --nologo -v q 2>&1 | Tee-Object -Variable out | Out-Null
+          $text  = $out -join "`n"
+          $hits  = [regex]::Matches($text, 'warning [A-Z]+\d+') | ForEach-Object { $_.Value }
+          if ($hits.Count -gt 0) {
+            Write-Host "发现 $($hits.Count) 条警告："
+            $hits | Group-Object | Sort-Object Count -Descending |
+              ForEach-Object { Write-Host ("  {0,4}x {1}" -f $_.Count, $_.Name) }
+            Write-Host "`n完整警告行："
+            ($out | Select-String 'warning ') | Select-Object -First 10 | ForEach-Object { Write-Host "  $_" }
+            Write-Error "编译有警告，请修掉（门禁要求 0 警告）"
+            exit 1
+          }
+          Write-Host "0 条警告 ✓"
 
       - name: 发布（单文件）
         working-directory: iprc1000_gui_dotnet
@@ -56,7 +65,7 @@ jobs:
           if ($miss) { Write-Error "缺少产物: $($miss -join ', ')"; exit 1 }
           Write-Host "产物完整 ✓"
 
-      - name: 跑打包脚本（含 24 项内容校验）
+      - name: 跑打包脚本（含包内容 + 源码正反向校验）
         shell: pwsh
         env:
           IPRC1000_ROOT: ${{ github.workspace }}

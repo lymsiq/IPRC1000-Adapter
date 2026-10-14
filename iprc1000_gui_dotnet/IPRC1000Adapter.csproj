@@ -24,9 +24,9 @@
     <!-- ── 版本信息 ──
          改版本只需要改下面这一个 <Version>：程序内显示、exe 文件属性、
          发布包文件名（package.py 会读它）都从这里取，避免多处各写一份而漂移。 -->
-    <Version>1.0.1</Version>
-    <FileVersion>1.0.1.0</FileVersion>
-    <AssemblyVersion>1.0.1.0</AssemblyVersion>
+    <Version>1.0.2</Version>
+    <FileVersion>1.0.2.0</FileVersion>
+    <AssemblyVersion>1.0.2.0</AssemblyVersion>
     <Product>IPRC1000 遥控器适配器</Product>
     <Company>IPRC1000 Adapter contributors</Company>
     <Copyright>MIT License</Copyright>
@@ -51,6 +51,21 @@
     <!-- 写 CABLE Input 用的 WASAPI 封装（约 1 MB） -->
     <PackageReference Include="NAudio" Version="2.2.1" />
   </ItemGroup>
+
+  <!-- 去掉用不到的 WebView2 WPF 程序集。
+       本程序只用 WinForms 版（Microsoft.Web.WebView2.WinForms），
+       但包的 lib_manual 是 net5.0-windows10.0.17763.0，与 net8.0-windows 匹配，
+       于是 WPF 版也被引用进来 —— 它引用 WindowsBase 5.0，而 WinForms 用 4.0，
+       两者冲突会刷出 22 条 MSB3277。
+       必须在 ResolveAssemblyReferences **之前**从引用列表移除（RAR 是发警告的那一步）。 -->
+  <Target Name="DropUnusedWebView2Wpf" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)"
+                 Condition="'%(Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+      <ReferencePath Remove="@(ReferencePath)"
+                     Condition="'%(Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup>
     <Content Include="ui\**\*" CopyToOutputDirectory="PreserveNewest" />
