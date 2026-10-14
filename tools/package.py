@@ -139,7 +139,7 @@ def build():
 
     os.makedirs(os.path.join(target, "tools"), exist_ok=True)
     for f in ("check_stuck_key.py", "stuck_key_guard.py", "Run-Guard.cmd",
-              "一键部署.ps1", "run_tests.sh", "SetHidDriver/publish/SetHidDriver.exe"):
+              "一键部署.ps1", "SetHidDriver/publish/SetHidDriver.exe"):
         src = os.path.join(ROOT, "tools", f)
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(target, "tools", os.path.basename(f)))

@@ -128,18 +128,17 @@ back          0x09   Backspace         Backspace         Backspace         OK   
 > **必须重启程序**：映射在程序启动时读一次、常驻内存；改完配置（或换了新 exe）后
 > 要**右键托盘退出**再重新打开，否则跑的还是旧映射。
 
-### 发布前测试套件
+### 全量自检
 
-```bash
-bash tools/run_tests.sh
+```powershell
+& "IPRC1000 Adapter.exe" --selftest "$env:TEMP\selftest.json"; notepad "$env:TEMP\selftest.json"
 ```
 
-覆盖四层共 11 项：映射一致性（两组）、出厂默认冻结（两组）、注入通路（虚拟 HID + SendInput）、
-单键注入（菜单键 / 右 Alt / Ctrl / Alt）。
+报告含运行状态（按键来源 / 设备是否还是键盘 / 注入开关 / 虚拟键盘驱动 / 环境就绪项）与界面探针。
 
-> ⚠ `--selftest`（全量自检）**不在此脚本内** —— 它要开 WebView2 界面，
-> 必须在有交互桌面的会话里手动跑。无桌面环境下 WebView2 起不来，
-> 自检会如实把 `source`/`jsProbe` 记为错误（这是设计好的降级，不是崩溃）。
+> ⚠ 自检要开 WebView2 界面，**必须在有交互桌面的会话里跑**。无桌面环境下 WebView2 起不来，
+> 自检会如实把 `source` / `jsProbe` 记为错误（这是设计好的降级，不是崩溃），
+> 并在 `<报告>.trace.log` 留下执行轨迹。
 
 **日志**：`%APPDATA%\IPRC1000 Adapter\key-events.log`（按键全过程）· `stuck-guard.log`（卡键救援）
 
@@ -165,7 +164,6 @@ bash tools/run_tests.sh
 | `Run-Guard.cmd` | 守卫的提权启动器 |
 | `check_stuck_key.py` | 卡键根因检查（读系统键盘状态 + 设备是否在线）|
 | `package.py` | 开发用：一键打包 + 校验包内容（打包前自动重新编译，共 21 项校验）|
-| `run_tests.sh` | 开发用：发布前测试套件（映射一致性 / 出厂默认冻结 / 注入通路 / 单键注入）|
 | `IPRC1000 Adapter.exe --map-dump <文件> [组号]` | 打印「实际注入 / 界面显示 / 出厂默认」三列，核对是否一致（排障首选）|
 | `IPRC1000 Adapter.exe --inject-test <文件>` | 注入自检：虚拟 HID 与 SendInput 两条通路 |
 | `IPRC1000 Adapter.exe --inject-verify <十六进制VK>` | 单键注入验证：按住时读 `GetAsyncKeyState` 判断系统是否收到 |

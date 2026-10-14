@@ -36,6 +36,7 @@ tools/
   ├─ SetHidDriver/         设备驱动切换工具（键盘 ↔ 普通 HID）
   ├─ 一键部署.ps1           首次部署：驱动 + 设备绑定 + 声卡 + 启动
   ├─ stuck_key_guard.py    独立卡键守卫（App 没跑也能救）
+  ├─ Run-Guard.cmd         上面那个守卫的提权启动器
   ├─ check_stuck_key.py    卡键根因检查
   ├─ package.py            一键打包 + 包内容校验
   └─ docs/                 SOP 与遥控器说明书
