@@ -578,6 +578,16 @@ function renderEnv(s) {
   $('#btnAutoRun').textContent = `开机自启：${s.autoRun ? '已开启' : '已关闭'}`;
   $('#btnStartMin').textContent = `启动时进托盘：${s.startMinimized ? '已开启' : '已关闭'}`;
   $('#btnAutoDrv').textContent = `启动自动切驱动：${s.autoSwitchDriver ? '已开启' : '已关闭'}`;
+  $('#btnAutoMic').textContent = `默认麦克风被改走时自动改回：${s.autoKeepMic ? '已开启' : '已关闭'}`;
+  // 把"当前真正的默认录音设备"直接显示出来 —— Windows 会在蓝牙耳机接入/断开时
+  // 把它悄悄改走，那样输入法读到的是别的设备（表现为「录音启动失败」或通话无波形）
+  const dm = s.defaultMicName || '?';
+  const dmOk = dm.toLowerCase().includes('cable output');
+  $('#defaultMicNote').className = 'note' + (dmOk ? '' : ' warn');
+  $('#defaultMicNote').innerHTML = dmOk
+    ? `当前默认录音设备：<b>${dm}</b> ✓`
+    : `当前默认录音设备：<b>${dm}</b> —— <b>不是 CABLE Output</b>，输入法/通话软件会读错设备。` +
+      (s.autoKeepMic ? '程序会在一分钟内自动改回。' : '请点下方「一键完成全部」改回，或开启上面的自动改回。');
 
   const uh = s.winuhid || {};
   setDot('#d-uhid', uh.ready ? 'on' : 'warn');
@@ -723,6 +733,15 @@ function bindUI() {
   $('#btnAutoDrv').onclick = async () => {
     const r = JSON.parse(await B.setAutoSwitchDriver(String(!(state && state.autoSwitchDriver))));
     toast(r.message, 6000); await refresh();
+  };
+  $('#btnAutoMic').onclick = async () => {
+    const r = JSON.parse(await B.setAutoKeepMic(String(!(state && state.autoKeepMic))));
+    toast(r.message, 6000); await refresh();
+  };
+  $('#btnCheckMic').onclick = async () => {
+    const r = JSON.parse(await B.checkCaptureDevice());
+    toast(r.message, r.canOpen && r.isCable ? 6000 : 14000);
+    await refresh();
   };
   // ── 屏幕键盘弹窗：保存 / 不执行 / 取消 ──
   const curKey = () => ((state && state.keys && state.keys.items) || []).find(x => x.id === selectedKey);
@@ -870,6 +889,8 @@ function boot() {
         device: { ok: true }, bridge: { ok: true } },
       stuckGuard: { watchdogMs: 800, unlockCount: 0, lastUnlock: null },
       autoStart: true, autoRun: true, startMinimized: true, autoSwitchDriver: true,
+      autoKeepMic: true,
+      defaultMicName: 'CABLE Output (VB-Audio Virtual Cable)',
       driverNote: '设备已是非键盘模式',
       groups: { active: 0, items: [
         { name: '默认配置组 1', configured: 22 },

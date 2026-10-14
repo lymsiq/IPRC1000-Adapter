@@ -216,25 +216,72 @@ internal static class Env
         return false;
     }
 
-    private static bool DefaultMicIsCable()
+    /// <summary>
+    /// 当前**默认录音设备**的名字。用 CoreAudio 官方 API 取，不是猜注册表。
+    /// 取不到时返回 `（取不到：…）`，调用方按"不是 CABLE"处理。
+    /// </summary>
+    public static string DefaultCaptureName()
     {
-        var path = @"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture";
-        foreach (var ep in SubKeys(Registry.LocalMachine, path))
+        try
         {
-            using var k = Registry.LocalMachine.OpenSubKey($@"{path}\{ep}", false);
-            if (k?.GetValue("DeviceState") is not int st || st != 1) continue;   // ACTIVE
-            using var props = Registry.LocalMachine.OpenSubKey($@"{path}\{ep}\Properties", false);
-            if (props == null) continue;
-            var name = "";
-            foreach (var pkey in new[]
-                     {
-                         "{a45c254e-df1c-4efd-8020-67d146a850e0},2",
-                         "{b3f8fa53-0004-438e-9003-51a46e139bfc},6",
-                     })
-                if (props.GetValue(pkey) is string s) name += " " + s;
-            if (name.ToLowerInvariant().Contains("cable output")) return true;
+            using var en = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+            return en.GetDefaultAudioEndpoint(
+                NAudio.CoreAudioApi.DataFlow.Capture,
+                NAudio.CoreAudioApi.Role.Communications).FriendlyName;
         }
-        return false;
+        catch (Exception e) { return $"（取不到：{e.Message}）"; }
+    }
+
+    /// <summary>
+    /// 默认录音设备**是不是** CABLE Output。
+    ///
+    /// ⚠ 与上面的 `DefaultMicIsCable()` 是两回事：那个只查"CABLE Output 是否存在且 ACTIVE"，
+    /// 名字里带着 `cable output` 就返回 true —— **设备在 ≠ 它是默认设备**。
+    /// 界面写着「默认录音设备」其实一直用的是存在性判断，所以默认被系统改走时
+    /// 界面照样显示 ✔（这正是"有时按语音键没声音/输入法报录音启动失败"的可疑原因之一）。
+    /// 这里用官方 API 取真正的默认设备来比对。
+    /// </summary>
+    public static bool DefaultCaptureIsCable()
+        => DefaultCaptureName().ToLowerInvariant().Contains("cable output");
+
+    /// <summary>
+    /// 探测「输入法/通话软件要打开的那个麦克风」此刻能不能打开。
+    ///
+    /// 专治「录音启动失败」这类间歇性问题：报告默认设备是谁、是不是 CABLE Output、
+    /// 现在能不能用**共享模式**打开，打不开就把 HRESULT 原样带回来。
+    ///
+    /// 共享模式打开失败基本只有几种可能：设备被别的程序**独占**占着（AUDCLNT_E_DEVICE_IN_USE）、
+    /// 设备已失效（AUDCLNT_E_DEVICE_INVALIDATED）或设备不在。这些正是输入法报错的真实原因。
+    /// </summary>
+    public static object ProbeCaptureDevice()
+    {
+        var name = DefaultCaptureName();
+        var isCable = name.ToLowerInvariant().Contains("cable output");
+        var canOpen = false;
+        string? err = null;
+        try
+        {
+            using var en = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+            var dev = en.GetDefaultAudioEndpoint(
+                NAudio.CoreAudioApi.DataFlow.Capture, NAudio.CoreAudioApi.Role.Communications);
+            var cap = new NAudio.CoreAudioApi.WasapiCapture(dev, true, 50);
+            cap.StartRecording();
+            Thread.Sleep(120);
+            cap.StopRecording();
+            cap.Dispose();
+            canOpen = true;
+        }
+        catch (Exception e)
+        {
+            err = $"{e.GetType().Name}(HRESULT=0x{(e.HResult & 0xFFFFFFFF):X8}): {e.Message}";
+        }
+        return new
+        {
+            defaultMicName = name,
+            isCable,
+            canOpen,
+            error = err,
+        };
     }
 
     /// <summary>
@@ -275,12 +322,15 @@ internal static class Env
     {
         var cin = MmDevicesHas("Render", "cable input");
         var cout = MmDevicesHas("Capture", "cable output");
+        // 真正的默认设备名（CoreAudio API）—— "设备在不在" 和 "是不是默认" 必须分开报告
+        var dmName = DefaultCaptureName();
         return new
         {
             input = cin,
             output = cout,
             ready = cin && cout,
-            defaultMic = DefaultMicIsCable(),
+            defaultMic = dmName.ToLowerInvariant().Contains("cable output"),
+            defaultMicName = dmName,
             version = (cin || cout) ? "4.5（内置）" : "—",
         };
     }

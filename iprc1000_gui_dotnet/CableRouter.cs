@@ -34,7 +34,8 @@ internal sealed class CableRouter : IDisposable
     // 整条链路里"最后一公里"就靠它：桥的统计（bridge.log / bridge-stats.json）能说明
     // "帧有没有来"，这里说明"来了有没有真的写进 CABLE"。缺了它，两端都正常但没声音时无从下嘴。
     private static readonly object _logLock = new();
-    private static void Log(string msg)
+    /// <summary>音频链路通用诊断日志（写 router.log）。同一份日志里既有声卡开关也有默认设备变化，便于对照。</summary>
+    internal static void Log(string msg)
     {
         try
         {

@@ -5,6 +5,36 @@
 
 ---
 
+## [1.0.4] - 2026-10-14
+
+针对「录音启动失败」补上诊断与一个**检测逻辑的实错**。
+
+### 修复
+
+- **「默认录音设备」的检测一直是错的**：旧实现遍历注册表，只要存在一个名为
+  `CABLE Output` 且状态为 ACTIVE 的设备就返回 true —— **那只证明"设备在"，不证明"它是默认"**。
+  所以界面上的「默认录音设备 ✔」是假的：设备被系统改走后照样显示 ✔。
+  现在改用 CoreAudio 官方 API `GetDefaultAudioEndpoint` 取真正的默认设备来比对，
+  并把**默认设备的真实名字**直接显示在界面上。
+- 该检测错误意味着：Windows 把默认录音设备改走时（蓝牙耳机/耳麦接入或断开、
+  设备热插拔都会触发），本程序**既发现不了、也不会改回来** —— 而输入法/通话软件读的正是
+  这个默认设备，于是打开的是别的设备（可能还没就绪）→ 弹「录音启动失败」，或通话没波形。
+
+### 新增
+
+- **默认录音设备看门狗**：发现默认设备不是 CABLE Output 时，把"被改成了哪个设备"记进
+  `router.log`，并按 1 分钟一次的节奏自动改回。可在界面开关（默认开）。
+- **「检查录音设备」按钮**：当场探测输入法要打开的那个麦克风能不能开 ——
+  报告默认设备是谁、是不是 CABLE Output、此刻能否用共享模式打开，
+  失败时带出 HRESULT（`AUDCLNT_E_DEVICE_IN_USE` = 被别的程序独占占用）。
+  同时写进 `router.log`。这是定位间歇性「录音启动失败」最快的一步。
+
+> 排查记录：VB-CABLE 已装 **3.3.1.7（2024-10-07）**，与本项目内置的官方 Pack45
+> 内 win10 INF 版本号完全一致，且 Pack45 仍是官方最新包 —— **不需要更新**。
+> 麦克风隐私权限无任何拒绝项。
+
+---
+
 ## [1.0.3] - 2026-10-14
 
 修「按语音键有时没声音、长录音到 20~30 秒后没声音」。
@@ -105,6 +135,7 @@ WinUHid（MIT）、VB-CABLE（VB-Audio Donationware）、语音桥 `etw_consumer
 
 ---
 
+[1.0.4]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.4
 [1.0.3]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.3
 [1.0.2]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.2
 [1.0.0]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.0

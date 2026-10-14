@@ -309,6 +309,8 @@ internal sealed class MainForm : Form
             "setAutoRun" => _backend.SetAutoRun(Arg(0)),
             "setStartMinimized" => _backend.SetStartMinimized(Arg(0)),
             "setAutoSwitchDriver" => _backend.SetAutoSwitchDriver(Arg(0)),
+            "setAutoKeepMic" => _backend.SetAutoKeepMic(Arg(0)),
+            "checkCaptureDevice" => _backend.CheckCaptureDevice(),
             "installWinuhid" => _backend.InstallWinuhid(),
             "exportWinuhid" => _backend.ExportWinuhid(),
             _ => Env.Json(new { ok = false, message = $"未知方法 {method}" }),

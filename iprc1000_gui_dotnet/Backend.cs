@@ -241,12 +241,52 @@ internal sealed class Backend : IDisposable
         var c = (dynamic)_cableCache;
         _cableReady = c.ready;
         _micOk = c.defaultMic;
+        _micDefaultName = c.defaultMicName;
+        WatchDefaultMic();
         // ★ 不要在这里 EnsureReady()：它会创建虚拟 HID 设备，每轮轮询都做一次代价很大。
         //   只在驱动版本足够（>=1）时认为就绪，真正的设备在第一次注入时惰性创建。
         _uhidReady = WinUhidInjector.ProbeDriver();
         _diagCache = Env.RemoteDiag();
         _probeAt = DateTime.UtcNow;
     }
+
+    // ───────── 默认录音设备看门狗 ─────────
+    //
+    // 为什么需要：输入法/通话软件读的是**系统默认录音设备**。VB-CABLE 的 CABLE Output
+    // 本来由部署脚本设成默认，但 Windows 会在**蓝牙耳机/耳麦连接或断开、设备热插拔**时
+    // 自作主张把默认录音设备切走。一旦切走：
+    //   · 输入法打开的是那个刚出现、还没就绪的设备 → 弹「录音启动失败」
+    //   · 就算打开成功，读到的也不是我们的音频 → 通话波形没信号
+    // 而本程序此前**既检测不到**（旧检测只判断"CABLE Output 是否存在"，不是"是否为默认"）
+    // **也不会自动改回来**（SetDefaultMic 只在手动点「一键完成全部」时跑）。
+    // 现在：发现漂移就记日志（把被切到哪个设备也记下来），并按 1 分钟一次的节奏改回来。
+
+    private string? _micDefaultName;
+    private DateTime _lastMicFix = DateTime.MinValue;
+
+    /// <summary>漂移检测 + 自动恢复（每轮探针跑一次）</summary>
+    private void WatchDefaultMic()
+    {
+        var now = _micDefaultName ?? "?";
+        if (now == _lastMicSeen) return;
+        _lastMicSeen = now;
+        if (now.ToLowerInvariant().Contains("cable output"))
+        {
+            CableRouter.Log($"[MIC] 默认录音设备 = {now}（正确）");
+            return;
+        }
+        CableRouter.Log($"[MIC] ⚠ 默认录音设备被改成了「{now}」，不是 CABLE Output —— " +
+                        "输入法/通话软件会读错设备（表现为「录音启动失败」或通话无波形）");
+        // 自动改回（每 60 秒最多一次，避免和系统反复拉锯）
+        if (!Settings.AutoKeepDefaultMic) return;
+        if (!Env.IsAdmin()) { CableRouter.Log("[MIC] 需要管理员权限才能改回，已跳过"); return; }
+        if ((DateTime.UtcNow - _lastMicFix).TotalSeconds < 60) return;
+        _lastMicFix = DateTime.UtcNow;
+        var (ok, msg) = Env.SetDefaultMic();
+        CableRouter.Log(ok ? "[MIC] 已自动改回 CABLE Output" : $"[MIC] 自动改回失败：{msg}");
+    }
+
+    private string? _lastMicSeen;
 
     private bool BridgeRunning => _bridge != null && !_bridge.HasExited;
 
@@ -344,6 +384,9 @@ internal sealed class Backend : IDisposable
             ["startMinimized"] = Settings.StartMinimized,
             ["autoStart"] = AutoStartBridge,
             ["autoSwitchDriver"] = Settings.AutoSwitchDriver,
+            ["autoKeepMic"] = Settings.AutoKeepDefaultMic,
+            // 当前真正的默认录音设备（用来一眼看出有没有被系统改走）
+            ["defaultMicName"] = _micDefaultName ?? "?",
             ["groups"] = new JsonObject
             {
                 ["active"] = Keymaps.ActiveIndex,
@@ -876,6 +919,43 @@ internal sealed class Backend : IDisposable
         return Env.Json(new { ok = true, autoSwitchDriver = want,
             message = want ? "已开启：每次启动会把遥控器驱动自动切成非键盘（零 m、无卡键）。"
                            : "已关闭：不再自动改驱动。" });
+    }
+
+    public string SetAutoKeepMic(string? on)
+    {
+        var want = on is "true" or "1" or "True";
+        Settings.AutoKeepDefaultMic = want;
+        return Env.Json(new { ok = true, autoKeepMic = want,
+            message = want ? "已开启：默认录音设备被 Windows 改走时（蓝牙耳机接入/断开等）会自动改回 CABLE Output。"
+                           : "已关闭：不再自动改回默认录音设备（输入法可能读到别的设备）。" });
+    }
+
+    /// <summary>
+    /// 「检查录音设备」：输入法/通话软件要打开的那个麦克风，此刻到底能不能开。
+    /// 专治间歇性的「录音启动失败」—— 失败时它会指出是"默认设备被改走"还是"设备被占用"。
+    /// </summary>
+    public string CheckCaptureDevice()
+    {
+        var o = (dynamic)Env.ProbeCaptureDevice();
+        var ok = (bool)o.canOpen;
+        var isCable = (bool)o.isCable;
+        var name = (string)o.defaultMicName;
+        var err = (string?)o.error;
+
+        CableRouter.Log($"[MIC-CHECK] 默认录音设备={name} 是CABLE={isCable} 可打开={ok}" +
+                        (err is null ? "" : $" 错误={err}"));
+
+        string msg;
+        if (ok && isCable)
+            msg = $"正常。默认录音设备是「{name}」，现在可以正常打开。";
+        else if (!isCable)
+            msg = $"默认录音设备是「{name}」，**不是 CABLE Output** —— 输入法/通话软件会读错设备，" +
+                  "这就是「录音启动失败」或通话没波形的原因。点「一键完成全部」可改回。";
+        else
+            msg = $"CABLE Output 是默认设备，但**现在打不开**：{err}\n" +
+                  "常见原因是别的程序正以独占模式占用它（同时开着通话软件和输入法时最容易出现）。" +
+                  "关掉其中一个再试。";
+        return Env.Json(new { ok, isCable, canOpen = ok, name, error = err, message = msg });
     }
 
     /// <summary>手动「释放所有注入键」——用于键盘手感不对时一键复位</summary>

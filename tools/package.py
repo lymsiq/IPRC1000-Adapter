@@ -114,6 +114,10 @@ SRC_REQUIRED = [
     ("声卡侧有日志", "iprc1000_gui_dotnet/CableRouter.cs", "router.log"),
     ("桥侧写运行统计", "tools/etw_consumer/src/main.rs", "bridge-stats.json"),
     ("桥有单实例保护", "tools/etw_consumer/src/main.rs", "acquire_single_instance"),
+    # 默认录音设备必须是"用 CoreAudio API 查真正的默认"，不是"查设备在不在"
+    ("默认设备用官方 API 查", "iprc1000_gui_dotnet/Env.cs", "GetDefaultAudioEndpoint"),
+    ("默认设备漂移会记日志", "iprc1000_gui_dotnet/Backend.cs", "[MIC]"),
+    ("有录音设备自检入口", "iprc1000_gui_dotnet/Env.cs", "ProbeCaptureDevice"),
 ]
 
 # 包内「不应出现」的路径：(标签, 子串)。用来防体积膨胀与误打包。

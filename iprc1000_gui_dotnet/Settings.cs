@@ -48,6 +48,18 @@ internal static class Settings
         set { _data.AutoSwitchDriver = value; Save(); }
     }
 
+    /// <summary>
+    /// 默认录音设备被系统改走时，是否自动改回 CABLE Output（默认开）。
+    ///
+    /// Windows 会在蓝牙耳机/耳麦连接或断开、设备热插拔时自动切换默认录音设备。
+    /// 一旦切走，输入法拿到的是别的设备 —— 表现为「录音启动失败」或通话无波形。
+    /// </summary>
+    public static bool AutoKeepDefaultMic
+    {
+        get => _data.AutoKeepDefaultMic;
+        set { _data.AutoKeepDefaultMic = value; Save(); }
+    }
+
     public static string KeySource
     {
         get => string.IsNullOrEmpty(_data.KeySource) ? "auto" : _data.KeySource;
@@ -71,6 +83,7 @@ internal static class Settings
         public bool StartMinimized { get; set; }
         public bool AutoStartBridge { get; set; } = true;
         public bool AutoSwitchDriver { get; set; } = true;
+        public bool AutoKeepDefaultMic { get; set; } = true;
         public string KeySource { get; set; } = "auto";
     }
 }
