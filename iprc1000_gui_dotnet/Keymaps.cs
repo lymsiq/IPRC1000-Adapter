@@ -35,7 +35,7 @@ internal static class Keymaps
     }
 
     /// <summary>存档版本：<2 表示还是旧的「Codex 编程」组，需要升级成 WorkBuddy 映射</summary>
-    private const int Ver_ = 7;
+    private const int Ver_ = 8;
 
     private sealed class Store
     {
@@ -120,6 +120,20 @@ internal static class Keymaps
                             s.Groups[1].Map["right"] = new[] { 0x27 };
                         }
                         s.Ver = 7;
+                        Save(s);
+                    }
+                    if (s.Ver < 8)
+                    {
+                        // 用户反馈：info 的映射（Alt+Enter / Ctrl+Enter / 斜杠）都无感 → 两组的 info 一律清空。
+                        // 同时修复「menu 与 info 撞成同一个组合键」的历史遗留：两者相同时把 menu 还原成 Win+X。
+                        foreach (var g in s.Groups)
+                        {
+                            g.Map["info"] = Array.Empty<int>();
+                            if (g.Map.TryGetValue("menu", out var mv) && mv.Length > 0 &&
+                                mv.SequenceEqual(new[] { 0x11, 0x0D }))
+                                g.Map["menu"] = new[] { 0x5B, 0x58 };
+                        }
+                        s.Ver = 8;
                         Save(s);
                     }
                     return s;
@@ -291,8 +305,8 @@ internal static class Defaults
         ["back"] = new[] { 0x08 },                     // Backspace（浏览器/资源管理器=后退）
         ["menu"] = new[] { 0x5B, 0x58 },               // Win+X  快捷菜单（开始按钮右键菜单）
         ["exit"] = new[] { 0x1B },                     // Esc
-        ["info"] = new[] { 0x20 },                     // Space
-        ["ok"] = new[] { 0x0D },                       // Return
+        ["info"] = Array.Empty<int>(),                 // ★ 默认不映射（原 Alt+Enter / Ctrl+Enter 在多数场景无感，交给用户自定）
+        ["ok"] = new[] { 0x0D },                       // Enter
         ["up"] = new[] { 0x26 },
         ["down"] = new[] { 0x28 },
         ["left"] = new[] { 0x25 },
@@ -325,7 +339,7 @@ internal static class Defaults
         ["back"]         = new[] { 0x11, 0x50 },         // Ctrl+P        打开文件搜索
         ["menu"]         = new[] { 0x11, 0x4F },         // Ctrl+O        全局搜索
         ["exit"]         = new[] { 0x1B },               // Esc           停止生成
-        ["info"]         = new[] { 0xBF },               // /            唤起斜杠命令（ok 已是 Enter，info 不重复）
+        ["info"]         = Array.Empty<int>(),           // ★ 默认不映射（/ 与 Ctrl+Enter 在 WorkBuddy 里都无感）
         ["ok"]           = new[] { 0x0D },               // Enter         发送消息
         ["up"]           = new[] { 0x26 },               // ↑             光标上移
         ["down"]         = new[] { 0x28 },               // ↓             光标下移

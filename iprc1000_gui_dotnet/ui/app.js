@@ -8,7 +8,7 @@ const KB_ROWS = [
   [['Tab',0x09,'w15'],['Q',0x51],['W',0x57],['E',0x45],['R',0x52],['T',0x54],['Y',0x59],
    ['U',0x55],['I',0x49],['O',0x4F],['P',0x50],['[',0xDB],[']',0xDD],['\\',0xDC,'w15']],
   [['Caps',0x14,'w2'],['A',0x41],['S',0x53],['D',0x44],['F',0x46],['G',0x47],['H',0x48],
-   ['J',0x4A],['K',0x4B],['L',0x4C],[';',0xBA],["'",0xDE],['Enter',0x0D,'w25']],
+   ['J',0x4A],['K',0x4B],['L',0x4C],[';',0xBA],["'",0xDE],['enter',0x0D,'w25']],
   [['Shift',0x10,'w25'],['Z',0x5A],['X',0x58],['C',0x43],['V',0x56],['B',0x42],['N',0x4E],
    ['M',0x4D],[',',0xBC],['.',0xBE],['/',0xBF],['Shift',0x10,'w25']],
   // 底部行总宽与上面各行对齐（1.5宽Ctrl + 6宽Space + 1.5宽Ctrl 等 ≈ 15 个单位）
@@ -203,7 +203,7 @@ function renderKeyRow(list, it) {
   }
   row.innerHTML = `
     <div class="keythumb" style="${thumbStyle}"></div>
-    <div>
+    <div class="keytext">
       <div class="keyname">${it.name}</div>
       <div class="keyhid">HID ${it.hid}</div>
     </div>
@@ -275,6 +275,12 @@ function renderGroups(s) {
 }
 
 // ── 屏幕键盘 ──
+function kbPreviewText() {
+  const parts = [...kbMods].map(v => VK_SYM[v] || String(v));
+  if (kbKey !== null) parts.push(kbKeyLabel || ('0x' + kbKey.toString(16).toUpperCase()));
+  return parts.length ? parts.join(' + ') : '';
+}
+
 function paintKb() {
   $('#kbMods').querySelectorAll('.m').forEach((e) => {
     e.classList.toggle('on', kbMods.has(Number(e.dataset.vk)));
@@ -282,9 +288,13 @@ function paintKb() {
   document.querySelectorAll('#kbMain .kb-key, #kbExtra .kb-key').forEach((e) => {
     e.classList.toggle('on', kbKey !== null && Number(e.dataset.vk) === kbKey && !e.dataset.mod);
   });
-  const parts = [...kbMods].map(v => VK_SYM[v] || String(v));
-  if (kbKey !== null) parts.push(kbKeyLabel || ('0x' + kbKey.toString(16).toUpperCase()));
-  $('#comboCur').textContent = parts.length ? parts.join(' + ') : '不执行（该键不注入）';
+  const txt = kbPreviewText();
+  // ★ 两个位置都写：底部「当前：<b>」+ 弹窗头部副标题
+  //   （旧版 index.html 里 id="comboCur" 出现过重复，导致只写到其中一个 → 另一个永远是空的）
+  const cur = $('#comboCur');
+  if (cur) cur.textContent = txt || '不执行（该键不注入）';
+  const sub = $('#comboSub');
+  if (sub) sub.textContent = '当前：' + (txt || '未设置');
 }
 
 function buildKeyboard() {
@@ -385,8 +395,6 @@ function selectKey(id) {
   paintKb();
   $('#comboMask').classList.remove('hide');
 }
-
-function closeCombo() { $('#comboMask').classList.add('hide'); }
 
 function closeCombo() { $('#comboMask').classList.add('hide'); }
 
@@ -704,6 +712,14 @@ function bindUI() {
   };
   $('#kbNone').onclick = () => { kbMods = new Set(); kbKey = null; kbKeyLabel = ''; paintKb(); };
   $('#kbCancel').onclick = closeCombo;
+  // ★ 关闭路径（旧版漏了这三个 → 用户报「点击关闭无法关闭」）：
+  //   ① 右上角 ×   ② 点遮罩空白处   ③ Esc
+  $('#comboClose').onclick = closeCombo;
+  const mask = $('#comboMask');
+  if (mask) mask.onclick = (e) => { if (e.target === mask) closeCombo(); };
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('#comboMask').classList.contains('hide')) closeCombo();
+  });
 
   // ── 配置组：新建 / 删除 / 导出 / 导入 ──
   $('#gNew').onclick = async () => {
@@ -747,10 +763,6 @@ function bindUI() {
     const r = JSON.parse(await B.relaunchAdmin());
     toast(r.message, 4200);
   };
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') selectedKey = null;
-  });
 }
 
 /* ───────── 桥接层：同时支持 WebView2（.NET 版）与 QWebChannel（PySide6 版） ───────── */

@@ -33,6 +33,10 @@ CHECKS = [
     ("配置组 Tab gTabs",   "ui/index.html", "gTabs"),
     ("遥控器热区 keyhit",  "ui/style.css", ".keyhit"),
     ("缩略图 sprite",      "ui/style.css", ".keythumb"),
+    # ★ 回归守卫：这两个曾经是 bug —— 弹窗关不掉（comboClose 未绑定）、按键名被挤没（keytext 缺 flex）
+    ("弹窗可关闭 comboClose", "ui/app.js",  "comboClose"),
+    ("按键名列 keytext",    "ui/style.css", ".keytext"),
+    ("无重复 id comboCur", "ui/index.html", "comboSub"),
     ("一键部署脚本",       "tools/一键部署.ps1", "一键部署"),
     ("SOP 文档",          "文档/SOP-部署与使用.md", "SOP"),
     ("遥控器说明",         "文档/遥控器按键说明.md", "语音键"),

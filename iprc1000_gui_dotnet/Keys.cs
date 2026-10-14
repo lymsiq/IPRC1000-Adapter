@@ -18,13 +18,13 @@ public record Btn(string Id, string Label, string Name, string Hid, int[] Defaul
         // ★ 推荐默认（依据 Windows Media Center 官方遥控器键位表 + 现代 Windows 习惯）：
         //   方向键→方向键 · 确认→Enter · 清除/退出→Esc · 返回→Alt+←（不比退格破坏文本）
         //   频道±→PageUp/PageDown（官方就是 PageUp/Down）· 音量/静音→系统媒体音量键
-        //   播放/快进/快退→媒体键 · 收藏→Ctrl+D · 信息→Alt+Enter · 上一频道→Alt+Tab
+        //   播放/快进/快退→媒体键 · 收藏→Ctrl+D · 信息→（默认留空）· 上一频道→Alt+Tab
         //   菜单→菜单键 · 账户→Win · 方块键→F11(全屏) · 语音→右 Alt（豆包长按模式）
         new("power", "pwr", "电源", "0x17", Array.Empty<int>()),                 // 故意留空，避免误触关机
         new("back", "back", "返回", "0x09", new[] { 0x12, 0x25 }),                 // Alt+←
         new("menu", "menu", "菜单", "0x11", new[] { 0x5D }),                       // 菜单键（右键菜单）
         new("exit", "exit", "退出 / Home", "0x07", new[] { 0x1B }),                // Esc
-        new("info", "info", "信息", "0x0b", new[] { 0x12, 0x0D }),                 // Alt+Enter（属性）
+        new("info", "info", "信息", "0x0b", Array.Empty<int>()),                 // 默认不映射（见 Defaults.Plain）
         new("ok", "ok", "确认", "0x28", new[] { 0x0D }),                         // Enter
         new("up", "▲", "上", "0x52", new[] { 0x26 }),
         new("down", "▼", "下", "0x51", new[] { 0x28 }),
@@ -48,7 +48,7 @@ public record Btn(string Id, string Label, string Name, string Hid, int[] Defaul
     /// <summary>虚拟键码 → 显示名。也用于「当前操作」判断遥控器按键。</summary>
     public static readonly Dictionary<int, string> VkName = new()
     {
-        [0x0D] = "Return", [0x1B] = "Esc", [0x20] = "空格", [0x09] = "Tab", [0x08] = "Backspace",
+        [0x0D] = "enter", [0x1B] = "Esc", [0x20] = "空格", [0x09] = "Tab", [0x08] = "Backspace",
         [0x25] = "←", [0x26] = "↑", [0x27] = "→", [0x28] = "↓", [0x21] = "PgUp", [0x22] = "PgDn",
         [0x11] = "Ctrl", [0x10] = "Shift", [0x12] = "Alt", [0x5B] = "Win",
         [0xA0] = "LShift", [0xA1] = "RShift", [0xA2] = "LCtrl", [0xA3] = "RCtrl",
