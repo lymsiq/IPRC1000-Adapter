@@ -147,10 +147,27 @@ SRC_FORBIDDEN = [
     # 收到 CLEAR 就 ClearBuffer() 会丢掉已缓冲的真实音频 → 每次会话切换都断一下。
     # （会话是"松手 END → 再按 CLEAR"反复建立的，环里往往还压着上一次的真实音频）
     ("CLEAR 不再清缓冲", "iprc1000_gui_dotnet/CableRouter.cs", "ClearBuffer()"),
+    # ★★ 注入链路：单槽 `_injectedNow` 是卡键的根因，绝不能复活。
+    #    旧的单槽实现会让"按住语音键(→右Alt) + 再按确认 + 先松语音"把右 Alt 永久卡住，
+    #    而且会把它在 _heldButtons 里的登记一起删掉 —— 看门狗也救不回来。
+    ("单槽 _injectedNow 不得复活", "iprc1000_gui_dotnet/KeyFilter.cs", "_injectedNow"),
 ]
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★★ 注入链路的三道保险（2026-10-15 线上排查后加，缺任一道都可能再卡键）
+    ("注入按整份报告下发", "iprc1000_gui_dotnet/KeyFilter.cs", "_injectedSet"),
+    ("孤儿键回收器存在", "iprc1000_gui_dotnet/KeyFilter.cs", "ReapOrphanKeys"),
+    ("孤儿键回收以系统状态为准", "iprc1000_gui_dotnet/KeyFilter.cs", "GetAsyncKeyState"),
+    ("启动兜底清残留修饰键", "iprc1000_gui_dotnet/KeyFilter.cs", "ClearStaleModifiersOnStart"),
+    ("多键同时按住回归自检", "iprc1000_gui_dotnet/KeyFilter.cs", "InjectMultiKeyTest"),
+    ("多键自检有 CLI 入口", "iprc1000_gui_dotnet/Program.cs", "--inject-multikey-test"),
+    ("虚拟 HID 创建失败会自愈重试", "iprc1000_gui_dotnet/WinUhidInjector.cs", "ScheduleBackgroundRetry"),
+    ("单实例保护存在", "iprc1000_gui_dotnet/Program.cs", "MainForm.SingleInstanceMutex"),
+    ("单实例有唤起窗口的监听", "iprc1000_gui_dotnet/MainForm.cs", "StartShowWindowListener"),
+    # 诊断盲区：这三个"静默降级"以前完全查不出来
+    ("注入开关变化会留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "InjectEnabled"),
+    ("虚拟 HID 失败会留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "虚拟 HID 下发失败"),
     ("注入走 Keymaps.Get()", "iprc1000_gui_dotnet/KeyFilter.cs", "Keymaps.Get(bid)"),
     ("映射自检入口 --map-dump", "iprc1000_gui_dotnet/Program.cs", "--map-dump"),
     ("缩进 JSON 走 Env.JsonPretty", "iprc1000_gui_dotnet/Env.cs", "JsonOptsPretty"),

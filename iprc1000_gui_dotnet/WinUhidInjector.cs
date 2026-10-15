@@ -125,7 +125,12 @@ internal static class WinUhidInjector
             if (_dev != IntPtr.Zero) return true;
 
             var dll = DllPath();
-            if (dll == null) { LastError = "未找到 WinUHid.dll"; return false; }
+            if (dll == null)
+            {
+                LastError = "未找到 WinUHid.dll";
+                EtwKeySource.AppendLog("INJ  ★ 虚拟 HID 不可用：未找到 WinUHid.dll（回退 SendInput，输入法可能过滤）");
+                return false;
+            }
 
             if (_module == IntPtr.Zero)
             {
@@ -155,6 +160,7 @@ internal static class WinUhidInjector
             if (DriverVersion < 1)
             {
                 LastError = $"WinUHid 驱动未安装或未就绪（interface version={DriverVersion}），请先装驱动";
+                EtwKeySource.AppendLog("INJ  ★ " + LastError + "（回退 SendInput，输入法可能过滤）");
                 return false;
             }
 
@@ -164,11 +170,70 @@ internal static class WinUhidInjector
             _destroy = Marshal.GetDelegateForFunctionPointer<FnDestroyDevice>(pDestroy);
 
             _dev = CreateKeyboard(create, start);
-            if (_dev == IntPtr.Zero) return false;
+            if (_dev == IntPtr.Zero)
+            {
+                // ★ 设备创建失败必须留痕：此时会静默回退 SendInput，而 SendInput 会被
+                //   输入法过滤 —— 现象是"遥控器按了没反应"，日志上却什么都看不到。
+                //   （限流 5 秒一条：失败时每次注入都会重试，不限流会把日志刷爆）
+                if ((DateTime.UtcNow - _lastCreateFailLog).TotalSeconds >= 5)
+                {
+                    _lastCreateFailLog = DateTime.UtcNow;
+                    EtwKeySource.AppendLog(
+                        $"INJ  ★ 虚拟 HID 设备创建失败：{LastError ?? "未知"}（回退 SendInput，输入法可能过滤）");
+                }
+                ScheduleBackgroundRetry();
+                return false;
+            }
 
             LastError = null;
+            // ★ 设备生命周期留痕：卡键排查时要能回答"这台虚拟键盘是什么时候建的/销毁的"
+            EtwKeySource.AppendLog($"INJ  虚拟 HID 设备已创建（驱动 interface version={DriverVersion}）");
             return true;
         }
+    }
+
+    private static DateTime _lastCreateFailLog = DateTime.MinValue;
+    private static int _retrying;          // 0 = 没有正在重试的后台线程
+
+    /// <summary>
+    /// 创建失败后**后台自愈重试**。
+    ///
+    /// 为什么需要：实测（2026-10-15）—— 上一次实例被 `taskkill /F` 强杀后，
+    /// WinUHid 的设备槽位会被**短暂占住**，紧接着的新进程 `WinUHidCreateDevice` 直接失败，
+    /// 于是整条注入链路静默退化成 SendInput（输入法会过滤它）→ 表现为"遥控器按了没反应"，
+    /// 而几秒之后自己就好了。这种"过一会儿就能成功"的失败，重试是最好的解药。
+    ///
+    /// 为什么放后台线程：`EnsureReady()` 在注入热路径上（第一次按键时会调），
+    /// 在里面 sleep 重试会把按键延迟拉长几百毫秒 —— 那正是我们一直想避免的。
+    /// 后台重试不阻塞任何按键；这期间按键走 SendInput 兜底，成功率低但不至于完全没反应。
+    /// </summary>
+    private static void ScheduleBackgroundRetry()
+    {
+        if (Interlocked.CompareExchange(ref _retrying, 1, 0) != 0) return;
+        var t = new Thread(() =>
+        {
+            try
+            {
+                for (var i = 1; i <= 6; i++)
+                {
+                    Thread.Sleep(600 * i);              // 0.6 / 1.2 / 1.8 … 秒，逐步拉开
+                    if (_dev != IntPtr.Zero) break;
+                    if (EnsureReady())
+                    {
+                        EtwKeySource.AppendLog($"INJ  ✓ 虚拟 HID 后台重试成功（第 {i} 次，累计约 {600 * i * (i + 1) / 2} ms）");
+                        break;
+                    }
+                    if (i == 6)
+                        EtwKeySource.AppendLog(
+                            "INJ  ★ 虚拟 HID 重试 6 次仍失败 —— 注入会一直走 SendInput，" +
+                            "输入法很可能过滤它；请检查 WinUHid 驱动是否正常（界面「环境设置」可装）");
+                }
+            }
+            catch { }
+            finally { Volatile.Write(ref _retrying, 0); }
+        })
+        { IsBackground = true, Name = "iprc1000-uhid-retry" };
+        t.Start();
     }
 
     private static IntPtr CreateKeyboard(FnCreateDevice create, FnStartDevice start)
@@ -343,9 +408,13 @@ internal static class WinUhidInjector
     {
         lock (Gate)
         {
-            try { if (_dev != IntPtr.Zero) _destroy?.Invoke(_dev); } catch { }
+            var had = _dev != IntPtr.Zero;
+            try { if (had) _destroy?.Invoke(_dev); } catch { }
             _dev = IntPtr.Zero;
             InUse = false;
+            // ★ 销毁也留痕：配合"创建"那条，就能看出虚拟键盘是不是被反复重建
+            //   （反复重建意味着某次残留的按下状态可能被留在系统里）
+            if (had) EtwKeySource.AppendLog("INJ  虚拟 HID 设备已销毁");
         }
     }
 }

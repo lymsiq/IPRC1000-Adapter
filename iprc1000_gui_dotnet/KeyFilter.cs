@@ -163,7 +163,60 @@ internal sealed class KeyFilter : IDisposable
 
     /// <summary>供界面清空诊断日志</summary>
     public static void ResetHookLogBudget() { }
-    private int[] _injectedNow = Array.Empty<int>();                // 当前已按下、尚未释放的注入键
+    /// <summary>
+    /// 当前**虚拟键盘整份报告**里按着的键 = 所有「按住中」按钮的键并集。
+    ///
+    /// ★★ 为什么必须是"全集"而不是"某一个按钮的键"：
+    ///   虚拟 HID 是**整份报告快照**模型 —— `WinUhidInjector.Send(keys)` 每次下发的都是
+    ///   "此刻按下的全集"，只发单个按钮的键会把**别的**按住中的键从报告里挤掉
+    ///   （系统立刻认为那个键抬起了）。
+    ///
+    /// 历史 bug（2026-10-15 线上排查确认）：这里原名 `_injectedNow`，是**单个全局槽**，
+    /// 只记「最后一个按下的按钮」。于是「按住语音键(→右 Alt) → 再按确认 → 先松语音」时：
+    ///   按语音 → 槽={0xA5}；按确认 → 槽={0x0D}（0xA5 被覆盖）
+    ///   松语音 → 释放的是 {0x0D}（错的键），并把语音在 `_heldButtons` 里的登记一起删掉
+    ///   ⇒ **看门狗再也看不到语音键，右 Alt 永久卡住**（实测症状：字母打不出、输入法失效）。
+    /// </summary>
+    private static int[] _injectedSet = Array.Empty<int>();
+    private static readonly object _injLock = new();
+
+    /// <summary>按 `_heldButtons` 重算"应该按着"的全集（整份报告的内容）。</summary>
+    private int[] ComputeIntended()
+    {
+        lock (_heldLock)
+        {
+            var set = new SortedSet<int>();
+            foreach (var e in _heldButtons.Values)
+                foreach (var v in e.vks) set.Add(v);
+            return set.ToArray();
+        }
+    }
+
+    /// <summary>
+    /// 本程序**可能**注入的全部 VK（所有配置组的映射值 + 全部修饰键）。
+    ///
+    /// 孤儿键回收器只在这个集合里找、绝不碰别的键 —— 所以连**上一个实例被强杀时
+    /// 留下的卡住键**也能被下一个实例兜住（新实例的 `_heldButtons` 是空的，
+    /// 但那台虚拟键盘可能还停在"按着"状态）。
+    /// 每次 tick 重算（一秒一次，几十个元素，开销可忽略），这样改了映射也不用清缓存。
+    /// </summary>
+    private static int[] InjectableVks()
+    {
+        var set = new SortedSet<int>();
+        try
+        {
+            for (var g = 0; g < Keymaps.Groups.Count; g++)
+                foreach (var vks in Keymaps.MapOf(g).Values)
+                    foreach (var v in vks) set.Add(v);
+            for (var g = 0; g < Keymaps.Groups.Count; g++)
+                foreach (var vks in Keymaps.FactoryOf(g).Values)
+                    foreach (var v in vks) set.Add(v);
+        }
+        catch { }
+        foreach (var m in new[] { 0xA5, 0xA4, 0x12, 0xA3, 0xA2, 0x11, 0xA1, 0xA0, 0x10, 0x5B, 0x5C })
+            set.Add(m);
+        return set.ToArray();
+    }
 
     /// <summary>
     /// 遥控器多久没有上报就认为「所有键都已松开」。
@@ -177,8 +230,26 @@ internal sealed class KeyFilter : IDisposable
     public const int HoldTimeoutMs = 800;
     private System.Threading.Timer? _watchdog;
 
-    /// <summary>是否注入映射快捷键</summary>
-    public bool InjectEnabled { get; set; } = true;
+    /// <summary>
+    /// 是否注入映射快捷键。**变化必须留痕** —— 注入关掉时按下的键不会被登记进按住集合，
+    /// 看门狗也就看不到（历史隐患来源）；以前这里是静默属性，事后完全查不出来。
+    /// </summary>
+    private volatile bool _injectEnabled = true;
+    public bool InjectEnabled
+    {
+        get => _injectEnabled;
+        set
+        {
+            if (_injectEnabled == value) return;
+            _injectEnabled = value;
+            try
+            {
+                EtwKeySource.AppendLog("INJ  InjectEnabled = " + (value ? "true" : "false")
+                    + (value ? "" : "（注入已关闭：此后按下的键不注入、也不登记）"));
+            }
+            catch { }
+        }
+    }
 
     // ── 「按一下绑定」：捕获下一次真实按键 ──
     /// <summary>是否正在等待捕获下一次按键</summary>
@@ -268,6 +339,11 @@ internal sealed class KeyFilter : IDisposable
         // v2 是真正管用的那条（ETW 模式下唯一有效的判据），必须无条件执行
         try { WatchdogV2(); }
         catch { }
+
+        // v3：以**系统实际状态**为准的孤儿键回收 —— 当 v2 赖以判断的"账"本身被写错时，
+        //     这是最后一道（实测确认过的失守场景见 ReapOrphanKeys 的注释）。
+        try { ReapOrphanKeys(); }
+        catch { }
     }
 
     /// <summary>
@@ -311,9 +387,11 @@ internal sealed class KeyFilter : IDisposable
         }
         try
         {
-            // 与正常释放走同一条路：虚拟 HID 发全零报告，否则 SendInput 补 KEYUP
-            InjectRelease(vks);
-            if (bid == "voice" && _injectedNow.Length == 0) { /* 已在 InjectRelease 里清 */ }
+            // ★ 把登记表删掉之后**重算整份报告**再下发（而不是只放这个按钮的键）——
+            //   虚拟 HID 是快照模型，只有整份下发才能保证"报告的 == 我们以为按着的"。
+            //   （历史 bug：这里原来只 InjectRelease(vks)，而 `_injectedNow` 并未被清，
+            //     导致看门狗释放之后还留着一组旧键，之后任意一次松手都会去放那组旧键。）
+            InjectSet(ComputeIntended());
         }
         catch { }
         var msg = $"GUARD  {bid}  强制释放  原因={why}  键={Keys.Format(vks)}";
@@ -375,11 +453,10 @@ internal sealed class KeyFilter : IDisposable
             try { Send(new[] { (int)vk }, true); } catch { }
         }
         // 释放可能卡住的注入键（否则修饰键卡住会让整个键盘行为异常）
-        if (_injectedNow.Length > 0)
+        // ★ 登记表已清空 → 整份报告重算出来就是空集 → 下发全零报告。
+        if (_injectedSet.Length > 0 || _viaVirtualHid)
         {
-            if (_viaVirtualHid) WinUhidInjector.Release();
-            else Send(_injectedNow.OrderByDescending(v => IsModifier(v) ? 0 : 1), true);
-            _injectedNow = Array.Empty<int>();
+            try { InjectSet(ComputeIntended()); } catch { }
             _viaVirtualHid = false;
         }
         if (n > 0) LastCleared = $"{reason}（释放 {n} 个）";
@@ -596,31 +673,112 @@ internal sealed class KeyFilter : IDisposable
             if (pressed) EtwKeySource.AppendLog($"APPLY  {bid}  DOWN  来源={src}  映射=（未设置）");
             return;
         }
-        if (!InjectEnabled) return;
 
         EtwKeySource.AppendLog($"APPLY  {bid}  {(pressed ? "DOWN" : "UP")}  来源={src}" +
             $"  映射={Keys.Format(vks)}  组={Keymaps.Current.Name}");
 
         if (pressed)
         {
+            // ★ 注入被关掉时**不能**登记进按住集合 —— 登记了但没真注入，看门狗会去释放
+            //   一个根本没按下过的键。这里显式留痕（以前是静默 return，事后查不出来）。
+            if (!InjectEnabled)
+            {
+                EtwKeySource.AppendLog($"INJ  {bid} 未注入：InjectEnabled=false（映射={Keys.Format(vks)}）");
+                return;
+            }
+
             // ★ 语音键按下 → 先预热音频链路（把 CABLE Input 提前打开），再注入按键。
             //   顺序很重要：开声卡要 100~300 ms，而音频随后就到 —— 要先开声卡再注入，
             //   否则那段时间的音频会被丢掉，表现为"按住后立刻说的第一个字识别不出来"。
             if (bid == "voice") { try { VoiceKeyDown?.Invoke(); } catch { } }
-            InjectPress(vks);
-            _injectedNow = vks;
+
+            bool dup;
+            lock (_heldLock) dup = _heldButtons.ContainsKey(bid);
+            if (dup)
+            {
+                // 遥控器抖动/自动重复发来第二个 DOWN：只记一条，**不重新注入**
+                // （重新注入会把它自己的键从整份报告里换掉，也会把 at 时间戳刷新、
+                //   让看门狗以为"刚按下"而延后判卡键）
+                EtwKeySource.AppendLog($"INJ  {bid} 重复 DOWN（已在按住集合里）—— 已忽略，避免累积");
+                return;
+            }
+
             // 记进"按住未放"登记表 —— 看门狗 v2 靠它发现丢 UP 的卡键（两种按键来源都走这里）
             lock (_heldLock) _heldButtons[bid] = (vks, DateTime.UtcNow);
+            InjectSet(ComputeIntended());          // 按"全集"下发，不挤掉别的按住中的键
         }
         else
         {
-            // ★ 释放**按下时记录的那组键**，而不是重新读一遍配置 ——
-            //   否则按住期间切了配置组/改了映射，就会放掉错的键，把原键卡在按下状态。
-            var rel = _injectedNow is { Length: > 0 } ? _injectedNow : vks;
-            InjectRelease(rel);
-            _injectedNow = Array.Empty<int>();
-            lock (_heldLock) _heldButtons.Remove(bid);
+            bool had;
+            lock (_heldLock) had = _heldButtons.Remove(bid);
+            if (!had)
+            {
+                // 没登记过就收到 UP：可能是看门狗/紧急复位已经替我们放过了，
+                // 也可能是遥控器发了个孤立 UP。
+                // ★ 这里**刻意不再补发释放** —— 补发会去动一个我们从未按下过的键，
+                //   万一用户此刻正按住真实键盘的同名键就会被误放。
+                //   真的还有残留的话，由孤儿键回收器（以系统实际状态为准）兜住。
+                EtwKeySource.AppendLog($"INJ  {bid} UP 到达但按住集合里没有它（可能已被看门狗/紧急复位释放）—— 不补发");
+                return;
+            }
+            // ★ 释放的是"移掉这个按钮之后剩下的全集"，而不是这个按钮自己的键 ——
+            //   否则会把别的按住中的键一起放掉（虚拟 HID 是整份报告快照模型）。
+            InjectSet(ComputeIntended());
         }
+    }
+
+    /// <summary>
+    /// 把虚拟键盘的报告**整份**设为 <paramref name="intended"/>（= 当前所有「按住中」按钮的键并集）。
+    ///
+    /// 这是修掉"卡键"的核心：任何一次变化都重算全集并整份下发，
+    /// 所以**永远不会出现"我们以为按着、报告里其实没有"或反过来**。
+    /// 日志按**变化量**分别记 DOWN/UP，格式与历史一致（分析脚本可继续用）。
+    /// </summary>
+    private static DateTime _lastHidFailLog = DateTime.MinValue;
+
+    private static void InjectSet(int[] intended)
+    {
+        int[] before;
+        lock (_injLock) { before = _injectedSet; _injectedSet = intended; }
+
+        var added = intended.Where(v => !before.Contains(v)).ToArray();
+        var removed = before.Where(v => !intended.Contains(v)).ToArray();
+        if (added.Length == 0 && removed.Length == 0) return;   // 报告没变，不必下发
+
+        // ── 媒体键：走 SendInput —— WinUHid 键盘设备表达不了 Consumer Page ──
+        //    它们是点按语义、不参与"整份报告"，所以按变化量单独发。
+        var addMedia = added.Where(IsMedia).ToArray();
+        var remMedia = removed.Where(IsMedia).ToArray();
+        if (addMedia.Length > 0) { Send(addMedia.OrderBy(v => IsModifier(v) ? 0 : 1), false); InjectLog(false, addMedia, false); }
+        if (remMedia.Length > 0) { Send(remMedia.OrderByDescending(v => IsModifier(v) ? 0 : 1), true); InjectLog(true, remMedia, false); }
+
+        // ── 其余键：整份报告下发（虚拟 HID 是快照模型）──
+        var report = intended.Where(v => !IsMedia(v)).ToArray();
+        var beforeK = before.Where(v => !IsMedia(v)).ToArray();
+        var addK = added.Where(v => !IsMedia(v)).ToArray();
+        var remK = removed.Where(v => !IsMedia(v)).ToArray();
+        // 只有媒体键变化时没有"报告"要下发，别白建一台虚拟键盘
+        if (report.Length == 0 && beforeK.Length == 0) return;
+
+        if (WinUhidInjector.Send(report))
+        {
+            _viaVirtualHid = true;
+            if (addK.Length > 0) InjectLog(false, addK, true);
+            if (remK.Length > 0) InjectLog(true, remK, true);
+            return;
+        }
+
+        // ★ 虚拟 HID 没就绪 / 下发失败：**必须留痕**，否则就是
+        //   "我们以为按着、系统其实没收到"，事后完全查不出来。
+        //   （限流 5 秒一条，免得整条链路失效时把日志刷爆）
+        if ((DateTime.UtcNow - _lastHidFailLog).TotalSeconds >= 5)
+        {
+            _lastHidFailLog = DateTime.UtcNow;
+            EtwKeySource.AppendLog($"INJ  ★ 虚拟 HID 下发失败（{WinUhidInjector.LastError ?? "未知"}）—— 回退 SendInput");
+        }
+        _viaVirtualHid = false;
+        if (addK.Length > 0) { Send(addK.OrderBy(v => IsModifier(v) ? 0 : 1), false); InjectLog(false, addK, false); }
+        if (remK.Length > 0) { Send(remK.OrderByDescending(v => IsModifier(v) ? 0 : 1), true); InjectLog(true, remK, false); }
     }
 
     // ── 注入（按住语义：按下注入，松手释放） ──
@@ -753,6 +911,57 @@ internal sealed class KeyFilter : IDisposable
     }
 
 
+    /// <summary>
+    /// **多键同时按住**的回归自检 —— 对应的正是 2026-10-15 查出的卡键缺陷。
+    ///
+    /// 复现序列：「按住 A → 再按 B → 先松 A → 再松 B」。
+    /// 旧实现（单槽 `_injectedNow`）在这一串里 **A 的键再也不会被释放**：
+    ///   按 A → 槽={A}；按 B → 槽={B}（A 被覆盖）；松 A → 释放的是 {B}，
+    ///   并把 A 在 `_heldButtons` 里的登记一起删掉 ⇒ 看门狗也看不到 A → 永久卡键。
+    ///
+    /// 断言全部用 `GetAsyncKeyState` 读**系统真实状态**，不看我们自己的账：
+    ///   ① 按 A 后          → A 按下、B 未按
+    ///   ② 再按 B 后        → **A 仍按下**（整份报告快照；旧的单键实现会把 A 挤掉）
+    ///   ③ 松 A 后          → A 抬起、**B 仍按下**
+    ///   ④ 松 B 后          → **两者都抬起** ← 这一条就是卡键的直接判据
+    /// </summary>
+    public static string InjectMultiKeyTest(int vkA = 0xA5, int vkB = 0x0D)
+    {
+        bool Read(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("IPRC1000 多键同时按住回归自检");
+        sb.AppendLine($"A = 0x{vkA:X2}   B = 0x{vkB:X2}");
+        sb.AppendLine("判据 = 虚拟 HID 的「整份报告快照」语义：只发单键会把它从报告里挤掉。");
+        sb.AppendLine();
+
+        var ok = true;
+        void Step(string name, int[] set, bool expectA, bool expectB, string expect)
+        {
+            try { InjectSet(set); }
+            catch (Exception e) { sb.AppendLine($"  ✗ {name}  注入异常：{e.Message}"); ok = false; return; }
+            Thread.Sleep(130);
+            var a = Read(vkA);
+            var b = Read(vkB);
+            var pass = a == expectA && b == expectB;
+            ok &= pass;
+            sb.AppendLine($"  {(pass ? "✓" : "✗")} {name}");
+            sb.AppendLine($"      期望 {expect}｜实测 A={(a ? "按下" : "抬起")} B={(b ? "按下" : "抬起")}");
+        }
+
+        Step("① 按下 A", new[] { vkA }, true, false, "A 按下、B 未按");
+        Step("② 再按下 B", new[] { vkA, vkB }, true, true, "A、B 都按下（A 不能被挤掉）");
+        Step("③ 松开 A", new[] { vkB }, false, true, "A 抬起、B 仍按下");
+        Step("④ 松开 B ★ 卡键判据", Array.Empty<int>(), false, false, "A、B 都抬起");
+
+        sb.AppendLine();
+        sb.AppendLine(ok ? "⇒ 全部通过 ✓ 多键同时按住不会卡键" : "⇒ ★ 有断言失败 —— 会出现卡键！");
+
+        // 无论如何先确保都放掉，别把自检本身变成一次卡键
+        try { InjectSet(Array.Empty<int>()); } catch { }
+        try { WinUhidInjector.Release(); } catch { }
+        return sb.ToString();
+    }
+
     private static void InjectRelease(int[] vks)
     {
         if (vks.Length > 0 && vks.Any(IsMedia))
@@ -831,14 +1040,116 @@ internal sealed class KeyFilter : IDisposable
     /// </summary>
     public static void ReleaseAllInjected()
     {
-        foreach (var vk in Keys.VkToButtonId.Keys)
+        // ① 虚拟 HID：一帧全零报告就把**我们这台虚拟键盘**的键全部放掉
+        try { WinUhidInjector.Release(); } catch { }
+        // ② SendInput 兜底：万一注入其实走的是 SendInput（虚拟 HID 没装/失效），逐键补 KEYUP。
+        //    只碰本程序**可能**注入的键（InjectableVks），不动别的键。
+        foreach (var vk in InjectableVks())
         {
-            try { InjectRelease(new[] { (int)vk }); } catch { }
+            try { Send(new[] { vk }, true); } catch { }
         }
-        // 额外把几个修饰键也放一遍（注入可能只按下了修饰键）
+        lock (_injLock) _injectedSet = Array.Empty<int>();
+    }
+
+    /// <summary>
+    /// **启动兜底**：清掉上一个实例被强杀时留在系统里的卡住修饰键。
+    ///
+    /// 为什么需要：退出路径（<see cref="ReleaseAllInjected"/>）在 `taskkill /F` 或崩溃时
+    /// **跑不到**，系统里就会留下一个"按着不放的右 Alt" —— 后果是字母键输出特殊字符、
+    /// 中文输入法直接失效（线上实测踩到）。那台虚拟键盘是**上一个进程**的设备，
+    /// 我们的全零报告清不掉它，只能补一次 SendInput 的 KEYUP 把系统侧的合并状态压回去。
+    ///
+    /// 为什么安全：只动**修饰键**，而且只动 `GetAsyncKeyState` **确实报"按着"**的那些 ——
+    /// 刚启动这一刻用户不会正按着修饰键；每次动作都写 stuck-guard.log，事后可查。
+    /// 想关掉：设 `IPRC1000_NO_START_CLEAN=1`。
+    /// </summary>
+    public static string? ClearStaleModifiersOnStart()
+    {
+        if (Environment.GetEnvironmentVariable("IPRC1000_NO_START_CLEAN") == "1") return null;
+        var stuck = new List<int>();
         foreach (var vk in new[] { 0xA5, 0xA4, 0x12, 0xA3, 0xA2, 0x11, 0xA1, 0xA0, 0x10, 0x5B, 0x5C })
+            if ((GetAsyncKeyState(vk) & 0x8000) != 0) stuck.Add(vk);
+        if (stuck.Count == 0) return null;
+
+        foreach (var vk in stuck)
         {
-            try { InjectRelease(new[] { vk }); } catch { }
+            try { Send(new[] { vk }, true); } catch { }
+        }
+        var names = string.Join(" ", stuck.Select(v => $"0x{v:X2}"));
+        var msg = $"GUARD  启动兜底  系统里残留着按下的修饰键 → 补发 KEYUP  键={names}" +
+                  "（多为上一次实例被强杀留下的）";
+        EtwKeySource.AppendLog(msg);
+        GuardLog(msg);
+        return names;
+    }
+
+    // ── 孤儿键回收器 ──
+    private DateTime _lastReapAt = DateTime.MinValue;
+    private readonly Dictionary<int, int> _orphanStreak = new();   // vk → 连续观察到"系统说按着"的次数
+    private readonly HashSet<int> _orphanLogged = new();
+
+    /// <summary>
+    /// 孤儿键回收 —— **以系统实际状态为准，不用我们自己的账**。
+    ///
+    /// 为什么必须有它：卡键的根因类别是"**我们自己的账不可靠**"。只要 `_heldButtons`
+    /// 被写错（历史上真发生过：单槽 `_injectedNow` 被覆盖时把登记表里的记录一起删掉），
+    /// 任何基于它的看门狗都必然失灵、救不回来。所以这里改问系统。
+    ///
+    /// 判据：`GetAsyncKeyState(vk)` 说这个键还按着，而**我们已经不持有任何键** →
+    /// 说明我们的虚拟键盘还剩着一份没收回的报告 → 补发全零报告。
+    ///
+    /// 为什么安全（三条）：
+    ///   ① 只在**我们没持有任何键**时才动手 —— 此时下发全零报告不可能碰到合法按住的键；
+    ///   ② 只在 `InjectableVks()`（本程序可能注入的键）里找，绝不碰别的键；
+    ///   ③ 全零报告只作用于**我们自己的虚拟键盘设备**；系统按键状态是分设备合并的，
+    ///      所以物理键盘上按着的键**不受影响**。
+    /// 另外要求连续 3 次（约 3 秒）都成立才动手，避免瞬时抖动误判。
+    /// 若注入其实走的是 SendInput 路径（`_viaVirtualHid == false`），只告警不动手 ——
+    /// 那条路径上没有"虚拟设备残留"这回事，而 SendInput 补发有可能误伤物理按键。
+    /// </summary>
+    private void ReapOrphanKeys()
+    {
+        if ((DateTime.UtcNow - _lastReapAt).TotalSeconds < 1.0) return;
+        _lastReapAt = DateTime.UtcNow;
+
+        // ① 我们正持有键 → 不介入（此时全零报告会误伤）
+        if (ComputeIntended().Length != 0) { _orphanStreak.Clear(); return; }
+
+        var candidates = InjectableVks();
+        if (candidates.Length == 0) return;
+
+        var orphans = new List<int>();
+        var suspects = new List<int>();
+        foreach (var vk in candidates)
+        {
+            if ((GetAsyncKeyState(vk) & 0x8000) == 0)
+            {
+                _orphanStreak.Remove(vk);
+                _orphanLogged.Remove(vk);
+                continue;
+            }
+            _orphanStreak[vk] = _orphanStreak.TryGetValue(vk, out var n) ? n + 1 : 1;
+            if (_orphanStreak[vk] < 3) continue;
+            (_viaVirtualHid ? orphans : suspects).Add(vk);
+            if (!_orphanLogged.Add(vk)) continue;      // 同一轮只记一次，避免刷屏
+        }
+
+        if (orphans.Count > 0)
+        {
+            var names = string.Join(" ", orphans.Select(v => $"0x{v:X2}"));
+            try { WinUhidInjector.Release(); } catch { }   // 全零报告：只作用于我们的虚拟键盘
+            lock (_injLock) _injectedSet = Array.Empty<int>();
+            var msg = $"GUARD  孤儿键回收  系统仍认为按着、但已不在我们的按住集合里 → 补发全零报告  键={names}";
+            EtwKeySource.AppendLog(msg);
+            GuardLog(msg);
+            LastError = "已回收孤儿键：" + names;
+        }
+        if (suspects.Count > 0)
+        {
+            // SendInput 路径下不敢自动补发（可能误伤物理按键），只告警让人知道
+            EtwKeySource.AppendLog(
+                $"INJ  ★ 疑似孤儿键 {string.Join(" ", suspects.Select(v => $"0x{v:X2}"))}" +
+                "（系统报按着、我们不持有）—— 当前走 SendInput，未自动补发，请手动紧急复位");
         }
     }
 

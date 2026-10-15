@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace Iprc1000Adapter;
@@ -54,6 +55,16 @@ internal static class Program
             return;
         }
 
+        // 多键同时按住回归自检：--inject-multikey-test [输出文件]
+        //   直接判「会不会卡键」—— 复现「按住A→再按B→先松A→再松B」那串，
+        //   旧实现里 A 的键再也不会被释放。见 KeyFilter.InjectMultiKeyTest 的注释。
+        if (args.Length > 0 && args[0] == "--inject-multikey-test")
+        {
+            var pm = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "inject_multikey.txt");
+            File.WriteAllText(pm, KeyFilter.InjectMultiKeyTest());
+            return;
+        }
+
         // 注入验证：--inject-verify <VK十六进制> <输出文件>
         if (args.Length > 1 && args[0] == "--inject-verify")
         {
@@ -82,6 +93,37 @@ internal static class Program
             var gi = args.Length > 2 && int.TryParse(args[2], out var g) ? g : Keymaps.ActiveIndex;
             File.WriteAllText(pd, DumpMaps(gi));
             return;
+        }
+
+        // ── 单实例保护 ──
+        // 为什么必须有：**每份实例都会创建自己的虚拟键盘设备**。若其中一份在"按住某键"时
+        // 被结束（任务管理器结束进程 / 崩溃），那个键就留在**它那台**设备的按下状态里，
+        // 而新实例用的是**另一台**虚拟键盘，管不到它 → 系统层表现为"这个键卡住了"。
+        // 第二份实例的行为：通知已在运行的那份把窗口显示出来，然后自己退出。
+        // ⚠ 必须放在上面那些 CLI 分支**之后** —— --inject-test / --map-dump 这类诊断入口
+        //    要能在程序正常运行期间照常跑（它们不该被"已在运行"挡掉）。
+        Mutex? singleInstance = null;
+        try
+        {
+            singleInstance = new Mutex(true, MainForm.SingleInstanceMutex, out var createdNew);
+            if (!createdNew)
+            {
+                try { EventWaitHandle.OpenExisting(MainForm.ShowWindowEvent).Set(); }
+                catch (Exception e)
+                {
+                    MessageBox.Show(
+                        "IPRC1000 遥控器适配器已经在运行了。\n\n" +
+                        "（想唤出它的窗口时失败了：" + e.Message + "）\n" +
+                        "请到系统托盘双击图标打开。",
+                        Env.AppName);
+                }
+                return;
+            }
+        }
+        catch (Exception e)
+        {
+            // 拿不到互斥体不该阻止启动，但必须留痕（否则以后查不出"为什么开了两份"）
+            MainForm.StartupMark("单实例保护不可用（已忽略）：" + e.Message);
         }
 
         // WebView2 需要显式 STA + 现代 WinForms 初始化
@@ -120,6 +162,7 @@ internal static class Program
         using var form = new MainForm(selftest, outPath);
         MainForm.StartupMark("主窗口构造完成");
         Application.Run(form);
+        GC.KeepAlive(singleInstance);   // 互斥体必须活到进程结束，否则保护会提前失效
     }
 
     /// <summary>

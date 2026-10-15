@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -42,6 +43,47 @@ internal sealed class MainForm : Form
     private readonly bool _selftest;
     private string? _selftestOut;
 
+    /// <summary>
+    /// 单实例用的名字：命名互斥体 + "请把窗口显示出来"事件。
+    ///
+    /// 为什么要单实例：**每份实例都会创建自己的虚拟键盘设备**。若其中一份在"按住某键"时
+    /// 被结束（任务管理器结束进程 / 崩溃），那个键就留在**它那台**设备的按下状态里，
+    /// 而新实例用的是**另一台**虚拟键盘，管不到它 → 系统层表现为"这个键卡住了"。
+    /// 第二个实例改为：Set 下面这个事件让已在运行的那份把窗口显示出来，然后自己退出。
+    /// </summary>
+    public const string SingleInstanceMutex = @"Local\IPRC1000Adapter.SingleInstance";
+    public const string ShowWindowEvent = @"Local\IPRC1000Adapter.ShowWindow";
+    private EventWaitHandle? _showEvent;
+    private Thread? _showThread;
+
+    /// <summary>接住"第二个实例要求显示窗口"的通知（后台线程等待，回 UI 线程执行）。</summary>
+    private void StartShowWindowListener()
+    {
+        try
+        {
+            _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowWindowEvent);
+            _showThread = new Thread(() =>
+            {
+                while (!_reallyExit)
+                {
+                    try
+                    {
+                        if (!_showEvent.WaitOne(1000)) continue;
+                        if (IsDisposed) break;
+                        try { BeginInvoke(new Action(RestoreFromTray)); } catch { break; }
+                    }
+                    catch { break; }
+                }
+            })
+            { IsBackground = true, Name = "iprc1000-show-window" };
+            _showThread.Start();
+        }
+        catch (Exception e)
+        {
+            StartupMark("窗口唤起监听未启动（已忽略）：" + e.Message);
+        }
+    }
+
     public MainForm(bool selftest, string? selftestOut)
     {
         _selftest = selftest;
@@ -71,6 +113,9 @@ internal sealed class MainForm : Form
         _tray.ContextMenuStrip = trayMenu;
         _tray.DoubleClick += (_, _) => RestoreFromTray();
 
+        // 单实例：第二个实例会 Set 事件要求我们把窗口显示出来
+        StartShowWindowListener();
+
         // 启动时最小化到托盘（默认开）
         if (Settings.StartMinimized)
         {
@@ -96,6 +141,16 @@ internal sealed class MainForm : Form
             // 句柄此刻已就绪，再装 Raw Input + 键盘钩子
             _filter.Start(Handle);
             StartupMark("按键钩子 + RAW INPUT 已装");
+
+            // ★ 启动兜底：清掉**上一个实例**被强杀时留在系统里的卡住修饰键
+            //   （退出路径在 taskkill /F / 崩溃时跑不到，那台虚拟键盘是上一个进程的设备，
+            //     我们的全零报告清不掉它 —— 只能补 SendInput 的 KEYUP）
+            try
+            {
+                var stale = KeyFilter.ClearStaleModifiersOnStart();
+                if (stale != null) StartupMark($"启动兜底：清掉了残留的修饰键 {stale}");
+            }
+            catch { }
             // ⚠ InitWebView 是 async void 语义：**必须自己 try/catch**，
             //   否则它内部任何异常都会掀翻进程（0xE0434352），且不留任何痕迹。
             BeginInvoke(new Action(async () =>
@@ -134,6 +189,7 @@ internal sealed class MainForm : Form
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         {
             try { KeyFilter.ReleaseAllInjected(); } catch { }
+            try { _showEvent?.Dispose(); } catch { }
         };
     }
 
