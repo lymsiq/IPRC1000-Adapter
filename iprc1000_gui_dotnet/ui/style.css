@@ -183,8 +183,6 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
 }
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
-.btn.tiny{padding:4px 9px;font-size:11.5px;border-radius:7px;flex:none}
-
 .keysum{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 10px}
 .keysum .pill{font-size:12px;padding:3px 10px;border-radius:99px;background:var(--blue-l);color:var(--blue)}
 .keygroup{font-size:12px;font-weight:700;color:var(--txt2);letter-spacing:.6px;

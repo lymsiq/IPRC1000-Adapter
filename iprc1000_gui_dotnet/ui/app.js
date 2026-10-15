@@ -605,11 +605,11 @@ function renderEnv(s) {
       '不受内核隔离限制），装完回来点「测试注入右 Alt」确认。' +
       (uh.error ? `<br>当前状态：${uh.error}` : '');
 
-  // 面板精简：去掉「拦截状态」（ETW 模式下无意义）与「豆包设置对应」（与上行重复）
+  // 面板精简：去掉「拦截状态」（ETW 模式下无意义）与「豆包设置对应」（与上行重复）；
+  // 「最近按键」只保留 keySrcKv 里的那格（带 usage / 按住态），这里不再重复展示
   $('#injectKv').innerHTML =
     kvItem('语音键原始按键', `<b>M</b>（HID 0x10）`) +
-    kvItem('按住时注入', `<b>${voiceBind}</b>（豆包「长按模式」用的就是它）`) +
-    kvItem('最近按键', ke.lastButton ? `${ke.lastButton}` : '—');
+    kvItem('按住时注入', `<b>${voiceBind}</b>（豆包「长按模式」用的就是它）`);
 
 }
 
