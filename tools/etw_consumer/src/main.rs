@@ -146,10 +146,9 @@ mod diag {
 
     /// 追加一行带时间戳的日志到 bridge.log
     pub fn log(msg: &str) {
-        let ts = now_ms();
         if let Ok(mut g) = log_file().lock() {
             if let Some(f) = g.as_mut() {
-                let _ = writeln!(f, "{}  {}", hms(ts), msg);
+                let _ = writeln!(f, "{}  {}", local_hms(), msg);
                 let _ = f.flush();
             }
         }
@@ -172,9 +171,36 @@ mod diag {
             .unwrap_or(0)
     }
 
+    #[cfg(not(target_os = "windows"))]
     fn hms(ms: u64) -> String {
         let s = (ms / 1000) % 86400;
         format!("{:02}:{:02}:{:02}.{:03}", s / 3600, (s / 60) % 60, s % 60, ms % 1000)
+    }
+
+    /// 本地时间 `HH:MM:SS.mmm`。
+    ///
+    /// ⚠ 原来用 `hms(now_ms())`，那是**UTC** —— 于是同一个 bridge.log 里
+    /// 应用写的行是本地时间、桥写的行是 UTC，差 8 小时，读日志时极易误判。
+    #[cfg(target_os = "windows")]
+    pub fn local_hms() -> String {
+        #[repr(C)]
+        struct SystemTime {
+            year: u16, month: u16, dow: u16, day: u16,
+            hour: u16, minute: u16, second: u16, millis: u16,
+        }
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetLocalTime(out: *mut SystemTime);
+        }
+        let mut st = SystemTime {
+            year: 0, month: 0, dow: 0, day: 0, hour: 0, minute: 0, second: 0, millis: 0,
+        };
+        unsafe { GetLocalTime(&mut st) };
+        format!("{:02}:{:02}:{:02}.{:03}", st.hour, st.minute, st.second, st.millis)
+    }
+    #[cfg(not(target_os = "windows"))]
+    pub fn local_hms() -> String {
+        hms(now_ms())
     }
 }
 
@@ -783,9 +809,12 @@ fn main() {
         let st = Arc::clone(&stats);
         let br = Arc::clone(&bridge);
         let t0 = Instant::now();
-        std::thread::spawn(move || loop {
+        std::thread::spawn(move || {
+            let mut n = 0u64;
+            loop {
             std::thread::sleep(Duration::from_millis(2000));
-            let json = {
+            n += 1;
+            let (json, stat_line) = {
                 let Ok(s) = st.lock() else { continue };
                 let Ok(g) = br.lock() else { continue };
                 let (sent, bytes) = g
@@ -799,7 +828,7 @@ fn main() {
                 } else {
                     (now.saturating_sub(s.last_frame_ms)) as i64
                 };
-                format!(
+                let json = format!(
                     concat!(
                         "{{\"pid\":{},\"uptimeSec\":{},\"heartbeatMs\":{},",
                         "\"frames\":{},\"samples16\":{},\"seconds16\":{:.2},",
@@ -828,9 +857,28 @@ fn main() {
                     s.other,
                     silent,
                     if g.in_session { 1 } else { 0 }
-                )
+                );
+                let stat_line = format!(
+                    "[STAT] 运行 {}s | 会话 {} 空档 {} 最长 {}ms | 帧 {} 丢帧 {} 被截首片 {} \
+                     | UDP {} 包 失败 {} | 距上次音频 {} | 会话中={}",
+                    t0.elapsed().as_secs(),
+                    s.sessions, s.gaps, s.max_gap_ms,
+                    s.frames, s.lost_cont, s.truncated_first,
+                    sent, s.udp_err,
+                    if silent < 0 { "从未".to_string() } else { format!("{silent}ms") },
+                    if g.in_session { "是" } else { "否" }
+                );
+                (json, stat_line)
             };
             diag::write_stats(&json);
+            // ★ 每 30 秒往 bridge.log 追加一行统计。
+            //   bridge-stats.json 只保留"当前值"，看不出走势；
+            //   而用户报的是「**多次对话后**才出现没波形」——正是需要看趋势的场景。
+            //   有了这条时间线，"丢帧是不是越攒越多""空档是不是越来越长"一眼可判。
+            if n % 15 == 0 {
+                diag::log(&stat_line);
+            }
+        }
         });
     }
 
@@ -920,8 +968,20 @@ fn main() {
     // 降到几十毫秒量级。
     let props = ferrisetw::trace::TraceProperties {
         buffer_size: 4,                 // KB，1 页
-        min_buffer: 2,
-        max_buffer: 4,
+        // ★ 缓冲数量 2/4 → 8/32。
+        //
+        // 原来最多只有 4 个 4KB 缓冲（共 16KB），而这条链路上的流量是：
+        //   真实音频 ≈ 33 KB/s（50 帧/秒 × 657 字节）
+        //   + 填缓冲 ≈ 200 KB/s（热档每 10ms 一个 2048 字节事件）
+        // 消费端（ferrisetw 的处理线程）只要停顿几十毫秒，缓冲就满、ETW 直接丢事件。
+        // 实测一台机器跑 20 分钟丢了 512 个音频续片（= 512 帧 × 20ms ≈ 10 秒音频），
+        // 表现就是音频断续、久了就像没声音。
+        //
+        // 关键：**buffer_size 不动**。刷新节奏由"填满一个缓冲"和 flush_timer 决定，
+        // 4KB 一页 + 2048 字节的事件 → 每 2 个事件刷一次，延迟不变。
+        // 而把缓冲**个数**放大 8 倍，只是给消费端留出积压空间，延迟不受影响。
+        min_buffer: 8,
+        max_buffer: 32,
         flush_timer: Duration::from_secs(1),   // API 只能到秒
         ..Default::default()
     };

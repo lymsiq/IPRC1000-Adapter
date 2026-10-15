@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace Iprc1000Adapter;
 
@@ -86,6 +87,29 @@ internal sealed class KeyFilter : IDisposable
 
     private readonly HashSet<ushort> _held = new();
     private readonly object _heldLock = new();
+
+    // ── 卡键看门狗 v2 ──────────────────────────────────────────────────────────
+    //
+    // ★ 背景：看门狗 v1 只盯 Raw Input 的 _held 集合，而按键来源切到 ETW 之后
+    //   HandleRawInput 根本不会被调用（驱动已切成非键盘）→ _held 恒为空 →
+    //   看门狗每次都在第一行就 return。**丢一次 UP 就永久卡键**，只能手动紧急复位。
+    //   （2026-10-15 实录：语音键 DOWN 后 UP 丢失，注入的右 Alt 卡了 61 秒。）
+    //
+    // v2 改盯「**注入了还没放开**的按钮」，在 ApplyButton 里维护 ——
+    // 这条路径 Raw Input / ETW 两种来源都走，与按键来源无关。
+    //
+    // ★ 判据（实测得出）：语音键按住期间蓝牙 SCO 一定在传音频帧
+    //   （不说话也传静音帧；实测"语音键按下 → 首包音频 0~528ms"），
+    //   所以「语音键按着 + 音频停了 3 秒」= 遥控器早已松开、UP 丢了 → 强制放开。
+    //   注意**不能**用"遥控器静默"做判据 —— 实测正常按住 30 秒期间事件数也是 0。
+    private readonly Dictionary<string, (int[] vks, DateTime at)> _heldButtons = new();
+
+    /// <summary>
+    /// 音频静默毫秒数提供者（由 Backend 注入，读语音桥统计里的 silentMs）。
+    /// 语音键按住期间 SCO 链路一定在传帧，所以静默几秒就说明键早松了。
+    /// 返回 null 表示拿不到信号（桥没跑）——此时退化为绝对超时。
+    /// </summary>
+    public Func<long?>? AudioSilenceMs { get; set; }
     private readonly Dictionary<ulong, bool> _deviceCache = new();
     private IntPtr _hook = IntPtr.Zero;
     private HookProc? _proc;                 // 必须保活
@@ -229,10 +253,90 @@ internal sealed class KeyFilter : IDisposable
         {
             bool empty;
             lock (_heldLock) empty = _held.Count == 0;
-            if (empty) return;
-            if ((DateTime.UtcNow - _lastRawInputAt).TotalMilliseconds < HoldTimeoutMs) return;
-            var n = ClearHeld("遥控器静默超时（可能已休眠/断连，最后的 UP 丢了）");
-            LastError = $"已自动释放 {n} 个卡住的按键（遥控器静默超时）";
+            // ★★ 这里原来写的是 `if (empty) return;` —— 而 ETW 模式下 _held **永远是空的**
+            //    （它只在 Raw Input 路径维护），于是下面那句 WatchdogV2() **一次都没跑过**，
+            //    v2 看门狗等于没装。（集成测试当初直接调 WatchdogV2 绕过了这道门，所以没发现。）
+            //    改成：v1 判据不成立时**照旧往下走**，绝不提前 return。
+            if (!empty && (DateTime.UtcNow - _lastRawInputAt).TotalMilliseconds >= HoldTimeoutMs)
+            {
+                var n = ClearHeld("遥控器静默超时（可能已休眠/断连，最后的 UP 丢了）");
+                LastError = $"已自动释放 {n} 个卡住的按键（遥控器静默超时）";
+            }
+        }
+        catch { }
+
+        // v2 是真正管用的那条（ETW 模式下唯一有效的判据），必须无条件执行
+        try { WatchdogV2(); }
+        catch { }
+    }
+
+    /// <summary>
+    /// 卡键看门狗 v2：盯「注入了还没放开」的按钮。
+    ///
+    /// v1 只在 Raw Input 模式有效（_held 只在 HandleRawInput 里维护），
+    /// 而按键来源切到 ETW 后那条路径根本不跑 —— **丢一次 UP 就永久卡键**。
+    /// v2 在 ApplyButton（两种来源共用）里登记，再按下面的判据强制放开：
+    ///
+    /// · 语音键：音频判据。按住期间蓝牙 SCO 一定在传音频帧（实测按下 → 首包 0~528 ms，
+    ///   不说话也传静音帧），所以「按着 + 音频停了 &gt; 3 秒」= UP 丢了。
+    ///   拿不到音频信号时退化为绝对超时（120 秒）。
+    ///   ⚠ 不能用"遥控器静默"判 —— 实测正常按住 30 秒期间上报数也是 0。
+    /// · 其它键：都是点按，按住超过 15 秒即视为卡死。
+    /// </summary>
+    private void WatchdogV2()
+    {
+        List<KeyValuePair<string, (int[] vks, DateTime at)>> held;
+        lock (_heldLock) held = _heldButtons.ToList();
+        if (held.Count == 0) return;
+
+        foreach (var kv in held)
+        {
+            var (vks, at) = kv.Value;
+            var heldSec = (DateTime.UtcNow - at).TotalSeconds;
+
+            // 判据集中在 StuckGuard（纯函数，有单测覆盖），这里只负责取证据 + 执行。
+            var why = StuckGuard.Decide(kv.Key, heldSec, AudioSilenceMs?.Invoke());
+            if (why != null) ForceReleaseButton(kv.Key, why);
+        }
+    }
+
+    /// <summary>强制放开一个卡住的按钮（补发 KEYUP + 释放虚拟 HID），并记日志</summary>
+    private void ForceReleaseButton(string bid, string why)
+    {
+        int[] vks;
+        lock (_heldLock)
+        {
+            if (!_heldButtons.Remove(bid, out var e)) return;
+            vks = e.vks;
+        }
+        try
+        {
+            // 与正常释放走同一条路：虚拟 HID 发全零报告，否则 SendInput 补 KEYUP
+            InjectRelease(vks);
+            if (bid == "voice" && _injectedNow.Length == 0) { /* 已在 InjectRelease 里清 */ }
+        }
+        catch { }
+        var msg = $"GUARD  {bid}  强制释放  原因={why}  键={Keys.Format(vks)}";
+        EtwKeySource.AppendLog(msg);
+        GuardLog(msg);
+        LastError = $"已自动释放卡住的 {bid}（{why}）";
+    }
+
+    /// <summary>卡键看门狗的动作日志（与 key-events.log 分开，方便一眼扫）</summary>
+    private static readonly object _guardLogLock = new();
+    private static void GuardLog(string msg)
+    {
+        try
+        {
+            var p = Path.Combine(Env.ConfigDir, "stuck-guard.log");
+            var body = $"{DateTime.Now:HH:mm:ss.fff}  {msg}\n";
+            lock (_guardLogLock)
+            {
+                // ★ BOM 只能写一次。UTF8Encoding(true) 是"每次都写 BOM"，
+                //   追加几次日志里就会夹进一堆 ï»¿。（router.log 那边是同样的处理）
+                if (!File.Exists(p)) File.WriteAllText(p, body, new UTF8Encoding(true));
+                else File.AppendAllText(p, body, new UTF8Encoding(false));
+            }
         }
         catch { }
     }
@@ -240,6 +344,15 @@ internal sealed class KeyFilter : IDisposable
     /// <summary>清空「按住」集合并释放所有已注入未释放的键。返回清掉的键数。</summary>
     public int ClearHeld(string reason = "手动清空")
     {
+        // ★ v2 看门狗的登记集合也要一起清，否则手动复位之后
+        //   看门狗还会拿着一条已经不存在的"按住"记录去重复释放。
+        List<int[]> heldButtons;
+        lock (_heldLock)
+        {
+            heldButtons = _heldButtons.Values.Select(e => e.vks).ToList();
+            _heldButtons.Clear();
+        }
+
         ushort[] cleared;
         lock (_heldLock)
         {
@@ -248,6 +361,11 @@ internal sealed class KeyFilter : IDisposable
         }
         var n = cleared.Length;
         lock (_lastState) _lastState.Clear();
+
+        foreach (var vks in heldButtons)
+        {
+            try { InjectRelease(vks); } catch { }
+        }
 
         // ★ 给系统补发这些键的 KEYUP。
         //   遥控器丢 UP 时，Windows 会一直认为该键「按住」（表现为真实键盘对应字母打不出来、
@@ -491,6 +609,8 @@ internal sealed class KeyFilter : IDisposable
             if (bid == "voice") { try { VoiceKeyDown?.Invoke(); } catch { } }
             InjectPress(vks);
             _injectedNow = vks;
+            // 记进"按住未放"登记表 —— 看门狗 v2 靠它发现丢 UP 的卡键（两种按键来源都走这里）
+            lock (_heldLock) _heldButtons[bid] = (vks, DateTime.UtcNow);
         }
         else
         {
@@ -499,6 +619,7 @@ internal sealed class KeyFilter : IDisposable
             var rel = _injectedNow is { Length: > 0 } ? _injectedNow : vks;
             InjectRelease(rel);
             _injectedNow = Array.Empty<int>();
+            lock (_heldLock) _heldButtons.Remove(bid);
         }
     }
 

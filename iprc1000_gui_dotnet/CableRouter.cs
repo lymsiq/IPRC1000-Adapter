@@ -21,7 +21,6 @@ internal sealed class CableRouter : IDisposable
     private long _packets;
     private long _bytes;
     private volatile bool _inSession;
-    private DateTime _lastEnd = DateTime.MinValue;
 
     // 声卡开关要加锁：预热是从**按键线程**调的，而正常开关在**路由线程**里，
     // 两个线程同时 EnsureSink 会各自 new 出一个 WasapiOut（后一个泄漏）。
@@ -185,7 +184,6 @@ internal sealed class CableRouter : IDisposable
                     else if (n == 3 && asm[0] == (byte)'E')      // END
                     {
                         _inSession = false;
-                        _lastEnd = DateTime.UtcNow;
                         Log($"[END] 会话结束（累计 {Packets} 包 / {Bytes} 字节）");
                     }
                     else if (n >= 2 && n % 2 == 0)
@@ -193,15 +191,19 @@ internal sealed class CableRouter : IDisposable
                         Interlocked.Increment(ref _packets);
                         Interlocked.Add(ref _bytes, n);
                         // ★ 收到音频本身就说明"在会话中"。
-                        //   UDP 不可靠，CLEAR 有可能丢包；若只认 CLEAR，丢一次就会被下面的
-                        //   超时判断当成"会话已结束"而把声卡关掉 —— 表现为说话中途突然静音。
-                        var first = !_inSession;
+                        //   UDP 不可靠，CLEAR 有可能丢包；只认 CLEAR 的话丢一次状态就错了。
                         _inSession = true;
                         var ok = EnsureSink();
-                        if (first && _voiceDownAt != DateTime.MinValue)
+                        // 延迟埋点：从「语音键按下」到「第一包音频到达」。
+                        // ⚠ 原来写的是 `if (first && …)`，其中 first = !_inSession ——
+                        //   但 CLEAR 总是先于音频包到达、已把 _inSession 置 true，
+                        //   于是这个条件**永远不成立，这行日志从来没打印过**。
+                        //   现在只看「按键后是否已量过」，与 _inSession 无关。
+                        if (_voiceDownAt != DateTime.MinValue)
                         {
                             var ms = (DateTime.UtcNow - _voiceDownAt).TotalMilliseconds;
-                            Log($"[LAT] 语音键按下 → 首包音频到达 {ms:F0} ms（声卡已就绪={ok}）");
+                            if (ms < 5000)   // 超过 5 秒说明是后面某次音频，不是这次按键的
+                                Log($"[LAT] 语音键按下 → 首包音频到达 {ms:F0} ms（声卡已就绪={ok}）");
                             _voiceDownAt = DateTime.MinValue;
                         }
                         if (ok) _buf!.AddSamples(asm, 0, n);
@@ -211,15 +213,17 @@ internal sealed class CableRouter : IDisposable
             catch (SocketException) { /* 超时 */ }
             catch (Exception e) { if (Error == null) Error = e.Message; }
 
-            // 彻底静默一段时间后再关声卡。
-            // 以前是 0.6 秒 → 后来 3 秒，都会被正常停顿触发，每次重开 WASAPI 又要 100~300 ms，
-            // 而这段开销正好吃掉"按住后立刻说的第一个字"。放宽到 30 秒：
-            // 相当于一直保持温热，语音交互几乎不会再碰到冷启动。
-            if (!_inSession && _out != null && _lastEnd != DateTime.MinValue
-                && (DateTime.UtcNow - _lastEnd).TotalSeconds > 30.0)
-            {
-                if (_buf == null || _buf.BufferedBytes == 0) CloseSink();
-            }
+            // ── 声卡**一直开着**，不再按静默时长自动关 ──
+            //
+            // 走过的弯路：0.6 秒 → 3 秒 → 30 秒，每一档都会被正常停顿触发，
+            // 而每次重开 WASAPI 都要 40~120 ms，这段开销正好吃掉"按住后立刻说的第一个字"。
+            // 更要命的是：语音键**预热**刚打开声卡，下一轮循环就会因为
+            // "距上次 END 已超时 + 缓冲为空"把它立刻关掉 —— 开→关→再开，纯粹是抖动。
+            //
+            // 本产品的前提就是「CABLE Output 是一路常驻的麦克风」，
+            // 所以让 CABLE Input 也常驻才对：ReadFully=true 会在没数据时补静音，
+            // 就像一个正常麦克风在安静环境里输出静音一样，不会播出过期音频。
+            // 只在出错或退出时关闭（见 EnsureSink 的 catch 与 Dispose）。
         }
         CloseSink();
     }

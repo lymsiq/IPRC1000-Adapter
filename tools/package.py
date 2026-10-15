@@ -131,6 +131,33 @@ SRC_REQUIRED = [
     ("默认设备用官方 API 查", "iprc1000_gui_dotnet/Env.cs", "GetDefaultAudioEndpoint"),
     ("默认设备漂移会记日志", "iprc1000_gui_dotnet/Backend.cs", "[MIC]"),
     ("有录音设备自检入口", "iprc1000_gui_dotnet/Env.cs", "ProbeCaptureDevice"),
+    # v1.0.6：声卡常驻（不再按静默自动关，避免"开→关→再开"抖动）
+    ("声卡常驻不再自动关", "iprc1000_gui_dotnet/CableRouter.cs", "声卡**一直开着**"),
+    # v1.0.6：桥的输出是 UTF-8，必须显式指定，否则中文乱码
+    ("桥输出按 UTF-8 解码", "iprc1000_gui_dotnet/Backend.cs", "StandardOutputEncoding = Encoding.UTF8"),
+    # v1.0.6：ETW 缓冲加大，防丢音频帧
+    ("ETW 缓冲已加大", "tools/etw_consumer/src/main.rs", "max_buffer: 32"),
+    ("桥日志用本地时间", "tools/etw_consumer/src/main.rs", "local_hms"),
+    # v1.0.7：卡键看门狗 v2。v1 盯「遥控器静默」，而 ETW 模式下遥控器按住时
+    # 根本不上报（实测按住 30 秒上报 0 次）→ 丢一次 UP 就永久卡键。
+    ("看门狗 v2 有独立登记集合", "iprc1000_gui_dotnet/KeyFilter.cs", "_heldButtons"),
+    ("看门狗 v2 会被定时器调用", "iprc1000_gui_dotnet/KeyFilter.cs", "WatchdogV2()"),
+    ("判据抽成可单测的纯函数", "iprc1000_gui_dotnet/StuckGuard.cs", "public static string? Decide"),
+    ("看门狗用音频做判据", "iprc1000_gui_dotnet/KeyFilter.cs", "StuckGuard.Decide(kv.Key, heldSec"),
+    ("后端挂上了音频证据", "iprc1000_gui_dotnet/Backend.cs", "AudioSilenceMs"),
+    ("强制释放有动作日志", "iprc1000_gui_dotnet/KeyFilter.cs", "stuck-guard.log"),
+    # 紧急复位必须连 v2 的集合一起清，否则看门狗会拿着已失效的记录重复释放
+    ("紧急复位会清 v2 集合", "iprc1000_gui_dotnet/KeyFilter.cs", "_heldButtons.Clear()"),
+    # silentMs = -1 表示桥起来了但一帧都没收到，必须折算成大值，否则永不判卡键
+    ("从未收帧按超大静默处理", "iprc1000_gui_dotnet/Backend.cs", "long.MaxValue / 4"),
+    # v1.0.7 资源 review：
+    # ① 看门狗曾经被 `if (empty) return;` 挡住（ETW 模式下 v1 集合恒为空）→ v2 一次都没跑过
+    ("v1 判据不成立不许提前 return", "iprc1000_gui_dotnet/KeyFilter.cs", "if (!empty &&"),
+    # ② 窗口藏进托盘后停掉前端 2 秒轮询（跨进程 getState + 三次 DOM 重绘没人看）
+    ("托盘时停前端轮询", "iprc1000_gui_dotnet/ui/app.js", "window.setUiVisible"),
+    ("可见性变化会通知前端", "iprc1000_gui_dotnet/MainForm.cs", "OnVisibleChanged"),
+    # ③ WebView2 默认关掉没用的 Chromium 子系统（省 crashpad 等）
+    ("WebView2 有省资源参数", "iprc1000_gui_dotnet/MainForm.cs", "IPRC1000_WEBVIEW_ARGS"),
 ]
 
 # 包内「不应出现」的路径：(标签, 子串)。用来防体积膨胀与误打包。

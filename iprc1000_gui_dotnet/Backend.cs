@@ -52,6 +52,20 @@ internal sealed class Backend : IDisposable
         // 见 KeyFilter.VoiceKeyDown 的说明：不预热会丢掉"按住后立刻说的第一个字"。
         KeyFilter.VoiceKeyDown -= WarmAudio;   // 防重复订阅
         KeyFilter.VoiceKeyDown += WarmAudio;
+        // ★ 卡键看门狗 v2 的音频判据：语音键按住期间蓝牙 SCO 一定在传帧，
+        // 「按着 + 静默 >3s」= UP 丢了 → 看门狗会强制放开。
+        // 只认当前这个桥进程写的统计（pid 匹配），避免读到上一个实例的残留。
+        _filter.AudioSilenceMs = () =>
+        {
+            var st = ReadBridgeStats();
+            if (st == null) return null;
+            if ((st["pid"]?.GetValue<int>() ?? -1) != SafePid()) return null;
+            long v;
+            try { v = st["silentMs"]?.GetValue<long>() ?? -1; } catch { return null; }
+            // -1 = 桥起来了但**一帧都没收到过**。这不是"有信号"，而是彻头彻尾的没信号，
+            // 必须折算成一个超大的静默时长，否则 `>3000` 判不成立、语音键永远不会被放开。
+            return v < 0 ? long.MaxValue / 4 : v;
+        };
         // ETW 按键来源常驻监听（被动、无副作用）；是否真正生效由按键来源模式决定
         StartProbeThread();
         _etwKeys = new EtwKeySource(EtwKeySource.DefaultPort, OnUsage);
@@ -540,8 +554,13 @@ internal sealed class Backend : IDisposable
                     CreateNoWindow = true,
                     // ★ 必须重定向并主动读走：否则桥的输出被丢弃（CreateNoWindow 下没有控制台），
                     //   而"音频为什么断"的线索全在桥的 stdout 里。顺带避免子进程写满管道被阻塞。
+                    // ⚠ 也必须显式指定 UTF-8：桥（Rust）写的是 UTF-8，而 .NET 默认按
+                    //   控制台代码页（中文机 cp936）解码 → 中文全变成乱码
+                    //   （"UDP → 127.0.0.1" 会变成 "UDP 鈫?127.0.0.1"）。
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
+                    StandardOutputEncoding = Encoding.UTF8,
+                    StandardErrorEncoding = Encoding.UTF8,
                     Arguments = $"--udp 127.0.0.1:{Env.PcmPort} --hp 70 --seconds 86400",
                 };
                 var proc = Process.Start(psi);

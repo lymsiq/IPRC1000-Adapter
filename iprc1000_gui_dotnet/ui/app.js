@@ -624,6 +624,19 @@ async function refresh() {
   renderEnv(state);
 }
 
+/* ── 窗口藏进托盘后停掉 2 秒轮询 ──
+   本程序是常驻托盘应用，窗口大部分时间是隐藏的。原来 refresh 每 2 秒照跑：
+   一次跨进程 getState()（不小的 JSON）+ 三次全量 DOM 重绘，而根本没人看。
+   由 C# 侧 OnVisibleChanged 调 window.setUiVisible() 控制；
+   重新露出时立刻补刷一次，避免显示旧数据。 */
+window.setUiVisible = function (v) {
+  if (timer) { clearInterval(timer); timer = null; }
+  if (v) {
+    refresh();
+    timer = setInterval(refresh, 2000);
+  }
+};
+
 /* ───────── 绑定 ───────── */
 function bindUI() {
   $$('.nav-btn').forEach((b) => (b.onclick = () => goto(b.dataset.page)));

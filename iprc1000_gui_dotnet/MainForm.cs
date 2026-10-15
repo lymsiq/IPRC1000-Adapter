@@ -111,10 +111,35 @@ internal sealed class MainForm : Form
             Env.AppName, "WebView2");
         Directory.CreateDirectory(dataDir);
 
-        // 允许外部注入 Chromium 参数（沙箱/无 GPU 环境调试用），WebView2 会读这个环境变量
+        // ★ 省资源：默认关掉对「本地静态 UI」完全没用的 Chromium 子系统。
+        //
+        //   本程序常驻后台，UI 只是几页本地 HTML/CSS —— 但默认会拉起一整套浏览器：
+        //   实测 **13 个进程 / 724 MB**，其中属于我们的就有 **6 个进程 / 356 MB**
+        //   （GPU 进程 84 MB + crashpad 12 MB 是纯浪费）。
+        //   走官方环境变量注入，不动 EnsureCoreWebView2Async 那条敏感路径。
+        //
+        //   刻意**没有**加 --disable-renderer-backgrounding /
+        //   --disable-backgrounding-occluded-windows：那两个会让后台渲染进程不降频，
+        //   对本常驻托盘应用是反效果（我们要的就是窗口藏起来时它自己降下去）。
+        //
+        // ⚠ 关于 `--disable-gpu`（本可再省 ~84 MB 的 GPU 进程）：
+        //   **实测没能验证它是否会让界面白屏**，所以默认不加。
+        //   原因：自动化环境里启动的实例窗口不显示，WebView2 压根不初始化
+        //   （连 `--selftest` 都因此走 18 秒兜底，这是既有问题），拿不到对照组。
+        //   想试的话自己加：设环境变量 IPRC1000_WEBVIEW_ARGS="--disable-gpu ..."，
+        //   界面白就去掉它。
         var extra = Environment.GetEnvironmentVariable("IPRC1000_WEBVIEW_ARGS");
-        if (!string.IsNullOrWhiteSpace(extra))
-            Environment.SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", extra);
+        if (string.IsNullOrWhiteSpace(extra))
+            extra = "--disable-crash-reporter --no-crash-upload "  // 省 crashpad（~12 MB）
+                  + "--disable-background-networking "
+                  + "--disable-sync --disable-extensions "
+                  + "--no-first-run --no-default-browser-check "
+                  + "--mute-audio "
+                  + "--renderer-process-limit=1 "          // 我们只有一页，不需要多渲染进程
+                  + "--disable-features=Translate,OptimizationHints,MediaRouter,"
+                  + "CalculateNativeWinOcclusion";
+        Environment.SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", extra);
+        Trace($"[webview] 额外参数：{extra}");
 
         // ★ 用 CreationProperties + 无参 EnsureCoreWebView2Async：
         //   它内部会自行 marshal 到 UI 线程；显式 CreateAsync 后 await 的续体可能落到
@@ -475,6 +500,26 @@ internal sealed class MainForm : Form
         base.OnResize(e);
         // 最小化 → 收进托盘（任务栏不再占位）
         if (WindowState == FormWindowState.Minimized) Hide();
+    }
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        // ★ 窗口收进托盘后，前端每 2 秒一次的 getState() + 三次 DOM 重绘纯属浪费
+        //   （本程序绝大部分时间都待在托盘里）。让它停掉；重新露出时再补刷。
+        //   两个入口（最小化 / 点 X 收托盘）都走 Hide()，这里一处就够。
+        SetUiVisible(Visible);
+    }
+
+    private async void SetUiVisible(bool v)
+    {
+        try
+        {
+            if (_web?.CoreWebView2 == null) return;
+            await _web.CoreWebView2.ExecuteScriptAsync(
+                $"window.setUiVisible({(v ? "true" : "false")})");
+        }
+        catch { }   // WebView2 尚未就绪时忽略，下次可见性变化会再试
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
