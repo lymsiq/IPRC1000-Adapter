@@ -278,6 +278,16 @@ internal sealed class MainForm : Form
     //   用户点开托盘 → 重建（几百毫秒），并回到原来的页面
     // 收益：常驻内存 457 MB → 约 100 MB，且**界面观感零损失**（重建的是同一个页面）。
 
+    /// <summary>
+    /// CoreWebView2 是否已初始化并完成首次导航。
+    /// ★ 必须和「控件是否存在」(<see cref="_web"/>) 分开记 ——
+    ///   构造函数就会创建控件（让窗口有内容可停靠），但初始化要等到 Load 之后。
+    ///   如果拿「控件是否为 null」当"已初始化"用，首次启动会在
+    ///   <see cref="EnsureWebViewAsync"/> 的守卫处直接返回，InitWebView 永远不执行
+    ///   → 没有 CoreWebView2、也没有导航 → **整窗白屏**（v1.1.0 首发的实际事故）。
+    /// </summary>
+    private bool _webReady;
+
     private void AttachWebView()
     {
         var w = new WebView2 { Dock = DockStyle.Fill };
@@ -289,14 +299,20 @@ internal sealed class MainForm : Form
     /// <summary>确保 WebView2 已创建并初始化（首次与重建共用这一条路径）。</summary>
     private async Task EnsureWebViewAsync()
     {
-        if (_web != null || _webInitBusy || IsDisposed) return;
+        if (_webReady || _webInitBusy || IsDisposed) return;
         _webInitBusy = true;
         try
         {
             var sw = Stopwatch.StartNew();
-            AttachWebView();
+            if (_web == null) AttachWebView();      // 释放后重建；首次启动控件已由构造函数建好
             await InitWebView();
-            WebViewLog($"界面已重建，耗时 {sw.ElapsedMilliseconds} ms（累计释放 {_releaseCount} 次）");
+            _webReady = true;
+            WebViewLog($"界面已就绪，耗时 {sw.ElapsedMilliseconds} ms（累计释放 {_releaseCount} 次）");
+        }
+        catch (Exception e)
+        {
+            WebViewLog($"★ 界面初始化失败：{e.GetType().Name}: {e.Message}");
+            throw;
         }
         finally { _webInitBusy = false; }
     }
@@ -318,6 +334,7 @@ internal sealed class MainForm : Form
         var w = _web;
         if (w == null) return;
         _web = null;
+        _webReady = false;
         var sw = Stopwatch.StartNew();
         try { w.Dispose(); } catch (Exception e) { WebViewLog($"释放时出异常（已忽略）：{e.Message}"); }
         _releaseCount++;
@@ -629,9 +646,9 @@ internal sealed class MainForm : Form
 
         if (Visible)
         {
-            // 露出来了：取消隐藏计时；若界面进程已被释放，就地重建
+            // 露出来了：取消隐藏计时；若界面进程已被释放（或还没初始化成功），就地补建
             _hiddenSince = DateTime.MinValue;
-            if (_web == null && !_releaseDisabled)
+            if (!_webReady && !_releaseDisabled)
             {
                 BeginInvoke(new Action(async () =>
                 {
