@@ -232,8 +232,10 @@ WinUHid（MIT）、VB-CABLE（VB-Audio Donationware）、语音桥 `etw_consumer
 
 ---
 
-<!-- 1.0.6 / 1.0.7 只在本机发布（GitHub 已冻结在 v1.0.5），故无远端 tag 链接 -->
+<!-- 1.0.6 没有单独打 tag（两个版本的改动在文件层面交叉，合并为一次提交），链接指向那次提交 -->
 
+[1.0.7]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.7
+[1.0.6]: https://github.com/lymsiq/IPRC1000-Adapter/commit/e8ce17eda4a51e79ff4f141378d8c7aafb724e02
 [1.0.5]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.5
 [1.0.4]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.4
 [1.0.3]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.3
