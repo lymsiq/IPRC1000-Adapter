@@ -12,10 +12,16 @@
     <RootNamespace>Iprc1000Adapter</RootNamespace>
     <ApplicationIcon>ui\icon.ico</ApplicationIcon>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <!-- 关键：框架依赖 + 单文件 → 用系统 .NET 8 Desktop 运行时，不打包运行时 -->
+    <!-- 关键：框架依赖 + 单文件 → 用系统 .NET Desktop 运行时，不打包运行时 -->
     <SelfContained>false</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- ★ 放宽运行时版本门槛
+         默认策略（Minor）会**锁死在 8.x** —— 机器上只装了 .NET 9/10/11 的话，
+         双击程序会直接弹「需要下载 .NET」，而我们编译时用的 API 完全兼容它们。
+         Major = 缺 8.x 时向上找最低可用的更高主版本 → 装 8/9/10/11 任一都能跑。
+         这直接减少了一整类「客户机上必须先装 .NET 8」的部署摩擦。 -->
+    <RollForward>Major</RollForward>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <DebugType>none</DebugType>
     <AllowedReferenceRelatedFileExtensions>none</AllowedReferenceRelatedFileExtensions>
