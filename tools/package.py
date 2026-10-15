@@ -11,6 +11,7 @@
 用法：python F:\\vibe\\tools\\package.py
 """
 import datetime
+import hashlib
 import os
 import re
 import shutil
@@ -478,3 +479,17 @@ if __name__ == "__main__":
     tgt = build()
     verify()
     print(f"\n包目录：{tgt}\n压缩包：{ZP}")
+
+    # ★★ 发布清单 —— GitHub Release 必须传**两个**附件。
+    #    包内「升级说明.txt」向用户承诺了一个永久下载链接，它指向**固定名**那个包；
+    #    只传带版本号的包 → 那个链接就是 404。
+    #    v1.0.7 / v1.1.0 都这么漏过（固定名附件从 v1.0.5 起再没上传过），
+    #    直到 v1.1.1 实测链接 404 才发现 —— 文档写了、流程没做，用户照样拿不到。
+    print("\n★ 上传 GitHub Release 时**两个附件都要传**，只传一个永久链接就是 404：")
+    print(f"   {os.path.basename(ZP)}   ← 带版本号的存档")
+    print(f"   {os.path.basename(FIXED_ZIP)}                   ← 固定名，永久链接靠它")
+    print("   永久链接（发布后务必自测一次）：")
+    print("   https://github.com/lymsiq/IPRC1000-Adapter/releases/latest/download/IPRC1000_Adapter.zip")
+    for p in (ZP, FIXED_ZIP):
+        h = hashlib.sha256(open(p, "rb").read()).hexdigest()
+        print(f"   sha256 {os.path.basename(p)} = {h}")
