@@ -5,6 +5,41 @@
 
 ---
 
+## [1.1.0] - 2026-10-15
+
+托盘时释放界面进程 —— 常驻内存 **457 MB → 约 100 MB**，界面观感零损失。
+
+### 新增
+
+- **托盘释放 WebView2**：窗口收进托盘 ≥30 秒后主动 Dispose 掉 WebView2，
+  Chromium 的 6 个进程（约 356 MB）随之退出；重新打开窗口时就地重建（几百毫秒），
+  并回到释放前的那个页面（`SourceChanged` 记录当前地址）。
+  阈值可用环境变量 `IPRC1000_RELEASE_WEBVIEW_SEC` 调整（0 = 从不释放）。
+- **重建失败自动降级**：一旦重建失败，永久停用自动释放并弹窗提示，
+  不会反复报错。
+- 新增 `%APPDATA%\IPRC1000 Adapter\webview.log` —— 释放/重建生命周期日志，
+  单独一份，方便核对内存策略是否生效。
+- 新增 `tools/ui_probe.js` —— **真实浏览器渲染**的界面冒烟探针
+  （三页渲染 / 导航切换 / 弹窗 / 缩略图 / JS 报错 / app.js 引用的元素必须存在）。
+  2026-10-15 的白屏事故就是靠它这类检查才从「看不见」变成「可断言」的。
+- 新增 `tools/review.py`（重建版）—— 源码卫生检查。
+  **只报告，不判定**：识别 `'前缀' + 变量` 动态拼接、整词匹配、剥注释后扫描，
+  输出分 [硬伤] / [待确认] 两级，只有硬伤才影响退出码。
+
+### 优化
+
+- 环境设置页次要按钮折进 `<details class="adv">`（按既定界面约定：
+  面板上只留最常用的 1~2 个动作），共折叠 17 个按钮，展开即可点、功能不变。
+- 删除确认无引用的死代码：`.keycap`（×2）、`.keybind`、
+  `.modal-body .combo-input`、`.modal-actions`、`.btn.tiny`、
+  永不更新的 `remoteHint` 标签、`injectKv` 里重复的「最近按键」
+  （保留 `keySrcKv` 里带 usage / 按住态的那格）。
+- 修复：环境自检面板图标用了 `.ic-green` 但 CSS 未定义 —— 已补。
+
+### 兼容
+
+- 桥接入口与 v1.0.7 完全一致，`Backend.cs` / `KeyFilter.cs` 未动。
+
 ## [1.0.7] - 2026-10-14
 
 修「按键映射锁定、只能靠紧急复位恢复」——**看门狗在 ETW 模式下是死的**。
@@ -234,6 +269,7 @@ WinUHid（MIT）、VB-CABLE（VB-Audio Donationware）、语音桥 `etw_consumer
 
 <!-- 1.0.6 没有单独打 tag（两个版本的改动在文件层面交叉，合并为一次提交），链接指向那次提交 -->
 
+[1.1.0]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.1.0
 [1.0.7]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.7
 [1.0.6]: https://github.com/lymsiq/IPRC1000-Adapter/commit/e8ce17eda4a51e79ff4f141378d8c7aafb724e02
 [1.0.5]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.5
