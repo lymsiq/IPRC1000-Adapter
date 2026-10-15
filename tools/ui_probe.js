@@ -158,6 +158,24 @@ const PROBE = () => {
   if (bound) ok('导航按钮已绑定 onclick（bindUI 正常完成）');
   else bad('导航按钮没有 onclick —— 点了不会切页');
 
+  /* ── 1.6 app.js 引用的每个元素都必须存在 ──
+     直接从源码抓 $('#xxx') / getElementById('xxx')，再到 DOM 里逐个核对。
+     这道闸防的是「改 HTML 时删掉了 JS 还在用的元素」——一旦发生，
+     对应功能在真机上会静默失效或直接抛 TypeError。 */
+  {
+    const src = fs.readFileSync(path.join(UI, 'app.js'), 'utf8')
+      // 先剥注释再抓 id，否则注释里的示例（如 `$('#x')`）会算进去
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1');   // [^:] 是为了不吃掉字符串里的 https://
+    const ids = new Set();
+    for (const m of src.matchAll(/\$\('#([A-Za-z][\w-]*)'\)/g)) ids.add(m[1]);
+    for (const m of src.matchAll(/getElementById\('([A-Za-z][\w-]*)'\)/g)) ids.add(m[1]);
+    const inDom = await page.evaluate((list) => list.map((id) => [id, !!document.getElementById(id)]), [...ids]);
+    const missing = inDom.filter(([, f]) => !f).map(([id]) => id);
+    if (missing.length) bad('app.js 引用但 DOM 里不存在的元素：' + missing.join(', '));
+    else ok('app.js 引用的 ' + ids.size + ' 个元素在 DOM 里全部存在');
+  }
+
   /* ── 2. 逐页切换 ── */
   for (const name of PAGES) {
     await page.click(`.nav-btn[data-page="${name}"]`);

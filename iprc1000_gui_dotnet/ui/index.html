@@ -202,17 +202,22 @@
         <div class="note" id="defaultMicNote"></div>
         <div class="panel-actions">
           <button class="btn" id="btnSetupAll">一键完成全部</button>
-          <button class="btn ghost" id="btnInstallCable2">安装虚拟声卡</button>
-          <button class="btn ghost" id="btnInstallUhid2">安装虚拟键盘驱动</button>
-          <button class="btn ghost" id="btnSwitchDriver">切换设备驱动</button>
-          <button class="btn ghost" id="btnRevertDriver">还原成键盘驱动</button>
-          <button class="btn ghost" id="btnAutoStart">启动后自动拉起语音桥</button>
-          <button class="btn ghost" id="btnAutoRun">开机自启</button>
-          <button class="btn ghost" id="btnStartMin">启动时进托盘</button>
-          <button class="btn ghost" id="btnAutoDrv">启动自动切驱动</button>
-          <button class="btn ghost" id="btnAutoMic">默认麦克风被改走时自动改回</button>
           <button class="btn ghost" id="btnCheckMic">检查录音设备</button>
         </div>
+        <details class="adv">
+          <summary>更多选项：装声卡 / 装驱动 · 设备驱动切换 · 自启动设置</summary>
+          <div class="panel-actions">
+            <button class="btn ghost" id="btnInstallCable2">安装虚拟声卡</button>
+            <button class="btn ghost" id="btnInstallUhid2">安装虚拟键盘驱动</button>
+            <button class="btn ghost" id="btnSwitchDriver">切换设备驱动</button>
+            <button class="btn ghost" id="btnRevertDriver">还原成键盘驱动</button>
+            <button class="btn ghost" id="btnAutoStart">启动后自动拉起语音桥</button>
+            <button class="btn ghost" id="btnAutoRun">开机自启</button>
+            <button class="btn ghost" id="btnStartMin">启动时进托盘</button>
+            <button class="btn ghost" id="btnAutoDrv">启动自动切驱动</button>
+            <button class="btn ghost" id="btnAutoMic">默认麦克风被改走时自动改回</button>
+          </div>
+        </details>
       </div>
 
       <!-- 1. 注册表 -->
@@ -232,9 +237,14 @@
 
         <div class="panel-actions">
           <button class="btn" id="btnApplyReg">应用推荐值</button>
-          <button class="btn ghost" id="btnRecheck">重新检测</button>
-          <button class="btn ghost" id="btnReboot">立即重启</button>
         </div>
+        <details class="adv">
+          <summary>更多选项：重新检测 · 立即重启</summary>
+          <div class="panel-actions">
+            <button class="btn ghost" id="btnRecheck">重新检测</button>
+            <button class="btn ghost" id="btnReboot">立即重启</button>
+          </div>
+        </details>
       </div>
 
       <!-- 2. 虚拟声卡 -->
@@ -254,8 +264,13 @@
         <div class="panel-actions">
           <button class="btn" id="btnInstallCable">安装 / 修复虚拟声卡</button>
           <button class="btn ghost" id="btnSetMic">设为默认麦克风</button>
-          <button class="btn ghost" id="btnOpenCable">打开官网</button>
         </div>
+        <details class="adv">
+          <summary>更多选项：打开官网</summary>
+          <div class="panel-actions">
+            <button class="btn ghost" id="btnOpenCable">打开官网</button>
+          </div>
+        </details>
       </div>
 
       <!-- 3. 音频桥 -->
@@ -274,9 +289,14 @@
 
         <div class="panel-actions">
           <button class="btn" id="btnBridge">启动语音桥</button>
-          <button class="btn ghost" id="btnInject">关闭快捷键注入</button>
-          <button class="btn ghost" id="btnAdmin">以管理员身份重启本程序</button>
         </div>
+        <details class="adv">
+          <summary>更多选项：快捷键注入开关 · 管理员身份重启</summary>
+          <div class="panel-actions">
+            <button class="btn ghost" id="btnInject">关闭快捷键注入</button>
+            <button class="btn ghost" id="btnAdmin">以管理员身份重启本程序</button>
+          </div>
+        </details>
       </div>
 
       <!-- 4. 按键拦截 -->
@@ -295,17 +315,18 @@
         <div class="note" id="keySrcNote"></div>
         <div class="panel-actions">
           <button class="btn" id="btnReleaseAll">紧急复位：释放所有按键</button>
+          <button class="btn ghost" id="btnInstallUhid">安装虚拟键盘驱动</button>
         </div>
         <div class="kv" id="uhidKv"></div>
         <div class="note" id="uhidNote"></div>
-        <div class="panel-actions">
-          <button class="btn" id="btnInstallUhid">安装虚拟键盘驱动</button>
-          <button class="btn ghost" id="btnTestInject">测试注入右 Alt</button>
-        </div>
-        <div class="panel-actions">
-          <button class="btn ghost" id="btnClearLog">清空按键日志</button>
-          <button class="btn ghost" id="btnExportUhid">导出到桌面手动安装</button>
-        </div>
+        <details class="adv">
+          <summary>更多选项：测试注入 · 清空日志 · 导出驱动手动安装</summary>
+          <div class="panel-actions">
+            <button class="btn ghost" id="btnTestInject">测试注入右 Alt</button>
+            <button class="btn ghost" id="btnClearLog">清空按键日志</button>
+            <button class="btn ghost" id="btnExportUhid">导出到桌面手动安装</button>
+          </div>
+        </details>
       </div>
     </section>
 

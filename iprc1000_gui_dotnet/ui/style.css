@@ -153,6 +153,15 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
 /* 说明里的小字（排查提示之类），比正文再淡一档 */
 .dim{color:var(--txt3)}
 .panel-actions{display:flex;gap:9px;margin-top:15px;flex-wrap:wrap}
+/* 次要动作折叠：面板上只留最常用的 1~2 个，其余收进 details（原生折叠，零 JS） */
+.adv{margin-top:9px}
+.adv>summary{display:inline-flex;align-items:center;gap:5px;padding:4px 2px;cursor:pointer;
+  color:var(--txt2);font-size:12.5px;user-select:none;list-style:none;border-radius:7px}
+.adv>summary::-webkit-details-marker{display:none}
+.adv>summary::before{content:'▸';font-size:10px;line-height:1;transition:transform .15s}
+.adv[open]>summary::before{transform:rotate(90deg)}
+.adv>summary:hover{color:var(--blue)}
+.adv .panel-actions{margin-top:8px}
 
 /* 按钮 */
 .btn{
