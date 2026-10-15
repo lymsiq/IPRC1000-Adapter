@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [ValidateSet("Install", "InstallElevated", "Finish", "Repair", "Restore", "Audit", "EnsureMic", "EnsureUsbMic")]
   [string] $Mode = "Install",

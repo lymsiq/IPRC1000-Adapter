@@ -1,7 +1,8 @@
-# ============================================================================
+﻿# ============================================================================
 #  IPRC1000 遥控器适配器 —— 一键部署
 #
-#  做四件事（已完成的会自动跳过）：
+#  做五件事（已完成的会自动跳过）：
+#    ⓪ 确保 .NET 桌面运行时（主程序是框架依赖发布，共用系统这一份；缺则自动安装）
 #    ① 安装 WinUHid 虚拟键盘驱动（注入「右 Alt 长按说话」必需）
 #    ② 把遥控器的 HID 设备驱动从「键盘」切换成「普通 HID 设备」
 #       —— 这一步**不需要装任何新驱动**（用的是 Windows 自带 input.inf）
@@ -50,6 +51,23 @@ if (-not (Test-Path (Join-Path $Root 'IPRC1000 Adapter.exe'))) { $Root = $PSScri
 $Exe  = Join-Path $Root 'IPRC1000 Adapter.exe'
 if (-not (Test-Path $Exe)) { Fail "找不到主程序，请确认脚本在解压后的包里：$Root"; exit 1 }
 Ok "程序目录：$Root"
+
+# ── 0. .NET 桌面运行时 ────────────────────────────────────────────────────
+#    ★ 复用 准备运行时.ps1 —— 检测与安装只有那一份实现，避免两处漂移。
+#      「启动.cmd」走的也是同一个脚本。
+Write-Host ''
+Write-Host '⓪ .NET 桌面运行时'
+$prep = Join-Path $PSScriptRoot '准备运行时.ps1'
+if (-not (Test-Path $prep)) { $prep = Join-Path $Root 'tools\准备运行时.ps1' }
+if (Test-Path $prep) {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $prep -AppDir $Root
+    if ($LASTEXITCODE -ne 0) {
+        Fail '.NET 桌面运行时没准备好 —— 主程序起不来。请按上面的提示处理后重跑本脚本。'
+        exit 1
+    }
+} else {
+    Warn "没找到 $prep —— 跳过运行时检查（主程序可能起不来）"
+}
 
 # ── 1. WinUHid 虚拟键盘驱动 ────────────────────────────────────────────────
 Write-Host ''
@@ -142,8 +160,9 @@ Ok '已启动'
 
 Write-Host ''
 Write-Host '══════════════════════════════════════════════════════════'
-Write-Host '  部署完成。请打开主程序的「环境设置 → 环境自检」确认 5 项全绿：'
-Write-Host '    虚拟声卡 / 默认录音设备=CABLE Output / WinUHid 驱动 / 按键受保护 / 语音桥'
+Write-Host '  部署完成。请打开主程序的「环境设置 → 环境自检」确认全绿：'
+Write-Host '    虚拟声卡 / 默认录音设备=CABLE Output / WinUHid 驱动 / 遥控器已不是键盘 / 语音桥'
+Write-Host '    以及运行环境：.NET 运行时 / WebView2 运行时 / 管理员权限'
 Write-Host ''
 Write-Host '  日常用法：按住遥控器【语音键】对着遥控器说话即可（会自动注入右 Alt）。'
 Write-Host '  按最底部【方块键】可循环切换配置组（默认组 ↔ WorkBuddy 快捷键组）。'
