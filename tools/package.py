@@ -88,6 +88,28 @@ CHECKS = [
     ("快捷方式生成器",      "创建桌面快捷方式.cmd", "IPRC1000 遥控器"),
     ("快捷方式在 tools 里", "tools/创建桌面快捷方式.cmd", "管理员身份运行"),
     ("升级说明",           "升级说明.txt", "永久下载链接"),
+    # ★ v1.1.1 启动引导：缺 .NET 桌面运行时时自动装。
+    #   顶层与 tools/ 两处都要有 —— 快捷方式指向它，用户也习惯"解压后一眼看到"。
+    ("启动引导在顶层",      "启动.cmd", "准备运行时"),
+    ("启动引导在 tools 里", "tools/启动.cmd", "准备运行时"),
+    ("运行时准备脚本",      "tools/准备运行时.ps1", "[switch]$Quiet"),
+    # 快捷方式必须仍指向「启动.cmd」——若退回直接指 exe，缺 .NET 的机器就只剩英文提示
+    ("快捷方式走启动引导",  "创建桌面快捷方式.cmd", "启动.cmd"),
+]
+
+# 包内文本的**编码约定**（踩过的坑，必须机器校验，否则只会在用户机器上炸）：
+#   .cmd → GBK：中文 Windows 控制台代码页是 cp936，UTF-8 的中文会被逐字节解错。
+#   .ps1 → UTF-8 **带 BOM**：PS 5.1 把无 BOM 的 UTF-8 当 ANSI 读，中文直接语法报错。
+# 判据用「按该编码读出后中文关键字还在」—— 单看"能不能解码"不够：
+# GBK 很宽容，UTF-8 的字节串按 GBK 也能解出来，只是变成乱码。
+ENCODING = [
+    # (期望编码, 包内路径, 该编码下必须仍然正确的中文关键字)
+    ("gbk", "启动.cmd",                   "准备运行时"),
+    ("gbk", "创建桌面快捷方式.cmd",        "快捷方式"),
+    ("gbk", "tools/启动.cmd",             "准备运行时"),
+    ("gbk", "tools/创建桌面快捷方式.cmd",  "快捷方式"),
+    ("bom", "tools/准备运行时.ps1",        "运行时"),
+    ("bom", "tools/一键部署.ps1",          "部署"),
 ]
 
 # 源码级「反向校验」：(标签, 相对仓库根的路径, 禁止出现的子串)
@@ -158,6 +180,19 @@ SRC_REQUIRED = [
     ("可见性变化会通知前端", "iprc1000_gui_dotnet/MainForm.cs", "OnVisibleChanged"),
     # ③ WebView2 默认关掉没用的 Chromium 子系统（省 crashpad 等）
     ("WebView2 有省资源参数", "iprc1000_gui_dotnet/MainForm.cs", "IPRC1000_WEBVIEW_ARGS"),
+    # ★★ v1.1.1 白屏事故回归守卫（v1.1.0 首发整窗白屏，界面完全打不开）。
+    #    根因：把「控件是否存在」(_web) 当成了"已初始化"用，而构造函数就会建控件
+    #    → 首次启动在守卫处直接 return → InitWebView 永不执行 → 无 CoreWebView2、无导航。
+    #    铁证：白屏机器上 webview.log **根本不存在**（日志是由 InitWebView 那条路径写的）。
+    #    下面四条缺任何一条，白屏就可能复发：
+    ("就绪标志与控件标志分离", "iprc1000_gui_dotnet/MainForm.cs", "private bool _webReady;"),
+    ("初始化守卫用就绪标志", "iprc1000_gui_dotnet/MainForm.cs",
+     "if (_webReady || _webInitBusy || IsDisposed) return;"),
+    ("初始化成功才置就绪", "iprc1000_gui_dotnet/MainForm.cs", "_webReady = true;"),
+    ("释放时清掉就绪标志", "iprc1000_gui_dotnet/MainForm.cs", "_webReady = false;"),
+    # 出"白屏/界面没起来"时必须有日志可看（v1.1.0 期间正是因为无日志只能靠猜）
+    ("界面生命周期有日志", "iprc1000_gui_dotnet/MainForm.cs", "webview.log"),
+    ("初始化成败都记日志", "iprc1000_gui_dotnet/MainForm.cs", "界面初始化失败"),
 ]
 
 # 包内「不应出现」的路径：(标签, 子串)。用来防体积膨胀与误打包。
@@ -240,15 +275,17 @@ def build():
     os.makedirs(os.path.join(target, "tools"), exist_ok=True)
     for f in ("check_stuck_key.py", "stuck_key_guard.py", "Run-Guard.cmd",
               "一键部署.ps1", "SetHidDriver/publish/SetHidDriver.exe",
-              "创建桌面快捷方式.cmd"):
+              "创建桌面快捷方式.cmd", "准备运行时.ps1", "启动.cmd"):
         src = os.path.join(ROOT, "tools", f)
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(target, "tools", os.path.basename(f)))
-    # ★ 快捷方式生成器也放到包**顶层**：用户最自然的动作是"解压后一眼看到它"，
-    #   埋在 tools/ 里容易被忽略。两处都放，成本只有一个几 KB 的文件。
-    sc = os.path.join(ROOT, "tools", "创建桌面快捷方式.cmd")
-    if os.path.exists(sc):
-        shutil.copy2(sc, os.path.join(target, "创建桌面快捷方式.cmd"))
+    # ★ 启动引导也放到包**顶层**：桌面快捷方式直接指向它，而用户最自然的动作是
+    #   "解压后一眼看到它"，埋在 tools/ 里容易被忽略。两处都放，成本只有几 KB。
+    #   （「启动.cmd」自己会先试同目录、再试 ..\，所以两种位置都能跑）
+    for n in ("创建桌面快捷方式.cmd", "启动.cmd"):
+        p = os.path.join(ROOT, "tools", n)
+        if os.path.exists(p):
+            shutil.copy2(p, os.path.join(target, n))
     docsrc = os.path.join(ROOT, "tools", "docs")
     if os.path.isdir(docsrc):
         # ★ 排除 screenshots/：它下面就是那 4 张界面截图，已经以中文名放到包顶层了
@@ -292,6 +329,12 @@ def build():
         f.write("  2) 双击里面的「创建桌面快捷方式.cmd」\n")
         f.write("     → 桌面出现「IPRC1000 遥控器」，已设为「以管理员身份运行」\n")
         f.write("  3) 首次部署环境：右键「以 PowerShell 运行」tools\\一键部署.ps1\n\n")
+        f.write("【以后都从「启动.cmd」进】\n")
+        f.write("  也可以直接双击程序目录里的「启动.cmd」（桌面快捷方式指的就是它）。\n")
+        f.write("  它会先确认 .NET 桌面运行时到位：缺了就自动装（优先用包内离线安装器，\n")
+        f.write("  否则联网下载官方安装包），装好再拉起主程序 —— 不会再弹英文的\n")
+        f.write("  「需要下载 .NET」对话框让你自己找下载地址。\n")
+        f.write("  ★ 主程序支持 .NET 8/9/10/11 任一桌面运行时，不是只认 8。\n\n")
         f.write("【以后每次升级】两步，快捷方式不用动：\n")
         f.write("  1) 下载 IPRC1000_Adapter.zip（同一个链接，永远是最新版）\n")
         f.write("  2) 解压到 D:\\ ，选「全部覆盖」\n")
@@ -311,7 +354,8 @@ def build():
                 "  · ETW 自适应填缓冲（按键延迟实测 ~13 ms）\n"
                 "  · 卡键三层防护（设备移除即时 / 800ms 看门狗 / 独立守卫）\n"
                 "  · 媒体键走 SendInput、启动自动切非键盘驱动\n"
-                "\n首次部署：右键「以 PowerShell 运行」tools\\一键部署.ps1\n"
+                "\n启动：双击「启动.cmd」（自动确认 / 安装 .NET 桌面运行时后拉起主程序）\n"
+                "首次部署：右键「以 PowerShell 运行」tools\\一键部署.ps1\n"
                 "文档：文档\\SOP-部署与使用.md · 文档\\遥控器按键说明.md\n"
                 "许可：LICENSE（MIT）· THIRD-PARTY-NOTICES.md（内置第三方组件声明）\n")
 
@@ -369,6 +413,34 @@ def verify():
             ok = not hit
             ok_all &= ok
             print(f"  {'✓' if ok else '✗'} {label}" + ("" if ok else f"  ← {hit[:3]}"))
+
+        # ── 文本编码约定（.cmd=GBK / .ps1=带 BOM 的 UTF-8）──
+        for want, member, kw in ENCODING:
+            if member not in names:
+                ok_all = False
+                print(f"  ✗ 缺 {member}（编码无法校验）")
+                continue
+            raw = z.read(member)
+            if want == "gbk":
+                # UTF-8 的字节串按 GBK 几乎总能"解得出来"，只是变成乱码 ——
+                # 所以判据不是能解码，而是**中文关键字还原正确**。
+                try:
+                    txt = raw.decode("gbk")
+                except UnicodeDecodeError:
+                    txt = ""
+                ok = kw in txt and not raw.startswith(b"\xef\xbb\xbf")
+                why = "" if ok else f"  ← 按 GBK 读不出「{kw}」（是不是存成了 UTF-8？）"
+            else:  # bom
+                ok = raw.startswith(b"\xef\xbb\xbf")
+                if ok:
+                    try:
+                        txt = raw.decode("utf-8-sig")
+                    except UnicodeDecodeError:
+                        txt, ok = "", False
+                    ok = ok and kw in txt
+                why = "" if ok else f"  ← 应为「带 BOM 的 UTF-8」且含「{kw}」"
+            ok_all &= ok
+            print(f"  {'✓' if ok else '✗'} {member} 编码为 {want.upper()}{why}")
 
     # ── 源码级正/反向校验（针对注入链路，防回归）──
     print("  ── 源码检查 ──")
