@@ -46,6 +46,7 @@ internal sealed class MainForm : Form
     {
         _selftest = selftest;
         _selftestOut = selftestOut;
+        StartupMark("窗口构造开始");
 
         Text = Env.AppName;
         ClientSize = new Size(1180, 760);
@@ -83,6 +84,7 @@ internal sealed class MainForm : Form
         _backend.AttachFilter(_filter);
 
         AttachWebView();
+        StartupMark("窗口构造完成（托盘/钩子对象/WebView2 控件已建）");
 
         // 隐藏计时：收进托盘 N 秒后把界面进程放掉
         _releaseTimer.Tick += (_, _) => ReleaseTick();
@@ -90,8 +92,10 @@ internal sealed class MainForm : Form
 
         Load += (_, _) =>
         {
+            StartupMark("Load 触发（窗口句柄就绪）");
             // 句柄此刻已就绪，再装 Raw Input + 键盘钩子
             _filter.Start(Handle);
+            StartupMark("按键钩子 + RAW INPUT 已装");
             // ⚠ InitWebView 是 async void 语义：**必须自己 try/catch**，
             //   否则它内部任何异常都会掀翻进程（0xE0434352），且不留任何痕迹。
             BeginInvoke(new Action(async () =>
@@ -136,6 +140,7 @@ internal sealed class MainForm : Form
     private async Task InitWebView()
     {
         var web = _web ?? throw new InvalidOperationException("WebView2 控件尚未创建");
+        StartupMark("开始初始化 WebView2（创建 Chromium 环境）");
         var dataDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             Env.AppName, "WebView2");
@@ -176,6 +181,7 @@ internal sealed class MainForm : Form
         //   线程池，再碰 CoreWebView2 就会抛「只能从 UI 线程访问」。
         web.CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = dataDir };
         await web.EnsureCoreWebView2Async();
+        StartupMark("WebView2 环境就绪（Chromium 已起来，这段通常是启动里最大的一块）");
 
         web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
         web.CoreWebView2.Settings.AreDevToolsEnabled = !_selftest;
@@ -220,6 +226,16 @@ internal sealed class MainForm : Form
             e.Handled = true;                     // 一律不开新窗口（外链交给系统浏览器走 openUrl）
             Trace($"[nav-guard] 已拦截新窗口：{e.Uri}");
         };
+
+        // ★ 常开：记录「页面真的渲染出来」的时刻。
+        //   这一条和「WebView2 环境就绪」是**两件事** —— `Navigate()` 只是**发起**导航，
+        //   它返回时页面还没渲染，用户看到的还是空窗口。
+        //   以前只有 selftest 才订阅这个事件，于是生产环境里
+        //   "页面到底什么时候出来的"完全看不见 —— 这正是「启动有点慢」说不清的原因。
+        web.CoreWebView2.NavigationCompleted += (_, e) =>
+            StartupMark(e.IsSuccess
+                ? "页面渲染完成 ← 用户此时才真正看到内容"
+                : $"页面渲染失败：{e.WebErrorStatus}");
 
         if (_selftest)
         {
@@ -268,6 +284,8 @@ internal sealed class MainForm : Form
             hard.Start();
         }
         web.CoreWebView2.Navigate(_lastUrl);
+        StartupMark("导航已发起");
+
     }
 
     // ───────── 界面进程的释放与重建 ─────────
@@ -307,7 +325,11 @@ internal sealed class MainForm : Form
             if (_web == null) AttachWebView();      // 释放后重建；首次启动控件已由构造函数建好
             await InitWebView();
             _webReady = true;
-            WebViewLog($"界面已就绪，耗时 {sw.ElapsedMilliseconds} ms（累计释放 {_releaseCount} 次）");
+            // ⚠ 措辞要准：这里只代表「Chromium 环境起来了 + 导航已发起」，
+            //   **页面还在渲染**，用户看到的仍是那个底色空窗口。
+            //   "用户真正看到内容"的时刻由上面的 NavigationCompleted 打点（T+ 行）。
+            WebViewLog($"WebView2 环境就绪 + 导航已发起，耗时 {sw.ElapsedMilliseconds} ms" +
+                       $"（累计释放 {_releaseCount} 次）");
         }
         catch (Exception e)
         {
@@ -335,12 +357,36 @@ internal sealed class MainForm : Form
         if (w == null) return;
         _web = null;
         _webReady = false;
+        // 重建时重新开一段时间轴（否则重建的打点会混在上一轮里，看不出是哪一次）
+        _startupMarked = false;
+        _firstStateLogged = false;
+
         var sw = Stopwatch.StartNew();
         try { w.Dispose(); } catch (Exception e) { WebViewLog($"释放时出异常（已忽略）：{e.Message}"); }
         _releaseCount++;
         WebViewLog($"窗口已隐藏 {hideSec:F0} s → 释放界面进程（Dispose 耗时 {sw.ElapsedMilliseconds} ms），" +
                    $"当前页面已记住={_lastUrl}");
     }
+
+    /// <summary>
+    /// 启动时间轴埋点：把「启动有点慢」从一个体感拆成 `T+xxx ms` 的若干段，
+    /// 和界面生命周期日志写在同一个文件里 —— 于是"环境就绪 vs 页面渲染"
+    /// 各占多少毫秒是一眼可见的事实，不用猜。
+    /// </summary>
+    private static bool _startupMarked;
+    internal static void StartupMark(string what)
+    {
+        var body = $"[T+{Program.StartupMs,5} ms] {what}";
+        if (!_startupMarked)
+        {
+            _startupMarked = true;
+            body = "──── 时间轴（本轮启动或重建）────\n" + body;
+        }
+        WebViewLog(body);
+    }
+
+    /// <summary>本轮是否已经记过"前端 JS 已就绪"（重建时重置，方便再看一次）。</summary>
+    private bool _firstStateLogged;
 
     /// <summary>界面进程的生命周期日志（与 key-events.log 分开，方便单独看内存策略是否生效）</summary>
     private static void WebViewLog(string msg)
@@ -430,6 +476,14 @@ internal sealed class MainForm : Form
         catch { return; }
 
         string Arg(int i) => args is JsonArray a && a.Count > i ? (a[i]?.ToString() ?? "") : "";
+
+        // 前端 boot() 一开始就 bindUI() + refresh()，所以首个 getState 到达
+        // 等价于「JS 跑起来了、开始要数据了」—— 用它给时间轴收尾。
+        if (!_firstStateLogged && method == "getState")
+        {
+            _firstStateLogged = true;
+            StartupMark("前端 JS 已就绪（首次向宿主取状态）");
+        }
 
         string result = method switch
         {

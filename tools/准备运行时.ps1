@@ -105,6 +105,21 @@ if (-not $AppDir) {
     if (-not $AppDir) { $AppDir = $here }
 }
 
+# ── ★ 免运行时版（自包含发布）压根不需要 .NET：先认出来，直接放行 ────────────────
+#   判据故意用 **exe 体积**，不加标记文件：
+#     框架依赖版 ≈ 2.5 MB ｜ 自包含压缩版 ≈ 64 MB ｜ 自包含不压缩 ≈ 140 MB
+#   差两个数量级，不会误判；也免掉"标记文件被误删 / 忘记更新"这类失配。
+#   为什么要这一步：不给它的话，免运行时版在缺 .NET 的机器上会**白装一个 55MB 运行时**
+#   （装了也没用，程序根本不看它）。
+$exePath = Join-Path $AppDir 'IPRC1000 Adapter.exe'
+if (Test-Path $exePath) {
+    $exeMB = (Get-Item $exePath).Length / 1MB
+    if ($exeMB -gt 40) {
+        if (-not $Quiet) { Ok ('本版自带 .NET 运行时（主程序 {0:N1} MB），无需安装' -f $exeMB) }
+        exit 0
+    }
+}
+
 # ── 找安装器：包内优先，其次联网 ─────────────────────────────────────────────
 function Get-Installer {
     $dotnetDir = Join-Path $AppDir 'assets\dotnet'

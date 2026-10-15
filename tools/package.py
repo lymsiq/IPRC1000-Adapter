@@ -63,6 +63,22 @@ PKG = os.path.join(ROOT, "IPRC1000_Adapter")
 ZP = os.path.join(ROOT, f"IPRC1000_Adapter_v{VERSION}.zip")
 FIXED_ZIP = os.path.join(ROOT, "IPRC1000_Adapter.zip")
 
+# ── 免运行时版（自包含 + 单文件压缩）────────────────────────────────────────────
+#
+# 为什么要有第二个变体：主包只有 2.5 MB，前提是**机器上已经装了 .NET 桌面运行时**
+# （约 170 MB）。门店机器经常是「无网 + 店员没有管理员权限」，装运行时这一步会卡死。
+#
+# 实测对比（同一份代码，只改发布参数）：
+#   · 框架依赖      2.5 MB   启动 674 ms   需要 .NET + 管理员
+#   · 自包含+压缩  ~64 MB    启动 840 ms   零依赖、零管理员、零联网
+#   · 自包含      140 MB     启动 690 ms   同上
+# 所以做**两个包让用户按机器情况选**，而不是换掉主包：
+# 主包继续小（大多数机器本来就有 .NET），免运行时版给卡在部署那一步的机器兜底。
+FULL_PUB = os.path.join(ROOT, "_full_publish")
+FULL_PKG = os.path.join(ROOT, "IPRC1000_Adapter_full")
+FULL_ZP = os.path.join(ROOT, f"IPRC1000_Adapter_full_v{VERSION}.zip")
+FULL_FIXED_ZIP = os.path.join(ROOT, "IPRC1000_Adapter_full.zip")
+
 # 包里必须存在的功能关键字（改完代码若这里 ✗，说明打包漏了新文件）
 CHECKS = [
     ("屏幕键盘 KB_ROWS",    "ui/app.js",   "KB_ROWS"),
@@ -194,6 +210,17 @@ SRC_REQUIRED = [
     # 出"白屏/界面没起来"时必须有日志可看（v1.1.0 期间正是因为无日志只能靠猜）
     ("界面生命周期有日志", "iprc1000_gui_dotnet/MainForm.cs", "webview.log"),
     ("初始化成败都记日志", "iprc1000_gui_dotnet/MainForm.cs", "界面初始化失败"),
+    # ★ v1.1.2 启动时间轴：让"启动慢"变成可查的事实，而不是体感。
+    #   基准必须是**进程真实创建时刻** —— 用进程内 Stopwatch 会因静态字段惰性初始化
+    #   而把开头几十毫秒整段抹掉（实测首行显示 T+0 ms，那时进程已跑了 135 ms）。
+    ("有启动时间轴埋点", "iprc1000_gui_dotnet/MainForm.cs", "StartupMark"),
+    ("时间轴基准是进程创建时刻", "iprc1000_gui_dotnet/Program.cs",
+     "Process.GetCurrentProcess().StartTime"),
+    # 「环境就绪」≠「页面渲染完成」：Navigate() 只是发起导航。
+    # 以前只有 selftest 订阅 NavigationCompleted，生产环境看不见页面何时出来。
+    ("页面渲染完成常开打点", "iprc1000_gui_dotnet/MainForm.cs", "页面渲染完成"),
+    # 免运行时版要靠 exe 体积认出自己，别让它在缺 .NET 的机器上白装一个运行时
+    ("运行时脚本认得出免运行时版", "tools/准备运行时.ps1", "-gt 40"),
 ]
 
 # 包内「不应出现」的路径：(标签, 子串)。用来防体积膨胀与误打包。
@@ -220,7 +247,7 @@ def kill_busy():
     time.sleep(1.2)
 
 
-def publish_fresh():
+def publish_fresh(out=None, self_contained=False, compressed=False):
     """打包前强制重新编译发布 —— 否则可能把上一次的 publish 打进包。
 
     以前踩过两次坑：
@@ -228,40 +255,66 @@ def publish_fresh():
       ② **更隐蔽**：csproj 里 `ui\\**\\*` 是 CopyToOutputDirectory=PreserveNewest，
          输出目录已存在时 MSBuild 的增量判断会**整个跳过 ui 的复制** →
          publish\\ui 里只剩 icon.ico，界面文件全丢。
-         所以这里先 `rmtree(PUB)` 再 publish，强制全量复制。
+         所以这里先 `rmtree(out)` 再 publish，强制全量复制。
+
+    参数：
+      self_contained=True → 自带 .NET 运行时（免运行时版用）
+      compressed=True     → 压缩单文件（体积 ~64MB；**代价是每次启动多约 165 ms**，
+                            因为是"每次启动解压"而不是只解一次）
     """
-    print("=== 重新编译发布 ===")
+    out = out or PUB
+    print("=== 重新编译发布" + ("（免运行时版）" if self_contained else "") + " ===")
     # ★ 必须先清空：见上面 ②，否则 ui/ 会被增量逻辑跳过
-    if os.path.exists(PUB):
-        shutil.rmtree(PUB, ignore_errors=True)
+    if os.path.exists(out):
+        shutil.rmtree(out, ignore_errors=True)
     cmd = ["dotnet", "publish", "-c", "Release", "-r", "win-x64",
-           "--self-contained", "false", "-p:PublishSingleFile=true",
-           "-o", PUB, "--nologo", "-v", "quiet"]
+           "--self-contained", "true" if self_contained else "false",
+           "-p:PublishSingleFile=true"]
+    if compressed:
+        cmd.append("-p:EnableCompressionInSingleFile=true")
+    cmd += ["-o", out, "--nologo", "-v", "quiet"]
     r = subprocess.run(cmd, cwd=os.path.join(ROOT, "iprc1000_gui_dotnet"),
                        capture_output=True, text=True, errors="replace")
     if r.returncode != 0:
         print("  ✗ 编译失败：")
         print("   " + (r.stdout or r.stderr)[-1500:].replace("\n", "\n   "))
         raise SystemExit(1)
-    for f in os.listdir(PUB):
+    for f in os.listdir(out):
         if f.endswith(".xml"):
-            try: os.remove(os.path.join(PUB, f))
+            try: os.remove(os.path.join(out, f))
             except OSError: pass
-    exe = os.path.join(PUB, "IPRC1000 Adapter.exe")
+    exe = os.path.join(out, "IPRC1000 Adapter.exe")
     print(f"  ✓ {exe}  {os.path.getsize(exe):,} 字节  "
           f"{datetime.datetime.fromtimestamp(os.path.getmtime(exe)):%H:%M:%S}")
     # 立刻自检 ui 是否真的复制过来了（这是坑 ② 的哨兵）
-    uip = os.path.join(PUB, "ui")
+    uip = os.path.join(out, "ui")
     need = ["app.js", "index.html", "style.css", "remote.png"]
     miss = [n for n in need if not os.path.exists(os.path.join(uip, n))]
     if miss:
         print(f"  ✗ publish\\ui 缺少 {miss} —— 增量复制又被跳过了")
         raise SystemExit(1)
     print(f"  ✓ publish\\ui 完整（{', '.join(need)}）")
+    size_mb = os.path.getsize(exe) / 1024 / 1024
+    if self_contained and size_mb < 40:
+        print(f"  ✗ 自包含版 exe 只有 {size_mb:.1f} MB —— 看起来没带上运行时")
+        raise SystemExit(1)
+    if (not self_contained) and size_mb > 20:
+        print(f"  ✗ 框架依赖版 exe 竟有 {size_mb:.1f} MB —— 发布参数不对")
+        raise SystemExit(1)
 
 
-def build():
-    target = PKG
+def build(pub=None, target=None, variant="main"):
+    """把 publish 输出 + 仓库附属文件装成一个发布目录，并出两份压缩包。
+
+    variant="main" → 主包（框架依赖，约 2.5 MB，**需要机器已装 .NET**）
+    variant="full" → 免运行时版（自包含 + 单文件压缩，约 64 MB，**零依赖**）
+
+    两个变体共用这一套逻辑：附属文件、文档、许可证、编码校验完全一致，
+    差别只有「exe 来自哪次 publish」和「说明文件多一段话」——
+    这样不会出现"主包有文档、免运行时版漏了许可证"这种漂移。
+    """
+    pub = pub or PUB
+    target = target or PKG
     if os.path.exists(target):
         try:
             shutil.rmtree(target)
@@ -269,8 +322,8 @@ def build():
             target = os.path.join(ROOT, "_pkg_new")
             shutil.rmtree(target, ignore_errors=True)
     os.makedirs(target, exist_ok=True)
-    for n in os.listdir(PUB):
-        s, d = os.path.join(PUB, n), os.path.join(target, n)
+    for n in os.listdir(pub):
+        s, d = os.path.join(pub, n), os.path.join(target, n)
         shutil.copytree(s, d) if os.path.isdir(s) else shutil.copy2(s, d)
 
     os.makedirs(os.path.join(target, "tools"), exist_ok=True)
@@ -318,6 +371,14 @@ def build():
         f.write("=" * 46 + "\n\n")
         f.write("【一句话】程序就放在一个固定文件夹里，以后升级只覆盖里面的文件，\n")
         f.write("          位置不变 → 桌面快捷方式建一次就永远有效。\n\n")
+        if variant == "full":
+            f.write("【★ 这一份是「免运行时版」】\n")
+            f.write("  主程序自带 .NET 运行时（所以包大，约 64 MB），但换来：\n")
+            f.write("    · 机器上不用装 .NET 桌面运行时\n")
+            f.write("    · 不需要管理员权限\n")
+            f.write("    · 不需要联网\n")
+            f.write("  适合：门店机器没网 / 装不上运行时 / 店员没有管理员权限。\n")
+            f.write("  （另一份 IPRC1000_Adapter.zip 只有约 2.5 MB，前提是机器已经装好 .NET。）\n\n")
         f.write("【这个文件夹叫什么】\n")
         f.write("  固定叫 IPRC1000_Adapter（不带版本号）。\n")
         f.write("  发布时除了带版本号的存档包，还会出一个**同名压缩包**：\n")
@@ -346,8 +407,12 @@ def build():
         f.write("        升级就是「下载 → 覆盖解压」两步。\n")
 
     with open(os.path.join(target, "版本.txt"), "w", encoding="utf-8") as f:
-        f.write("IPRC1000 Adapter\n")
+        f.write("IPRC1000 Adapter" + ("（免运行时版）" if variant == "full" else "") + "\n")
         f.write("打包时间：" + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "\n")
+        if variant == "full":
+            f.write("运行要求：无（主程序自带 .NET 运行时，不需要管理员、不需要联网）\n")
+        else:
+            f.write("运行要求：.NET 桌面运行时 8/9/10/11 任一（缺了「启动.cmd」会自动装）\n")
         f.write("包含：\n"
                 "  · 按键映射页：遥控器实体图（选中高亮）+ 每行按键截图 + 屏幕键盘选择器\n"
                 "  · 多组配置 Tab（+/双击重命名/−）、搜索、导出、导入\n"
@@ -360,9 +425,10 @@ def build():
                 "文档：文档\\SOP-部署与使用.md · 文档\\遥控器按键说明.md\n"
                 "许可：LICENSE（MIT）· THIRD-PARTY-NOTICES.md（内置第三方组件声明）\n")
 
-    if os.path.exists(ZP):
-        os.remove(ZP)
-    with zipfile.ZipFile(ZP, "w", zipfile.ZIP_DEFLATED) as z:
+    zp, fixed = (FULL_ZP, FULL_FIXED_ZIP) if variant == "full" else (ZP, FIXED_ZIP)
+    if os.path.exists(zp):
+        os.remove(zp)
+    with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
         for root, _, files in os.walk(target):
             for f in files:
                 p = os.path.join(root, f)
@@ -374,20 +440,22 @@ def build():
     # 于是 `IPRC1000_Adapter_v1.0.4.zip` 解压出 `IPRC1000_Adapter_v1.0.4\`、
     # 下个版本又是新目录 —— 桌面快捷方式每升一次级就失效一次。
     # 固定名的包解压出来的目录名永远一样，覆盖解压即可，快捷方式一劳永逸。
-    # 配合 GitHub 的 /releases/latest/download/ 还能得到**永久下载链接**：
-    #   https://github.com/lymsiq/IPRC1000-Adapter/releases/latest/download/IPRC1000_Adapter.zip
-    if os.path.exists(FIXED_ZIP):
-        os.remove(FIXED_ZIP)
-    shutil.copy2(ZP, FIXED_ZIP)
+    # 配合 GitHub 的 /releases/latest/download/ 还能得到**永久下载链接**。
+    # ⚠ v1.0.7 / v1.1.0 都只传了带版本号那个 → 永久链接实测 404，别再漏。
+    if os.path.exists(fixed):
+        os.remove(fixed)
+    shutil.copy2(zp, fixed)
     return target
 
 
-def verify():
-    print("=== 校验包内内容 ===")
+def verify(zp=None, title="主包", self_contained=False, source_checks=True):
+    """校验一个发布包的内容。两个变体共用 —— 断言必须两边都过。"""
+    zp = zp or ZP
+    print(f"=== 校验包内内容（{title}）===")
     ok_all = True
-    with zipfile.ZipFile(ZP) as z:
+    with zipfile.ZipFile(zp) as z:
         names = z.namelist()
-        print(f"  {os.path.getsize(ZP)/1024/1024:.2f} MB · {len(names)} 个文件")
+        print(f"  {os.path.getsize(zp)/1024/1024:.2f} MB · {len(names)} 个文件")
         for label, member, kw in CHECKS:
             try:
                 raw = z.read(member)
@@ -407,6 +475,14 @@ def verify():
             print(f"  {'✓' if ok else '✗'} {label}")
         exe = z.getinfo("IPRC1000 Adapter.exe")
         print(f"  主程序 {exe.file_size:,} 字节 · 时间 {exe.date_time}")
+        # ★ 变体自证：主包必须很小（说明是框架依赖），免运行时版必须很大（说明真带上了运行时）。
+        #   这条防的是"打错发布参数"——比如免运行时版其实还是框架依赖，
+        #   那用户在门店机器上就会遇到"装了却打不开"，而包里什么都看不出来。
+        mb = exe.file_size / 1024 / 1024
+        ok = mb > 40 if self_contained else mb < 20
+        ok_all &= ok
+        print(f"  {'✓' if ok else '✗'} 体积符合{('免运行时版' if self_contained else '框架依赖版')}"
+              f"预期（{mb:.1f} MB）")
 
         # ── 包内不应出现的路径（防止重复打包把体积撑大）──
         for label, bad in ZIP_FORBIDDEN:
@@ -444,6 +520,10 @@ def verify():
             print(f"  {'✓' if ok else '✗'} {member} 编码为 {want.upper()}{why}")
 
     # ── 源码级正/反向校验（针对注入链路，防回归）──
+    #    只在主包那一次跑：它检查的是仓库源码，跟打哪个变体无关。
+    if not source_checks:
+        print(f"  ⇒ {title}：" + ("全部通过，包是新的 ✓" if ok_all else "★ 有检查未通过 ✗"))
+        return ok_all
     print("  ── 源码检查 ──")
     for label, rel, bad in SRC_FORBIDDEN:
         p = os.path.join(ROOT, rel)
@@ -468,28 +548,44 @@ def verify():
         ok_all &= ok
         print(f"  {'✓' if ok else '✗'} {label}")
 
-    print(f"  ZIP 时间 {datetime.datetime.fromtimestamp(os.path.getmtime(ZP)):%Y-%m-%d %H:%M:%S}")
-    print("  ⇒ " + ("全部通过，包是新的 ✓" if ok_all else "★ 有检查未通过 ✗"))
+    print(f"  ZIP 时间 {datetime.datetime.fromtimestamp(os.path.getmtime(zp)):%Y-%m-%d %H:%M:%S}")
+    print(f"  ⇒ {title}：" + ("全部通过，包是新的 ✓" if ok_all else "★ 有检查未通过 ✗"))
     return ok_all
 
 
 if __name__ == "__main__":
     kill_busy()
-    publish_fresh()          # ★ 打包前先重新编译，杜绝"包里是旧程序"
+    # ── ① 主包（框架依赖，约 2.5 MB）──
+    publish_fresh()
     tgt = build()
     verify()
-    print(f"\n包目录：{tgt}\n压缩包：{ZP}")
 
-    # ★★ 发布清单 —— GitHub Release 必须传**两个**附件。
+    # ── ② 免运行时版（自包含 + 压缩，约 64 MB）──
+    #    需求来源：门店机器常年「无网 + 店员没有管理员权限」，
+    #    而 .NET 桌面运行时安装包约 55 MB、装完占约 170 MB —— 这一步经常卡死。
+    #    自包含版把这些全省掉，代价是包变大 + 每次启动多约 165 ms 的解压。
+    print()
+    publish_fresh(out=FULL_PUB, self_contained=True, compressed=True)
+    full_tgt = build(pub=FULL_PUB, target=FULL_PKG, variant="full")
+    verify(zp=FULL_ZP, title="免运行时版", self_contained=True, source_checks=False)
+
+    print(f"\n主包目录：{tgt}\n主包压缩包：{ZP}")
+    print(f"免运行时版目录：{full_tgt}\n免运行时版压缩包：{FULL_ZP}")
+
+    # ★★ 发布清单 —— GitHub Release 必须传**固定名**附件。
     #    包内「升级说明.txt」向用户承诺了一个永久下载链接，它指向**固定名**那个包；
     #    只传带版本号的包 → 那个链接就是 404。
     #    v1.0.7 / v1.1.0 都这么漏过（固定名附件从 v1.0.5 起再没上传过），
     #    直到 v1.1.1 实测链接 404 才发现 —— 文档写了、流程没做，用户照样拿不到。
-    print("\n★ 上传 GitHub Release 时**两个附件都要传**，只传一个永久链接就是 404：")
-    print(f"   {os.path.basename(ZP)}   ← 带版本号的存档")
-    print(f"   {os.path.basename(FIXED_ZIP)}                   ← 固定名，永久链接靠它")
-    print("   永久链接（发布后务必自测一次）：")
+    print("\n★ 上传 GitHub Release 时**固定名附件是必须的**，只传带版本号的那个永久链接就是 404：")
+    print(f"   {os.path.basename(FIXED_ZIP):38s} ← 固定名·主包（永久链接靠它）")
+    print(f"   {os.path.basename(ZP):38s} ← 带版本号存档")
+    print(f"   {os.path.basename(FULL_FIXED_ZIP):38s} ← 固定名·免运行时版")
+    print(f"   {os.path.basename(FULL_ZP):38s} ← 带版本号存档")
+    print("   永久链接（发布后务必自测一次，记得带 Cache-Control: no-cache —— CDN 会缓存）：")
     print("   https://github.com/lymsiq/IPRC1000-Adapter/releases/latest/download/IPRC1000_Adapter.zip")
-    for p in (ZP, FIXED_ZIP):
+    print("   https://github.com/lymsiq/IPRC1000-Adapter/releases/latest/download/IPRC1000_Adapter_full.zip")
+    for p in (ZP, FIXED_ZIP, FULL_ZP, FULL_FIXED_ZIP):
         h = hashlib.sha256(open(p, "rb").read()).hexdigest()
-        print(f"   sha256 {os.path.basename(p)} = {h}")
+        mb = os.path.getsize(p) / 1024 / 1024
+        print(f"   sha256 {os.path.basename(p):40s} {mb:7.1f} MB  {h}")

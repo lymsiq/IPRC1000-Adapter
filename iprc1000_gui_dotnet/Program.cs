@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Windows.Forms;
 
@@ -5,12 +6,37 @@ namespace Iprc1000Adapter;
 
 internal static class Program
 {
+    /// <summary>
+    /// 进程启动的**真实**时刻基准 —— 所有 `[T+xxx ms]` 打点都相对它。
+    ///
+    /// 为什么不用一个 `static readonly Stopwatch`：静态字段是**惰性初始化**的，
+    /// 第一次被读到才启动。实测就踩到了 —— 首次打点显示 `T+0 ms`，
+    /// 而那一刻进程其实已经跑了 40 多毫秒，"启动前 40 ms"被整段抹掉了。
+    /// `Process.StartTime` 是内核给的进程创建时间，不受"我们何时开始计时"影响。
+    /// 万一读不到（受限环境），退回一个进程内 Stopwatch。
+    /// </summary>
+    internal static long StartupMs
+    {
+        get
+        {
+            try
+            {
+                return (long)(DateTime.Now - Process.GetCurrentProcess().StartTime).TotalMilliseconds;
+            }
+            catch { return _fallbackSw.ElapsedMilliseconds; }
+        }
+    }
+
+    private static readonly Stopwatch _fallbackSw = Stopwatch.StartNew();
+
     [System.Runtime.InteropServices.DllImport("winmm.dll", EntryPoint = "timeBeginPeriod")]
     private static extern uint TimeBeginPeriod(uint ms);
 
     [STAThread]
     private static void Main(string[] args)
     {
+        // 让静态基准立刻就位（懒初始化会推迟它的起点）
+        _ = StartupMs;
         // ★ 必须在任何分支之前：把所有 Sleep/等待的粒度从 ~15.6 ms 提到 1 ms。
         //   否则连发间隔会抖动 5~15 ms —— 这正是"不丝滑/不精确"的根因。
         TimeBeginPeriod(1);
@@ -61,6 +87,7 @@ internal static class Program
         // WebView2 需要显式 STA + 现代 WinForms 初始化
         ApplicationConfiguration.Initialize();
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        MainForm.StartupMark("WinForms 初始化完成");
 
         // ★ 全局异常兜底：**selftest 模式也必须装**。
         //   以前 selftest 分支不装 —— 结果 InitWebView（async void 调用）一旦抛异常，
@@ -91,6 +118,7 @@ internal static class Program
         }
 
         using var form = new MainForm(selftest, outPath);
+        MainForm.StartupMark("主窗口构造完成");
         Application.Run(form);
     }
 

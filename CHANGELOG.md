@@ -5,6 +5,50 @@
 
 ---
 
+## [1.1.2] - 2026-10-15
+
+启动可诊断化 + 新增一个**免运行时**发布变体。主包不变（框架依赖，约 2.5 MB）。
+
+### 新增
+
+- **启动时间轴埋点**：`webview.log` 现在记录 `[T+xxx ms]` 打点，一次启动长这样：
+
+  ```
+  [T+  135 ms] WinForms 初始化完成
+  [T+  270 ms] 窗口构造完成（托盘/钩子对象/WebView2 控件已建）
+  [T+  278 ms] 按键钩子 + RAW INPUT 已装
+  [T+  330 ms] 开始初始化 WebView2（创建 Chromium 环境）
+  [T+  671 ms] WebView2 环境就绪
+  [T+  674 ms] 导航已发起
+  ```
+
+  → 「启动有点慢」的来源就此可量化：**WebView2 环境创建 341 ms（占 51%）**、
+  CLR + WinForms 初始化 135 ms、窗口构造 135 ms、BeginInvoke 往返 52 ms。
+  基准取**进程真实创建时刻**（`Process.StartTime`）—— 用进程内 `Stopwatch`
+  会因为静态字段**惰性初始化**而把开头整段抹掉（首行显示 `T+0 ms`，
+  而那时进程其实已经跑了 135 ms）。
+- **`页面渲染完成` 常开打点**：以前只有 selftest 订阅 `NavigationCompleted`，
+  生产环境里"页面到底什么时候出来的"完全看不见。这一条和「环境就绪」是**两件事** ——
+  `Navigate()` 只是**发起**导航，它返回时页面还没渲染。
+  同时把那句误导人的日志改成「WebView2 环境就绪 + 导航已发起」。
+- **免运行时发布变体** `IPRC1000_Adapter_full.zip`（自包含 + 单文件压缩，约 64 MB）：
+  不需要 .NET、不需要管理员权限、不需要联网。给"门店机器没网 / 装不上运行时 /
+  店员没有管理员权限"的场合兜底。两个变体共用同一套打包逻辑
+  （文档、许可证、编码校验完全一致），只有 exe 和说明里的一句话不同。
+  `tools/准备运行时.ps1` 按 exe 体积（>40 MB）认出免运行时版并直接放行 ——
+  否则它会在缺 .NET 的机器上白装一个 55 MB 运行时（装了也没用）。
+  ⚠ 代价：压缩版**每次启动多约 165 ms**（是每次解压，不是只解一次）。
+
+### 实测否定掉的优化（记下来，避免以后再试一遍）
+
+- **ReadyToRun 预编译**：这台机器上**反而慢 15 ms**（674 → 689 ms）。
+  exe 从 2.55 MB 涨到 4.06 MB，「WinForms 初始化」那段从 135 ms 变成 152 ms ——
+  读/映射更大镜像的成本超过了省下的 JIT。**不采用。**
+  （低端门店机可能有收益，但此处无法验证，所以不作为默认。）
+- **`PublishTrimmed` 裁剪**：`error NETSDK1175: 启用剪裁时，不支持或不推荐使用
+  Windows 窗体`。想裁剪就必须先摆脱 WinForms 宿主。**当前不可用。**
+- **WebView2 用户数据目录膨胀**：74.6 MB / 338 文件，属正常范围，不是拖慢原因。
+
 ## [1.1.1] - 2026-10-15
 
 修 v1.1.0 的**白屏** —— 该版本界面完全空白，无法使用。
@@ -318,6 +362,7 @@ WinUHid（MIT）、VB-CABLE（VB-Audio Donationware）、语音桥 `etw_consumer
 
 <!-- 1.0.6 没有单独打 tag（两个版本的改动在文件层面交叉，合并为一次提交），链接指向那次提交 -->
 
+[1.1.2]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.1.2
 [1.1.1]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.1.1
 [1.1.0]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.1.0
 [1.0.7]: https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v1.0.7
