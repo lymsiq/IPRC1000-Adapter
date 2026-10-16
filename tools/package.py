@@ -254,7 +254,7 @@ SRC_REQUIRED = [
     ("续片被截断有计数（老代码没有）", "tools/etw_consumer/src/main.rs", "trunc_cont"),
     ("帧头签名自检", "tools/etw_consumer/src/main.rs", "HDR_SIG"),
     ("丢失明细按 2 秒粒度落日志", "tools/etw_consumer/src/main.rs", "音频丢失明细"),
-    ("仪表有合成回放自检", "tools/bridge_loss_selftest.py", "scenario_cont_len_changed"),
+    ("仪表有合成回放自检", "tools/bridge_loss_selftest.py", "scenario_normal"),
     # 帧头**不是**常量：第 5/6 字节逐帧在变。早期笔记记成固定 `00 81 00` 是错的，
     # 照它做内容匹配会一帧都命不中（macOS 版就因此一直报「音频帧 0」）。
     ("帧头可变字节已标注", "tools/etw_consumer/src/main.rs", "帧头不是常量"),
