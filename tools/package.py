@@ -160,6 +160,8 @@ SRC_FORBIDDEN = [
     ("方块键那行不得再写死行为", "iprc1000_gui_dotnet/ui/app.js", "it.id === 'square' ? '切换配置组'"),
     # 鼠标模式不再有独立开关（模式 = 活动组），旧配置项不得复活
     ("鼠标模式不得再有独立开关", "iprc1000_gui_dotnet/MouseEngine.cs", "SquareKeyAction"),
+    # 用 in_session 判新会话会跳过全部序号比较（回放里恒为 false）—— 自检 ② 抓到过
+    ("不许用 in_session 判新会话", "tools/etw_consumer/src/main.rs", "let session_start = !self.in_session"),
     # ★ 解析器不得再写死音频分片长度（见上）—— 这两行是老 bug 的指纹
     ("音频解析不得写死首片长度", "tools/etw_consumer/src/main.rs", "dlen == 344"),
     ("音频解析不得写死续片长度", "tools/etw_consumer/src/main.rs", "dlen == 313"),
@@ -283,7 +285,7 @@ SRC_REQUIRED = [
     ("孤续片有计数", "tools/etw_consumer/src/main.rs", "orphan_cont"),
     ("怪长帧有计数", "tools/etw_consumer/src/main.rs", "short_pdu"),
     ("未识别分片留内容样本", "tools/etw_consumer/src/main.rs", "odd_sample"),
-    ("新会话重置帧序号基准", "tools/etw_consumer/src/main.rs", "s.last_seq = None"),
+    ("新会话按空档判、并跳过序号比较", "tools/etw_consumer/src/main.rs", "let session_start = self.last_frame_at"),
     ("自检覆盖三片拆分", "tools/bridge_loss_selftest.py", "scenario_three_frag_split"),
     ("自检有按键回归保护", "tools/bridge_loss_selftest.py", "scenario_audio_with_keys"),
     # ★★ 回调隔离（2026-10-16）：把文件 I/O 移出 ETW 回调路径。
