@@ -171,6 +171,13 @@ SRC_REQUIRED = [
     ("设备变更事件会触发驱动复查", "iprc1000_gui_dotnet/Backend.cs", "_deviceRecheckRequested"),
     ("驱动/按键来源变化有日志", "iprc1000_gui_dotnet/Backend.cs", "\"DEV  \""),
     ("手动还原键盘会关掉自动切换", "iprc1000_gui_dotnet/Backend.cs", "已同时关闭"),
+    # ★ 鼠标注入（阶段 0）：传输层用 SendInput（不是虚拟 HID），且必须能用探针现场取数
+    ("鼠标注入走 SendInput", "iprc1000_gui_dotnet/MouseInjector.cs", "MOUSEEVENTF_MOVE"),
+    ("鼠标实测探针存在", "iprc1000_gui_dotnet/MouseInjector.cs", "public static string Probe"),
+    ("鼠标探针有 CLI 入口", "iprc1000_gui_dotnet/Program.cs", "--mouse-probe"),
+    # 探针必须先把进程设成 DPI 感知 —— 否则 GetCursorPos 返回虚拟化坐标，
+    # 实测会把 1:1 的映射读成 5×（本机就这么误测过一轮，差点按错误的加速模型去设计）
+    ("鼠标探针先设 DPI 感知", "iprc1000_gui_dotnet/MouseInjector.cs", "SetProcessDpiAwarenessContext"),
     # 诊断盲区：这三个"静默降级"以前完全查不出来
     ("注入开关变化会留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "InjectEnabled"),
     ("虚拟 HID 失败会留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "虚拟 HID 下发失败"),

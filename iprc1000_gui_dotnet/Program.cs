@@ -65,6 +65,16 @@ internal static class Program
             return;
         }
 
+        // 鼠标注入实测探针：--mouse-probe [输出文件]
+        //   回答实现前必须先知道的三个数：系统指针加速是否开、相对移动的实测映射（1:1?）、
+        //   SendInput 单次开销。测完光标会还原。
+        if (args.Length > 0 && args[0] == "--mouse-probe")
+        {
+            var pa = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "mouse_probe.txt");
+            File.WriteAllText(pa, MouseInjector.Probe());
+            return;
+        }
+
         // 注入验证：--inject-verify <VK十六进制> <输出文件>
         if (args.Length > 1 && args[0] == "--inject-verify")
         {
