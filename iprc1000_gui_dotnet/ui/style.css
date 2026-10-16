@@ -267,7 +267,7 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
 
 
 /* ───── 配置组 Tab + 搜索 ───── */
-.grouptabs{display:flex;align-items:center;gap:6px;margin:0 0 12px}
+.grouptabs{display:flex;align-items:center;gap:6px;margin:0 0 12px;flex-wrap:wrap}
 .gtabs{display:flex;gap:5px;flex-wrap:wrap}
 .gtab{padding:5px 12px;border-radius:9px 9px 0 0;font-size:12.5px;cursor:pointer;
   border:1px solid var(--line);border-bottom:0;background:var(--bg2,#f4f7fb);color:var(--txt2)}
@@ -277,7 +277,7 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
 .tabadd{width:26px;height:26px;border-radius:8px;border:1px solid var(--line);cursor:pointer;
   background:var(--bg2,#f4f7fb);color:var(--txt2);font-size:15px;line-height:1}
 .tabadd:hover{background:var(--blue-l);color:var(--blue)}
-.gsearch{margin-left:auto;width:230px;padding:6px 11px;font-size:12.5px;border-radius:9px;
+.gsearch{margin-left:auto;flex:0 1 230px;min-width:150px;width:230px;padding:6px 11px;font-size:12.5px;border-radius:9px;
   border:1px solid var(--line);background:var(--bg2,#fff);color:var(--txt1,#1e2633)}
 
 /* ───── 屏幕键盘（弹窗内）───── */
@@ -303,6 +303,15 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
 .kb-key.w15{flex:1.5 1 0}.kb-key.w2{flex:2 1 0}.kb-key.w25{flex:2.5 1 0}
 .kb-key.w3{flex:3 1 0}.kb-key.w5{flex:5 1 0}.kb-key.w7{flex:7 1 0}
 .kb-extra{display:flex;gap:6px;flex-wrap:wrap}
+/* 弹窗里的鼠标动作行：与 .kb-extra 同款排布，前面加一句说明 */
+.kb-mouse{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:9px;
+  padding-top:9px;border-top:1px dashed var(--line)}
+.kb-mouse .kb-cap{font-size:12px;color:var(--txt3);margin-right:2px}
+/* 「按键映射」页配置组那一行里的方块键选项：跟 .seg 同款，但更紧凑 + 带一个前缀说明 */
+.seg.seg-sq{align-items:center;font-size:12.5px;flex:0 0 auto;white-space:nowrap}
+.seg.seg-sq .seg-cap{padding:0 8px;color:var(--txt3);font-size:12px;
+  border-right:1px solid var(--line);align-self:stretch;display:flex;align-items:center}
+.seg.seg-sq label{padding:6px 10px}
 .kb-foot{display:flex;align-items:center;gap:8px;margin-top:13px;
   border-top:1px solid var(--line);padding-top:11px}
 .kb-foot .grow{flex:1}

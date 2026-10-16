@@ -134,8 +134,17 @@
         <div class="gtabs" id="gTabs"></div>
         <button class="tabadd" id="gNew" title="复制当前映射并新建配置组">+</button>
         <button class="tabadd" id="gDel" title="删除当前配置组（至少保留一组）">−</button>
+        <!-- 方块键的作用：两个互斥选项（一次按下只能表达一个意图，同时切组又切模式会让人失去方向感）。
+             ★ 放在这一行是刻意的：方块键要么「切配置组」、要么「切键鼠模式」，两件事都与配置组标签同源；
+               原先放在「鼠标模式」页里，用户按到方块键切了模式却不知道去哪儿改回来。 -->
+        <div class="seg seg-sq" id="squareKeySeg" title="遥控器最底部的「方块键」按下时做什么（按下即生效）">
+          <span class="seg-cap">方块键</span>
+          <label><input type="radio" name="squareAction" value="mode">切键鼠</label>
+          <label><input type="radio" name="squareAction" value="group">切配置组</label>
+        </div>
         <input class="gsearch" id="gSearch" placeholder="搜索：按键名 / HID 值 / 映射动作" spellcheck="false" />
       </div>
+      <div class="hintline" id="mouseSquareHint"></div>
 
       <div class="keys-layout">
         <!-- 左：遥控器实体图（选中键高亮） -->
@@ -170,6 +179,8 @@
             <div class="kb-preset" id="kbPreset" style="display:none"></div>
             <div class="kb-main" id="kbMain"></div>
             <div class="kb-extra" id="kbExtra"></div>
+            <!-- 鼠标动作：把这个键配成鼠标左键 / 右键 / 滚轮上 / 滚轮下（走 SendInput，不经虚拟键盘） -->
+            <div class="kb-mouse" id="kbMouse"></div>
             <div class="kb-foot">
               <span class="kb-cur">当前：<b id="comboCur">未设置</b></span>
               <span class="grow"></span>
@@ -350,16 +361,10 @@
           <span class="dot" id="d-mouse"></span>
         </div>
         <div class="kv" id="mouseKv"></div>
-        <!-- 方块键的作用：两个互斥选项（一次按下只能表达一个意图） -->
-        <div class="optrow">
-          <span>方块键的作用</span>
-          <div class="seg" id="squareKeySeg">
-            <label><input type="radio" name="squareAction" value="mode">切换键鼠模式</label>
-            <label><input type="radio" name="squareAction" value="group">切换配置组</label>
-          </div>
-        </div>
-        <div class="hintline" id="mouseSquareHint"></div>
-        <div class="note" id="mouseNote"></div>
+        <!-- 方块键的作用已移到「按键映射」页的组标签那一行（那里才是"配置组"的地盘），
+             这里只留一句指路 —— 界面约定：同一份数据不许在两处各放一份控件。 -->
+        <div class="note" id="mouseNote">方块键去做「切配置组 / 切键鼠模式」了 —— 那个选项在
+          「<b>按键映射</b>」页的<b>配置组标签那一行</b>里选（同一个方块键只有两种意图，放一处就够了）。</div>
         <div class="panel-actions">
           <button class="btn" id="btnMouseToggle">切换到鼠标模式</button>
           <button class="btn ghost" id="btnMouseCalib">重新自校准</button>

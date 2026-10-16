@@ -156,6 +156,8 @@ SRC_FORBIDDEN = [
     #    ⇒ 进鼠标模式那一刻光标猛地跳走（多显示器下那儿还是两块屏的接缝）。
     #    用户当场指出："要先计算鼠标的当前位置，再在当前位置进行移动，而不是固定位置"。
     ("鼠标移动不得走绝对定位", "iprc1000_gui_dotnet/MouseEngine.cs", "MoveAbsolute"),
+    # 方块键那行右侧以前**写死**成"切换配置组"，与设置里的实际值打架（2026-10-16 用户指出）
+    ("方块键那行不得再写死行为", "iprc1000_gui_dotnet/ui/app.js", "it.id === 'square' ? '切换配置组'"),
     # ★ 解析器不得再写死音频分片长度（见上）—— 这两行是老 bug 的指纹
     ("音频解析不得写死首片长度", "tools/etw_consumer/src/main.rs", "dlen == 344"),
     ("音频解析不得写死续片长度", "tools/etw_consumer/src/main.rs", "dlen == 313"),
@@ -291,6 +293,16 @@ SRC_REQUIRED = [
     ("抖动自检有 CLI 入口", "iprc1000_gui_dotnet/Program.cs", "--jitter-test"),
     ("路由改用有界缓冲（不再用 1 秒 BufferedWaveProvider）", "iprc1000_gui_dotnet/CableRouter.cs", "new JitterBuffer()"),
     ("界面能看到抖动缓冲", "iprc1000_gui_dotnet/ui/app.js", "抖动缓冲"),
+    # ★★ 鼠标动作映射（2026-10-16 用户要求）：把任意按键配成 左键/右键/滚轮上/滚轮下
+    ("映射支持鼠标动作", "iprc1000_gui_dotnet/MouseAct.cs", "public const int Left = -1"),
+    ("鼠标动作走 SendInput（不进虚拟键盘）", "iprc1000_gui_dotnet/KeyFilter.cs", "MouseAct.IsSingleMouseAction"),
+    ("鼠标动作有日志留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "（鼠标动作）"),
+    ("解析认识鼠标动作名", "iprc1000_gui_dotnet/Keys.cs", "MouseAct.FromName"),
+    ("鼠标动作有纯逻辑自检", "iprc1000_gui_dotnet/MouseAct.cs", "public static string SelfTest"),
+    ("鼠标动作自检有 CLI 入口", "iprc1000_gui_dotnet/Program.cs", "--mouseact-test"),
+    ("方块键那行显示实际行为", "iprc1000_gui_dotnet/ui/app.js", "function bindSym"),
+    ("方块键选项在按键映射页", "iprc1000_gui_dotnet/ui/index.html", "seg-sq"),
+    ("弹窗有鼠标动作行", "iprc1000_gui_dotnet/ui/index.html", "kbMouse"),
     # v1.0.7：卡键看门狗 v2。v1 盯「遥控器静默」，而 ETW 模式下遥控器按住时
     # 根本不上报（实测按住 30 秒上报 0 次）→ 丢一次 UP 就永久卡键。
     ("看门狗 v2 有独立登记集合", "iprc1000_gui_dotnet/KeyFilter.cs", "_heldButtons"),

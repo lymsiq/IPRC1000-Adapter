@@ -21,6 +21,13 @@ const KB_MODS  = [['Ctrl',0x11],['Alt',0x12],['Shift',0x10],['Win（开始键）
 const KB_EXTRA = [['播放/暂停',0xB3],['上一首',0xB1],['下一首',0xB0],['音量 −',0xAE],['音量 +',0xAF],['静音',0xAD],
                   ['↑',0x26],['↓',0x28],['←',0x25],['→',0x27],['PgUp',0x21],['PgDn',0x22]];
 const VK_SYM = {0x11:'Ctrl',0x12:'Alt',0x10:'Shift',0x5B:'Win'};
+
+/* ── 鼠标动作：映射值用**负数哨兵**（与 C# 侧 MouseAct.cs 一一对应）──
+   为什么用负数：虚拟键码（VK）是 0x00..0xFF，负数**永远不可能**是真实按键，
+   万一哪里漏了分派，它会立刻变成明确的越界值，而不是悄悄注入一个错的键盘键。 */
+const MOUSE_ACTS = [['鼠标左键',-1],['鼠标右键',-2],['滚轮上',-3],['滚轮下',-4]];
+const MOUSE_NAME = Object.fromEntries(MOUSE_ACTS.map(([n,v]) => [v, n]));
+const isMouseAct = (v) => Number.isInteger(v) && v >= -4 && v <= -1;
 let kbMods = new Set();    // 已选修饰键
 let kbKey = null;          // 已选主键 vk
 let kbKeyLabel = '';       // 主键显示名
@@ -199,6 +206,20 @@ function paintRemoteSel() {
 }
 
 // 一行：缩略图（sprite 裁自 remote.png）+ 名称 + 组合键 + 箭头
+/// 列表右侧那行"这个键当前是什么动作"。
+///
+/// ★ 方块键必须显示**实际生效**的那一个：它的"绑定"不是键盘映射，而是
+/// 「切配置组 / 切键鼠模式」（在「按键映射」页配置组那一行里选）。
+/// 这里以前写死成"切换配置组"，于是用户把设置改成"切键鼠模式"之后，
+/// 列表里仍写着"切换配置组" —— 同一份数据在两个页面上打架。
+function bindSym(it) {
+  if (it.id === 'square') {
+    const act = (((state || {}).mouse) || {}).squareKeyAction || 'group';
+    return act === 'group' ? '切换配置组' : '切键鼠模式';
+  }
+  return it.sym || '不执行';
+}
+
 function renderKeyRow(list, it) {
   const row = document.createElement('div');
   row.className = 'keyrow' + (it.binding ? '' : ' none') + (selectedKey === it.id ? ' sel' : '');
@@ -219,7 +240,7 @@ function renderKeyRow(list, it) {
       <div class="keyname">${it.name}</div>
       <div class="keyhid">HID ${it.hid}</div>
     </div>
-    <div class="keybind-sym">${it.id === 'square' ? '切换配置组' : (it.sym || '不执行')}</div>
+    <div class="keybind-sym">${bindSym(it)}</div>
     <div class="chev">›</div>`;
   row.onclick = () => selectKey(it.id);
   list.appendChild(row);
@@ -242,6 +263,7 @@ function renderKeys(s) {
     `<span class="pill">点某一行可在下方改快捷键</span>`;
 
   renderGroups(s);
+  renderSquareKey(s);
   layoutRemote(items, (items[0] || {}).img);
 
   // 搜索过滤：按键名 / 显示标注 / HID 值 / 当前映射动作
@@ -267,6 +289,25 @@ function renderKeys(s) {
   items.forEach(it => { if (!seen.has(it.id)) emit(it); });   // 兜底：未归类的键
 }
 
+/* 方块键的两个互斥选项（切配置组 / 切键鼠模式）。
+   ★ 控件在「按键映射」页的配置组标签那一行，所以渲染也放在这里 —— 与控件同页，
+   免得出现"页面看着没刷新"的假象。 */
+function renderSquareKey(s) {
+  const sqMode = ((((s || state || {}).mouse) || {}).squareKeyAction || 'group') === 'mode';
+  for (const el of $$('#squareKeySeg input')) {
+    const sel = (el.value === 'mode') === sqMode;
+    el.checked = sel;
+    const lab = el.closest('label');
+    if (lab) lab.classList.toggle('on', sel);
+  }
+  const hint = $('#mouseSquareHint');
+  if (hint) {
+    hint.textContent = sqMode
+      ? '按方块键 = 切键鼠模式（按下即生效）。想切配置组就点左边的组标签。'
+      : '按方块键 = 循环切换配置组。想用方块键切键鼠模式，就选上面那个「切键鼠模式」。';
+  }
+}
+
 // ── 配置组 Tab ──
 function renderGroups(s) {
   const box = $('#gTabs'); if (!box) return;
@@ -289,7 +330,11 @@ function renderGroups(s) {
 // ── 屏幕键盘 ──
 function kbPreviewText() {
   const parts = [...kbMods].map(v => VK_SYM[v] || String(v));
-  if (kbKey !== null) parts.push(kbKeyLabel || ('0x' + kbKey.toString(16).toUpperCase()));
+  if (kbKey !== null) {
+    parts.push(isMouseAct(kbKey)
+      ? (MOUSE_NAME[kbKey] || '鼠标动作')                                   // 负数不能当 VK 打印
+      : (kbKeyLabel || ('0x' + kbKey.toString(16).toUpperCase())));
+  }
   return parts.length ? parts.join(' + ') : '';
 }
 
@@ -299,6 +344,10 @@ function paintKb() {
   });
   document.querySelectorAll('#kbMain .kb-key, #kbExtra .kb-key').forEach((e) => {
     e.classList.toggle('on', kbKey !== null && Number(e.dataset.vk) === kbKey && !e.dataset.mod);
+  });
+  // 鼠标动作单独高亮：键盘那两行在选中鼠标动作时必须全部熄灭，否则会出现两个"选中"
+  document.querySelectorAll('#kbMouse .kb-key').forEach((e) => {
+    e.classList.toggle('on', kbKey !== null && Number(e.dataset.mouse) === kbKey);
   });
   const txt = kbPreviewText();
   // ★ 两个位置都写：底部「当前：<b>」+ 弹窗头部副标题
@@ -337,6 +386,22 @@ function buildKeyboard() {
     k.onclick = () => { kbKey = vk; kbKeyLabel = label; kbMods.clear(); paintKb(); };
     extra.appendChild(k);
   });
+  // 鼠标动作：左键 / 右键 / 滚轮上 / 滚轮下
+  const mo = $('#kbMouse');
+  if (mo) {
+    const cap = document.createElement('span');
+    cap.className = 'kb-cap';
+    cap.textContent = '鼠标动作：';
+    mo.appendChild(cap);
+    MOUSE_ACTS.forEach(([label, vk]) => {
+      const k = document.createElement('div');
+      k.className = 'kb-key'; k.style.minWidth = '74px';
+      k.textContent = label; k.dataset.mouse = vk;
+      // 鼠标动作不能带修饰键（Ctrl+鼠标左键在遥控器上没法表达），所以点它就把修饰键清空
+      k.onclick = () => { kbKey = vk; kbKeyLabel = label; kbMods.clear(); paintKb(); };
+      mo.appendChild(k);
+    });
+  }
   mods.dataset.built = '1';
 }
 
@@ -358,7 +423,9 @@ function selectKey(id) {
     else if (vk === 0xA5) { kbKey = vk; kbKeyLabel = 'RightAlt'; }        // 右 Alt（豆包说话）
     else { kbKey = vk; kbKeyLabel = null; }
   });
-  if (kbKey !== null && !kbKeyLabel) {
+  if (kbKey !== null && isMouseAct(kbKey)) {
+    kbKeyLabel = MOUSE_NAME[kbKey] || '鼠标动作';       // 负数：键盘表里根本没有它
+  } else if (kbKey !== null && !kbKeyLabel) {
     // 从键盘表里反查显示名
     const all = KB_ROWS.flat().concat(KB_EXTRA);
     const hit = all.find(x => x[1] === kbKey);
@@ -367,7 +434,8 @@ function selectKey(id) {
 
   $('#comboTitle').textContent = `设置「${it.name}」的快捷键（${it.label}）`;
   $('#comboNote').textContent =
-    '点修饰键（Ctrl / Alt / Shift / Win，可多选）再点主键；只选修饰键也可保存；点「不执行」= 该键不注入。';
+    '点修饰键（Ctrl / Alt / Shift / Win，可多选）再点主键；只选修饰键也可保存；点「不执行」= 该键不注入。'
+    + '鼠标动作只能单独用（左/右键是按住—抬起成对，滚轮是按下滚一格）。';
   const th = $('#comboThumb');
   if (th && it.rect) {
     const { cx, cy, w, h } = it.rect;
@@ -733,17 +801,6 @@ function renderMouse(s) {
     kvItem('斜向', on ? '支持同时按住 上+左，且已归一化' : '—');
   $('#btnMouseToggle').textContent = on ? '切回键盘模式' : '切换到鼠标模式';
 
-  /* 方块键的两个互斥选项（切配置组 / 切键鼠模式） */
-  const sqMode = (m.squareKeyAction || 'group') === 'mode';
-  for (const el of $$('#squareKeySeg input')) {
-    const sel = (el.value === 'mode') === sqMode;
-    el.checked = sel;
-    const lab = el.closest('label');
-    if (lab) lab.classList.toggle('on', sel);
-  }
-  $('#mouseSquareHint').textContent = sqMode
-    ? '按方块键切键鼠模式；配置组改到「按键映射」页的组标签上选。'
-    : '按方块键循环切换配置组；要切键鼠模式就用上面的按钮（或把这里改成「切换键鼠模式」）。';
 
   /* 回写控件状态：正在被用户拖动的那一个跳过，免得把他的手指"拽回去" */
   for (const el of $$('#page-mouse input[type=range]')) {
@@ -1082,9 +1139,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.2',
+      version: '1.2.3',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.2（构建于 2026-10-16 13:35）',
+      versionLine: 'v1.2.3（构建于 2026-10-16 15:05）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
@@ -1124,7 +1181,7 @@ function boot() {
                normalizeDiagonal: true, directionHoldTimeoutSec: 8, buttonHoldTimeoutSec: 10,
                rememberMode: false, calibrate: true,
                wheelOnVolumeKeys: false, wheelMinPerSec: 3, wheelMaxPerSec: 16,
-               squareKeyAction: 'group',
+               squareKeyAction: 'mode',
                frames: 0, pixelsMoved: 0, dirTimeouts: 0, btnTimeouts: 0, orphanReaps: 0,
                lastReap: null, note: null },
       autoStart: true, autoRun: true, startMinimized: true, autoSwitchDriver: true,

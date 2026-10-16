@@ -75,6 +75,16 @@ internal static class Program
             return;
         }
 
+        // 鼠标动作映射自检：--mouseact-test [输出文件]
+        //   纯逻辑、不注入任何东西：验证"鼠标左键/右键/滚轮上/滚轮下"这四个映射值
+        //   存得进（Parse）、看得懂（Format）、且越界值不会漏成真实虚拟键码。
+        if (args.Length > 0 && args[0] == "--mouseact-test")
+        {
+            var pm = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "mouseact_test.txt");
+            File.WriteAllText(pm, MouseAct.SelfTest());
+            return;
+        }
+
         // 抖动缓冲自检：--jitter-test [输出文件]
         //   不需要声卡、不需要遥控器：纯内存驱动，验证"有界"的三个边界
         //   （起播阈值 / 积压上限且丢最旧 / 静默超时判新会话）。

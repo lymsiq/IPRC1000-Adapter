@@ -683,6 +683,35 @@ internal sealed class KeyFilter : IDisposable
             catch { }
         }
 
+        // ★ 映射成**鼠标动作**的按键（左键 / 右键 / 滚轮上 / 滚轮下）。
+        //   走 SendInput（MouseInjector），**绝不登记进 _heldButtons** —— 那会把它塞进键盘的
+        //   「整份报告」，反而发出一个真的键盘按键。与上面鼠标模式的方向键分流是同一套做法。
+        //   放在这里（鼠标模式分流之后、键盘映射之前）的原因：鼠标模式里的方向键/确认/info
+        //   优先级更高，其余按键才轮到映射表。
+        {
+            var mv = Keymaps.Get(bid);
+            if (MouseAct.IsSingleMouseAction(mv))
+            {
+                var dv = mv[0];
+                var name = MouseAct.NameOf(dv) ?? "?";
+                EtwKeySource.AppendLog(
+                    $"APPLY  {bid}  {(pressed ? "DOWN" : "UP")}  来源={src}  映射={name}（鼠标动作）");
+                if (pressed && !InjectEnabled)
+                {
+                    EtwKeySource.AppendLog($"INJ  {bid} 未注入：InjectEnabled=false（映射={name}）");
+                    return;
+                }
+                // 滚轮的抬起什么都不做（只在按下时滚一格，见 MouseAct 的注释）
+                if (pressed || dv == MouseAct.Left || dv == MouseAct.Right)
+                {
+                    if (!MouseAct.Apply(dv, pressed))
+                        EtwKeySource.AppendLog(
+                            $"INJ  {bid} 鼠标动作未生效：{MouseInjector.LastError ?? "SendInput 被拒（前台窗口权限更高？）"}");
+                }
+                return;
+            }
+        }
+
         // ★★ 关键修复：注入必须用**当前配置组**（Keymaps），不能用 Keys.Load()。
         //
         // 历史 bug：这里原来调的是 `Keys.Load()` —— 那是**旧版扁平格式**的读取器，
