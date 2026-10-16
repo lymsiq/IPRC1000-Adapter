@@ -3,10 +3,20 @@
 //! ## 帧结构（逐字节统计确认，`MaxEtwBytes` 生效后）
 //! L2CAP 负载 653 字节：
 //! ```text
-//! [0..12]   13 字节帧头   a1 f7 01 <seq> 00 81 00 <cnt> 00 00 00 40 01
+//! [0..12]   13 字节帧头   A1 F7 01 <seq> 00 <roll> <n> <cnt> 00 00 00 40 01
 //! [13..652] 640 字节音频 = 320 个 16bit LE 样本 @16 kHz
 //! ```
 //! ACL 上拆两片：首片 `dlen=344`(PB=10) + 续片 `dlen=313`(PB=01) = 657 = L2CAP头(4)+负载(653)
+//!
+//! ⚠ **帧头不是常量**（2026-10-16 由 macOS 版实测纠正，见 `lymsiq/IPRC1000-Mac` 的
+//! `docs/MACOS_VOICE.md`）：第 5 字节 `<roll>` **逐帧在变**（0x42/0x82/0xC2/0x02…每帧 +0x40），
+//! 第 6 字节 `<n>` 也每帧 +9。早期笔记把它记成固定的 `00 81 00` —— **那是错的**，
+//! 照它做内容匹配会一帧都命中不了（macOS 版就因此一直报「音频帧 0」）。
+//! 真正恒定的是 `A1 F7 01` + `[4]==0` + 尾部 `00 00 00 40 01`。
+//! 我们这边是**按长度组帧**（344+313），所以不受影响；`HDR_SIG/HDR_TAIL` 只用来做**自检**。
+//!
+//! ★ 第 3 字节 `<seq>` 是**逐帧 +1（1 字节回绕）的序号** —— 这是把"丢帧"从猜测
+//!   变成测量的关键：seq 连续就说明这期间一帧没丢，跳号才是真丢帧（见 `Stats::seq_*`）。
 //!
 //! ⚠ 若注册表 `MaxEtwBytes` 未在**驱动加载时**生效（即改完没重启），
 //! 首片只记 8 字节头 → 每帧只剩 156/320 样本。用 `bt_verify_reboot.py` 判定。
@@ -37,6 +47,11 @@ const BTHPORT_GUID: &str = "8a1f9517-3a8c-4a9e-a018-4f17a200f277";
 const FRAME_LEN: usize = 653; // L2CAP 负载
 const HDR: usize = 13; // 帧头
 const SAMPLES: usize = 320; // 每帧样本（16 kHz → 320 样本 = 20 ms）
+/// 帧头里**恒定**的两段（可变字节见文件头注释：第 5/6 字节逐帧在变）
+const HDR_SIG: [u8; 3] = [0xA1, 0xF7, 0x01];
+const HDR_TAIL: [u8; 2] = [0x40, 0x01];
+/// 帧头 `seq` 所在字节（1 字节、逐帧 +1、到 255 回绕）
+const HDR_SEQ_IDX: usize = 3;
 /// 无帧多久发 END。
 ///
 /// ⚠ 曾经是 250 ms —— 蓝牙链路正常抖动（RF 干扰、SCO 重传）很容易超过它，
@@ -104,10 +119,33 @@ struct Stats {
     last_frame_ms: u64,
     /// 会话计数：每次 CLEAR 前自增
     sessions: u64,
-    /// 被 ETW 丢掉的续片数（= 丢失的音频帧数）—— 缓冲区不够时会出现
+    /// 首片完整、但配对的续片**根本没到**的次数（= 组装失败的帧数）
     lost_cont: u64,
     /// UDP 发送失败次数
     udp_err: u64,
+
+    // ── 帧级丢失定位（2026-10-16 加，起因："连续语音之后按键没声音"）──
+    //
+    // 原来的盲区：只有 `lost_cont` 一个累计数，30 秒才打一行，
+    // 既分不清"事件被 ETW 丢了"还是"分片长度变了"，也看不出哪一秒开始丢。
+    // 现在：用**帧头 seq**（逐帧 +1）把真丢帧量出来，并给每条"被拒绝"的分片留痕。
+    /// 帧头签名不符的帧数（按理应为 0；不为 0 说明帧格式与预期不同）
+    hdr_odd: u64,
+    /// 帧头 seq 跳号次数（= 真丢帧：遥控器发过、我们没收到）
+    seq_jumps: u64,
+    /// seq 累计跳过的帧数（估计丢失帧数）
+    seq_lost: u64,
+    /// seq 重复 / 回退次数（重复帧或乱序）
+    seq_dup: u64,
+    /// 续片自身被截断（负载 < 313 B）的次数 —— 老实现里这条路径**完全没有计数**
+    trunc_cont: u64,
+    /// 没被任何规则识别的 ACL 分片数
+    odd_frag: u64,
+    /// 上面那些分片的 `(flag, dlen)` 分布（最多记 8 类）—— 长度一变就能看出来
+    odd_kinds: Vec<(u8, u16, u64)>,
+    /// 上一次看到的 seq（None = 还没见过；用 Option 而不是哨兵值，
+    /// 因为 `Stats` 是 `derive(Default)`，哨兵会被 0 顶掉）
+    last_seq: Option<u8>,
 }
 
 // ───────────────────────── 运行统计落盘（定位"音频为什么断"） ─────────────────────────
@@ -469,6 +507,11 @@ impl Bridge {
         }
         if flag == 1 && dlen == 313 {
             if let Some(mut head) = self.pending.take() {
+                // ★ 续片**自己**被 ETW 截断（负载不足 313 B）时，head 永远凑不满 657 →
+                //   这一帧**静默消失**。老实现里这条路径没有任何计数，是排查盲区。
+                if acl.len() < 313 {
+                    self.stats.lock().unwrap().trunc_cont += 1;
+                }
                 let n = acl.len().min(313);
                 head.extend_from_slice(&acl[..n]);
                 if head.len() == FRAME_LEN + 4 {
@@ -484,6 +527,19 @@ impl Bridge {
             let end = acl.len().min(14);
             let usages: Vec<u8> = acl[8..end].to_vec();
             self.handle_hid_report(&usages);
+            return;
+        }
+        // ── 都不认识 ──
+        // ★ 以前这里的处理是"什么都不做" —— 于是"音频为什么没声音"最直接的一类证据
+        //   （分片长度/标志变了）被**静默吞掉**，只能靠猜。现在记 (flag, dlen) 分布。
+        {
+            let mut s = self.stats.lock().unwrap();
+            s.odd_frag += 1;
+            if let Some(e) = s.odd_kinds.iter_mut().find(|e| e.0 == flag && e.1 == dlen as u16) {
+                e.2 += 1;
+            } else if s.odd_kinds.len() < 8 {
+                s.odd_kinds.push((flag, dlen as u16, 1));
+            }
         }
     }
 
@@ -521,6 +577,38 @@ impl Bridge {
     fn push_payload(&mut self, p: &[u8]) {
         if p.len() != FRAME_LEN {
             return;
+        }
+
+        // ── 帧头自检 + seq 跟踪 ──
+        //
+        // 帧头 = `A1 F7 01 <seq> 00 <roll> <n> <cnt> 00 00 00 40 01`，
+        // 其中 `<seq>` 逐帧 +1（1 字节，到 255 回绕）。**这是唯一能证明"真丢了多少帧"的判据**：
+        //   · seq 连续        → 这段时间一帧没丢（哪怕桥因为别的原因没出声）
+        //   · seq 跳号 n       → 真丢了 n-1 帧（遥控器发了、我们没收到）
+        //   · 帧头签名不符     → 帧格式与预期不同（那就不是"丢"，是"变了"）
+        // 有了它 + `lost_cont`（组装失败）+ `odd_frag`（被拒绝的分片），
+        // 三者一对就能判定故障在哪一层，不用再靠猜。
+        {
+            let sig_ok = p[0] == HDR_SIG[0]
+                && p[1] == HDR_SIG[1]
+                && p[2] == HDR_SIG[2]
+                && p[11] == HDR_TAIL[0]
+                && p[12] == HDR_TAIL[1];
+            let seq = p[HDR_SEQ_IDX];
+            let mut s = self.stats.lock().unwrap();
+            if !sig_ok {
+                s.hdr_odd += 1;
+            } else if let Some(prev) = s.last_seq {
+                match (seq.wrapping_sub(prev)) as u64 {
+                    1 => {}                       // 正常
+                    0 => s.seq_dup += 1,          // 重复帧
+                    n => {                        // 跳号 = 真丢帧
+                        s.seq_jumps += 1;
+                        s.seq_lost += n - 1;
+                    }
+                }
+            }
+            s.last_seq = Some(seq);
         }
         // ── 帧间空档统计：长录音里"说着说着没声"就是靠这个定位 ──
         if let Some(t) = self.last_frame_at {
@@ -811,6 +899,10 @@ fn main() {
         let t0 = Instant::now();
         std::thread::spawn(move || {
             let mut n = 0u64;
+            // ★ 2 秒粒度的"丢失增量"快照。原来只有一个 30 秒粒度的累计数 ——
+            //   "哪一秒开始丢、丢的是哪一类"完全看不见（2026-10-16 排查时就吃了这个亏：
+            //   511 这个数字查到了，但判断不出是 ETW 丢事件还是分片长度变了）。
+            let mut prev_loss = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
             loop {
             std::thread::sleep(Duration::from_millis(2000));
             n += 1;
@@ -835,6 +927,8 @@ fn main() {
                         "\"udpPackets\":{},\"udpBytes\":{},",
                         "\"sessions\":{},\"gaps\":{},\"maxGapMs\":{},",
                         "\"lostCont\":{},\"truncatedFirst\":{},\"udpErr\":{},",
+                        "\"seqJumps\":{},\"seqLost\":{},\"seqDup\":{},",
+                        "\"truncCont\":{},\"oddFrag\":{},\"hdrOdd\":{},",
                         "\"hidReports\":{},\"keyEvents\":{},\"otherEvents\":{},",
                         "\"silentMs\":{},\"inSession\":{}}}"
                     ),
@@ -852,6 +946,12 @@ fn main() {
                     s.lost_cont,
                     s.truncated_first,
                     s.udp_err,
+                    s.seq_jumps,
+                    s.seq_lost,
+                    s.seq_dup,
+                    s.trunc_cont,
+                    s.odd_frag,
+                    s.hdr_odd,
                     s.hid_reports,
                     s.key_events,
                     s.other,
@@ -859,11 +959,13 @@ fn main() {
                     if g.in_session { 1 } else { 0 }
                 );
                 let stat_line = format!(
-                    "[STAT] 运行 {}s | 会话 {} 空档 {} 最长 {}ms | 帧 {} 丢帧 {} 被截首片 {} \
+                    "[STAT] 运行 {}s | 会话 {} 空档 {} 最长 {}ms | 帧 {} 丢帧 {}（seq跳 {} 帧）被截首片 {} \
+                     · 截续片 {} · 未识别片 {} · 帧头异常 {} \
                      | UDP {} 包 失败 {} | 距上次音频 {} | 会话中={}",
                     t0.elapsed().as_secs(),
                     s.sessions, s.gaps, s.max_gap_ms,
-                    s.frames, s.lost_cont, s.truncated_first,
+                    s.frames, s.lost_cont, s.seq_lost, s.truncated_first,
+                    s.trunc_cont, s.odd_frag, s.hdr_odd,
                     sent, s.udp_err,
                     if silent < 0 { "从未".to_string() } else { format!("{silent}ms") },
                     if g.in_session { "是" } else { "否" }
@@ -871,6 +973,39 @@ fn main() {
                 (json, stat_line)
             };
             diag::write_stats(&json);
+            // ★ 丢失增量日志（2 秒一行，**只在有变化时**打）：
+            //   把"哪一类在涨"直接写进日志，下一次复现不用再翻累计数。
+            {
+                let cur = match st.lock() {
+                    Ok(s) => (
+                        s.lost_cont, s.seq_jumps, s.seq_lost,
+                        s.trunc_cont, s.odd_frag, s.hdr_odd, s.odd_kinds.clone(),
+                    ),
+                    Err(_) => continue,
+                };
+                let d = (
+                    cur.0.wrapping_sub(prev_loss.0),
+                    cur.1.wrapping_sub(prev_loss.1),
+                    cur.2.wrapping_sub(prev_loss.2),
+                    cur.3.wrapping_sub(prev_loss.3),
+                    cur.4.wrapping_sub(prev_loss.4),
+                    cur.5.wrapping_sub(prev_loss.5),
+                );
+                if d != (0, 0, 0, 0, 0, 0) {
+                    let mut kinds: Vec<String> = cur.6.iter()
+                        .map(|(f, l, c)| format!("flag={f} dlen={l}×{c}"))
+                        .collect();
+                    kinds.sort();
+                    diag::log(&format!(
+                        "★ 音频丢失明细: 组帧失败(续片没到) +{} · seq跳号 +{}（跳过 {} 帧）\
+                         · 续片被截断 +{} · 未识别分片 +{} [{}] · 帧头异常 +{}",
+                        d.0, d.1, d.2, d.3, d.4,
+                        if kinds.is_empty() { "无".to_string() } else { kinds.join(", ") },
+                        d.5
+                    ));
+                }
+                prev_loss = (cur.0, cur.1, cur.2, cur.3, cur.4, cur.5);
+            }
             // ★ 每 30 秒往 bridge.log 追加一行统计。
             //   bridge-stats.json 只保留"当前值"，看不出走势；
             //   而用户报的是「**多次对话后**才出现没波形」——正是需要看趋势的场景。
@@ -1143,6 +1278,18 @@ fn report(stats: &Arc<Mutex<Stats>>, bridge: &Arc<Mutex<Bridge>>) {
         "\n[i] 音频帧 {}  被截断首片 {}  HID报告 {}  按键事件 {}  其他事件 {}",
         st.frames, st.truncated_first, st.hid_reports, st.key_events, st.other
     );
+    println!(
+        "[i] 丢帧定位: 组帧失败(续片没到) {} · seq跳号 {} 次（跳过 {} 帧）· seq重复 {} \
+         · 续片被截断 {} · 未识别分片 {} · 帧头异常 {}",
+        st.lost_cont, st.seq_jumps, st.seq_lost, st.seq_dup,
+        st.trunc_cont, st.odd_frag, st.hdr_odd
+    );
+    if !st.odd_kinds.is_empty() {
+        let mut k: Vec<String> = st.odd_kinds.iter()
+            .map(|(f, l, c)| format!("flag={f} dlen={l}×{c}")).collect();
+        k.sort();
+        println!("[i] 未识别分片分布: {}", k.join(", "));
+    }
     if st.lat_n > 0 {
         println!(
             "[i] ETW 投递延迟（链路层事件实测）: 平均 {} ms  最大 {} ms  （{} 次采样）",

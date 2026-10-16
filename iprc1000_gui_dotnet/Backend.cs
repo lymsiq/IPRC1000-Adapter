@@ -874,11 +874,28 @@ internal sealed class Backend : IDisposable
             ["silentMs"] = silentMs,
             ["lostCont"] = L("lostCont"),
             ["truncatedFirst"] = L("truncatedFirst"),
+            // ★ 丢帧定位（2026-10-16 加）：光有"丢了 511 帧"没法定位是哪一层的错。
+            //   四级互相独立 ⇒ 一眼判定（判据见 tools/bridge_loss_selftest.py）：
+            //     seqLost  = 输出流里**总共**少了几帧（任何原因）
+            //     seqJumps = 序号跳了几次（跳号才是"遥控器发过、我们没收到"的真丢帧）
+            //     lostCont = 首片到了、配对的续片没到（组装失败）
+            //     oddFrag  = 分片长度/标志不认识 —— **"变了"而不是"丢了"**
+            //     truncCont/truncatedFirst = 分片在了但负载被 ETW 截断
+            ["seqJumps"] = L("seqJumps"),
+            ["seqLost"] = L("seqLost"),
+            ["seqDup"] = L("seqDup"),
+            ["truncCont"] = L("truncCont"),
+            ["oddFrag"] = L("oddFrag"),
+            ["hdrOdd"] = L("hdrOdd"),
             ["udpPackets"] = L("udpPackets"),
             ["udpBytes"] = L("udpBytes"),
             ["hint"] = !running ? "待启动"
                 : zombie ? "语音桥僵死：进程在但已停止上报 —— 会自动重启"
                 : st == null ? "正在监听 BthPort ETW（统计文件还没生成）"
+                : L("seqLost") > 0 || L("lostCont") > 0 || L("oddFrag") > 0
+                    ? $"⚠ 收到音频，但已丢 {L("seqLost")} 帧"
+                      + (L("oddFrag") > 0 ? "，且有分片长度不认识（帧格式可能变了）" : "")
+                      + " —— 明细见 bridge.log 的「音频丢失明细」"
                 : silentMs < 0 ? "正在监听 BthPort ETW（尚未收到音频）"
                 : $"正在监听 BthPort ETW（{silentMs} ms 前收到音频）",
         };

@@ -426,8 +426,9 @@ async function editKey(it) {
 }
 
 /* ───────── 渲染：环境设置 ───────── */
-function kvItem(k, v, cls) {
-  return `<div class="item"><div class="k">${k}</div><div class="v ${cls || ''}">${v}</div></div>`;
+function kvItem(k, v, cls, sub) {
+  return `<div class="item"><div class="k">${k}</div><div class="v ${cls || ''}">${v}`
+       + (sub ? `<span class="dim"> · ${sub}</span>` : '') + '</div></div>';
 }
 
 function renderEnv(s) {
@@ -485,7 +486,13 @@ function renderEnv(s) {
     kvItem('最近收到音频', silentTxt, silentCls) +
     kvItem('会话 / 空档', `${b.sessions || 0} / ${b.gaps || 0}` +
                         ((b.maxGapMs || 0) > 0 ? `（最长 ${b.maxGapMs} ms）` : '')) +
-    kvItem('ETW 丢帧', b.lostCont || 0, (b.lostCont || 0) > 0 ? 'bad' : 'ok') +
+    kvItem('丢失帧数', (b.seqLost || 0), (b.seqLost || 0) > 0 ? 'bad' : 'ok',
+           (b.seqJumps || 0) > 0 ? `序号跳了 ${b.seqJumps} 次` : '') +
+    kvItem('丢帧分类', '组装失败 ' + (b.lostCont || 0)
+                        + ' · 长度不认识 ' + (b.oddFrag || 0)
+                        + ' · 分片被截断 ' + ((b.truncCont || 0) + (b.truncatedFirst || 0)),
+           (b.lostCont || 0) + (b.oddFrag || 0) + (b.truncCont || 0) + (b.truncatedFirst || 0) > 0
+             ? 'bad' : 'ok') +
     kvItem('写入 CABLE', (rt.packets || 0) + ' 包') +
     kvItem('管理员权限', a ? '已具备' : '缺失', a ? 'ok' : 'bad');
   $('#bridgeNote').className = 'note' + (a ? '' : ' warn');
@@ -497,7 +504,11 @@ function renderEnv(s) {
           '再以 48 kHz 写入 <b>CABLE Input</b>。<b>按住遥控器语音键说话即可。</b>') +
       (rt.device ? `<br>输出设备：${rt.device}` : '') +
       `<br><span class="dim">排查用：「最近收到音频」说话时应始终 &lt;1 秒；` +
-      `一直涨 = 帧没来（遥控器/BT/ETW）；「ETW 丢帧」&gt;0 = 缓冲区不够。</span>`
+      `一直涨 = 帧没来（遥控器/BT/ETW）。<br>` +
+      `「丢失帧数」用帧头序号量出来，是<b>真丢了多少帧</b>；「丢帧分类」说明丢在哪一层 —— ` +
+      `组装失败=续片没到（事件被丢或线路丢）；长度不认识=分片长度/标志变了（★ 不是丢，是变了，` +
+      `说明帧格式与预期不同）；分片被截断=ETW 截断负载（改注册表 MaxEtwBytes 后**必须重启**）。<br>` +
+      `逐秒明细见 <code>bridge.log</code> 的「音频丢失明细」。</span>`
     : '语音桥需要<b>管理员权限</b>才能创建 ETW 会话（<code>StartTrace</code> 要求 Administrators）。' +
       '请点下面的「以管理员身份重启本程序」。';
 
@@ -1074,6 +1085,7 @@ function boot() {
                 frames: 18422, samples: 5895040, seconds: 368.4,
                 silentMs: 180, sessions: 3, gaps: 1, maxGapMs: 820,
                 lostCont: 0, truncatedFirst: 0, udpPackets: 18422, uptimeSec: 421,
+                seqJumps: 0, seqLost: 0, seqDup: 0, truncCont: 0, oddFrag: 0, hdrOdd: 0,
                 hint: '正在监听 BthPort ETW（180 ms 前收到音频）' },
       inject: true,
       router: { online: true, packets: 1152, bytes: 4423680, error: null, session: true,

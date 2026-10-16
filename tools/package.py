@@ -242,6 +242,20 @@ SRC_REQUIRED = [
     # v1.0.6：ETW 缓冲加大，防丢音频帧
     ("ETW 缓冲已加大", "tools/etw_consumer/src/main.rs", "max_buffer: 32"),
     ("桥日志用本地时间", "tools/etw_consumer/src/main.rs", "local_hms"),
+    # ★★ 丢帧定位仪表（2026-10-16 加，起因「连续语音之后按键没声音」）。
+    #    以前只有 `lost_cont` 一个 30 秒粒度的累计数 —— 既分不清"ETW 丢事件"还是
+    #    "分片长度变了"，也看不出哪一秒开始丢。这四类计数互相独立，缺一个就退回去靠猜。
+    ("帧头 seq 用来量真丢帧", "tools/etw_consumer/src/main.rs", "seq_lost"),
+    ("seq 跳号有独立计数", "tools/etw_consumer/src/main.rs", "seq_jumps"),
+    ("未识别分片留痕（不再静默吞掉）", "tools/etw_consumer/src/main.rs", "odd_kinds"),
+    ("续片被截断有计数（老代码没有）", "tools/etw_consumer/src/main.rs", "trunc_cont"),
+    ("帧头签名自检", "tools/etw_consumer/src/main.rs", "HDR_SIG"),
+    ("丢失明细按 2 秒粒度落日志", "tools/etw_consumer/src/main.rs", "音频丢失明细"),
+    ("仪表有合成回放自检", "tools/bridge_loss_selftest.py", "scenario_cont_len_changed"),
+    # 帧头**不是**常量：第 5/6 字节逐帧在变。早期笔记记成固定 `00 81 00` 是错的，
+    # 照它做内容匹配会一帧都命不中（macOS 版就因此一直报「音频帧 0」）。
+    ("帧头可变字节已标注", "tools/etw_consumer/src/main.rs", "帧头不是常量"),
+    ("界面能看到丢帧分类", "iprc1000_gui_dotnet/ui/app.js", "丢帧分类"),
     # v1.0.7：卡键看门狗 v2。v1 盯「遥控器静默」，而 ETW 模式下遥控器按住时
     # 根本不上报（实测按住 30 秒上报 0 次）→ 丢一次 UP 就永久卡键。
     ("看门狗 v2 有独立登记集合", "iprc1000_gui_dotnet/KeyFilter.cs", "_heldButtons"),
