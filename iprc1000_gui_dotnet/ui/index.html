@@ -31,6 +31,9 @@
       <button class="nav-btn" data-page="env" title="环境设置">
         <svg viewBox="0 0 24 24"><path d="M3 13.5h3l2-5.5 3.2 10L14 11l1.9 2.5H21" stroke-width="1.9" fill="none"/></svg>
       </button>
+      <button class="nav-btn" data-page="mouse" title="鼠标模式">
+        <svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="5" stroke-width="1.7" fill="none"/><path d="M12 7.6v3.9" stroke-width="1.9" fill="none"/></svg>
+      </button>
     </nav>
 
     <div class="device">
@@ -327,6 +330,84 @@
             <button class="btn ghost" id="btnExportUhid">导出到桌面手动安装</button>
           </div>
         </details>
+      </div>
+    </section>
+
+    <section class="page hidden" id="page-mouse">
+      <header class="page-head">
+        <h1>鼠标模式</h1>
+        <p>遥控器当鼠标用：方向键<b>按住拖动</b>即移动（按住越久越快）· 确认 = 左键 · info = 右键</p>
+      </header>
+
+      <!-- 0. 模式 -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="ic ic-blue"><svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="5"/><path d="M12 7.6v3.9"/></svg></div>
+          <div class="panel-title">
+            <b>键盘 / 鼠标模式</b>
+            <span>按遥控器最底部的「方块键」即可切换（按下即生效）</span>
+          </div>
+          <span class="dot" id="d-mouse"></span>
+        </div>
+        <div class="kv" id="mouseKv"></div>
+        <div class="note" id="mouseNote"></div>
+        <div class="panel-actions">
+          <button class="btn" id="btnMouseToggle">切换到鼠标模式</button>
+          <button class="btn ghost" id="btnMouseCalib">重新自校准</button>
+        </div>
+      </div>
+
+      <!-- 1. 手感 -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="ic ic-indigo"><svg viewBox="0 0 24 24"><path d="M4 17c3.5-9 6.5-9 8 0s4.5 3 8-4" fill="none" stroke-width="1.8"/></svg></div>
+          <div class="panel-title">
+            <b>手感</b>
+            <span>改完即时生效（拖动滑条就能在旁边试）</span>
+          </div>
+        </div>
+        <div class="sliders" id="mouseSliders">
+          <label class="slider-row"><span>起步速度</span><input type="range" data-k="minPxPerSec" data-unit=" px/秒" data-dec="0" min="10" max="400" step="10"><b class="val"></b></label>
+          <label class="slider-row"><span>满速</span><input type="range" data-k="maxPxPerSec" data-unit=" px/秒" data-dec="0" min="150" max="3000" step="50"><b class="val"></b></label>
+          <label class="slider-row"><span>加速时长</span><input type="range" data-k="rampMs" data-unit=" ms" data-dec="0" min="0" max="2500" step="50"><b class="val"></b></label>
+          <label class="slider-row"><span>加速曲线</span><input type="range" data-k="rampExponent" data-unit="" data-dec="1" min="1" max="3" step="0.1"><b class="val"></b></label>
+          <label class="slider-row"><span>滚轮起步</span><input type="range" data-k="wheelMinPerSec" data-unit=" 格/秒" data-dec="0" min="1" max="20" step="1"><b class="val"></b></label>
+          <label class="slider-row"><span>滚轮满速</span><input type="range" data-k="wheelMaxPerSec" data-unit=" 格/秒" data-dec="0" min="2" max="40" step="1"><b class="val"></b></label>
+        </div>
+        <div class="switches">
+          <label class="switch"><input type="checkbox" data-k="normalizeDiagonal">斜向归一化<i>不开斜着走快 41%</i></label>
+          <label class="switch"><input type="checkbox" data-k="wheelOnVolumeKeys">音量± 当滚轮<i>默认关，免得占了音量键</i></label>
+          <label class="switch"><input type="checkbox" data-k="rememberMode">记住上次模式<i>否则每次启动回键盘模式</i></label>
+        </div>
+        <div class="note" id="mouseCfgNote"></div>
+        <details class="adv">
+          <summary>更多选项：tick 频率 · 安全超时 · 恢复默认</summary>
+          <div class="sliders">
+            <label class="slider-row"><span>tick 频率</span><input type="range" data-k="tickHz" data-unit=" Hz" data-dec="0" min="30" max="120" step="10"><b class="val"></b></label>
+            <label class="slider-row"><span>方向键超时</span><input type="range" data-k="directionHoldTimeoutSec" data-unit=" 秒" data-dec="0" min="2" max="30" step="1"><b class="val"></b></label>
+            <label class="slider-row"><span>鼠标键超时</span><input type="range" data-k="buttonHoldTimeoutSec" data-unit=" 秒" data-dec="0" min="2" max="30" step="1"><b class="val"></b></label>
+          </div>
+          <div class="panel-actions">
+            <button class="btn ghost" id="btnMouseReset">恢复默认手感</button>
+          </div>
+        </details>
+      </div>
+
+      <!-- 2. 实时校准 -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="ic ic-green"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18" fill="none" stroke-width="1.7"/><circle cx="12" cy="12" r="4.2" fill="none" stroke-width="1.7"/></svg></div>
+          <div class="panel-title">
+            <b>实时校准</b>
+            <span>切到鼠标模式后按住方向键 —— 光点会跟着动，右下角是实时速度</span>
+          </div>
+        </div>
+        <div class="pad" id="mousePad">
+          <div class="pad-hint" id="mousePadHint">先切到鼠标模式，再按住遥控器方向键试试</div>
+          <div class="pad-dot" id="mouseDot"></div>
+          <div class="pad-speed" id="mouseSpeedLive"></div>
+        </div>
+        <div class="kv" id="mouseLiveKv"></div>
       </div>
     </section>
 

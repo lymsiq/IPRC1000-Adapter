@@ -206,6 +206,9 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
 .item .v{font-size:12.5px}
 .kv{gap:0}
 .note{margin-top:7px;padding:7px 10px;font-size:12px;line-height:1.5;border-radius:9px}
+/* 空的 .note 不显示任何东西 —— 否则它的左边框会留下一道小竖线，看着像半个括号标点。
+   约定：有内容才显示；`.warn` 是"这内容是警告"的意思，不是"显示/隐藏"的开关。 */
+.note:empty{display:none}
 .keyrow{padding:7px 11px;gap:10px;margin-bottom:5px;border-radius:10px}
 .keyname{font-size:13.5px}
 .keyhid{font-size:10.5px}
@@ -313,3 +316,37 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
 .pre-btn{padding:4px 10px;font-size:12px;border-radius:8px;cursor:pointer;
   border:1px solid var(--blue);background:#fff;color:var(--blue)}
 .pre-btn:hover{background:var(--blue);color:#fff}
+
+/* ───── 鼠标模式页 ───── */
+
+/* 手感滑条：标签 / 滑条 / 数值 三列，数值用等宽数字避免跳动 */
+.sliders{display:flex;flex-direction:column;gap:9px;margin:2px 0 12px}
+.slider-row{display:grid;grid-template-columns:96px 1fr 88px;align-items:center;gap:10px}
+.slider-row>span{color:var(--txt2);font-size:12.5px}
+.slider-row>input[type=range]{width:100%;height:18px;accent-color:var(--blue);cursor:pointer}
+.slider-row>.val{color:var(--txt);font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums}
+
+/* 开关做成胶囊，省地方也一眼看出状态 */
+.switches{display:flex;flex-wrap:wrap;gap:8px}
+.switch{display:flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;
+  border:1px solid var(--line);background:rgba(255,255,255,.7);cursor:pointer;
+  font-size:12.5px;color:var(--txt2)}
+.switch input{width:15px;height:15px;accent-color:var(--blue);cursor:pointer}
+.switch i{font-style:normal;color:var(--txt3);font-size:11.5px}
+.switch.on{color:var(--txt);border-color:rgba(47,128,237,.45);background:var(--blue-l)}
+
+/* 实时校准区：按住遥控器方向键就能看到光点跟着走 —— 调滑条时手感即时可感 */
+.pad{position:relative;height:172px;border:1px dashed rgba(120,150,190,.42);border-radius:12px;
+  overflow:hidden;margin:2px 0 10px;
+  background:
+    repeating-linear-gradient(0deg,rgba(120,150,190,.07) 0 1px,transparent 1px 20px),
+    repeating-linear-gradient(90deg,rgba(120,150,190,.07) 0 1px,transparent 1px 20px),
+    rgba(255,255,255,.55)}
+.pad-hint{position:absolute;inset:0;display:grid;place-items:center;color:var(--txt3);
+  font-size:12.5px;text-align:center;padding:0 20px}
+.pad-dot{position:absolute;left:50%;top:50%;width:11px;height:11px;border-radius:50%;
+  background:var(--blue);box-shadow:0 0 0 5px rgba(47,128,237,.15);
+  transform:translate(-50%,-50%);opacity:0;transition:opacity .18s}
+.pad-dot.on{opacity:1}
+.pad-speed{position:absolute;right:10px;bottom:8px;font-size:12px;color:var(--txt2);
+  font-variant-numeric:tabular-nums}

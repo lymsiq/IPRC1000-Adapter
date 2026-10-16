@@ -28,7 +28,7 @@ const { chromium } = require('playwright-core');
 
 const ROOT = path.resolve(__dirname, '..');
 const UI = path.join(ROOT, 'iprc1000_gui_dotnet', 'ui');
-const PAGES = ['overview', 'keys', 'env'];
+const PAGES = ['overview', 'keys', 'env', 'mouse'];
 
 const argv = process.argv.slice(2);
 const outIdx = argv.indexOf('--out');
@@ -118,7 +118,7 @@ const PROBE = () => {
 
   const missingIds = PAGES.filter((p) => !s.pageIds.includes('page-' + p));
   if (missingIds.length) bad('缺少页面 id：' + missingIds.map((p) => 'page-' + p).join(', ') + '（goto() 按 page- 前缀拼接找页，缺一个就会全页隐藏）');
-  else ok('三页 id 齐全（page-overview / page-keys / page-env）');
+  else ok('页面 id 齐全（' + PAGES.map((p) => 'page-' + p).join(' / ') + '）');
 
   const badNav = PAGES.filter((p) => !s.navPages.includes(p));
   if (badNav.length) bad('导航按钮缺 data-page：' + badNav.join(', '));

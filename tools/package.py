@@ -188,6 +188,12 @@ SRC_REQUIRED = [
     ("鼠标路由挂在 ApplyButton", "iprc1000_gui_dotnet/KeyFilter.cs", "MouseModeRouter"),
     ("鼠标模式有引擎自检", "iprc1000_gui_dotnet/MouseEngine.cs", "static string SelfTest"),
     ("引擎自检有 CLI 入口", "iprc1000_gui_dotnet/Program.cs", "--mouse-engine-test"),
+    # ★ 鼠标模式页（阶段 2）
+    ("鼠标模式页在包内", "iprc1000_gui_dotnet/ui/index.html", "page-mouse"),
+    ("鼠标页有实时校准区", "iprc1000_gui_dotnet/ui/index.html", "mousePad"),
+    ("鼠标页渲染函数存在", "iprc1000_gui_dotnet/ui/app.js", "function renderMouse"),
+    ("预览分支也渲染鼠标页", "iprc1000_gui_dotnet/ui/app.js", "renderEnv(demo); renderMouse(demo)"),
+    ("空 note 不显示", "iprc1000_gui_dotnet/ui/style.css", ".note:empty"),
     # 诊断盲区：这三个"静默降级"以前完全查不出来
     ("注入开关变化会留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "InjectEnabled"),
     ("虚拟 HID 失败会留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "虚拟 HID 下发失败"),

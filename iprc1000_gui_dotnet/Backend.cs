@@ -194,6 +194,30 @@ internal sealed class Backend : IDisposable
         LastButtonPressed = pressed;
     }
 
+    /// <summary>
+    /// 取走"自上次调用以来累计的鼠标位移" —— 界面「实时校准区」按 ~20 Hz 轮询用。
+    /// 只回增量、不回绝对位置，所以不会因为界面刷新而干扰真实光标。
+    /// </summary>
+    public string TakeMouseDelta()
+    {
+        var (dx, dy, px, sec) = _mouse.TakeDelta();
+        return Env.Json(new
+        {
+            dx = Math.Round(dx, 1),
+            dy = Math.Round(dy, 1),
+            px = Math.Round(px, 1),
+            pxPerSec = sec > 0.001 ? Math.Round(px / sec) : 0,
+            mode = _mouse.Enabled ? "mouse" : "keyboard",
+        });
+    }
+
+    /// <summary>界面上「重新自校准」按钮：量一次增益并回报结果</summary>
+    public string CalibrateMouse()
+    {
+        _mouse.Calibrate();
+        return _mouse.LastNote ?? "自校准完成。";
+    }
+
     /// <summary>切换/设置鼠标模式（界面与桥接调）。<paramref name="v"/>: "on"/"off"/"toggle"</summary>
     public string SetMouseMode(string? v)
     {

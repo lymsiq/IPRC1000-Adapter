@@ -55,6 +55,17 @@ internal sealed class MouseEngine
         public bool RememberMode { get; set; }
         /// <summary>进入鼠标模式时自校准（实测"请求 px → 实际 px"的增益）</summary>
         public bool Calibrate { get; set; } = true;
+
+        /// <summary>
+        /// 鼠标模式下把 **音量± 当滚轮** 用（默认**关**）。
+        /// 为什么默认关：有人还想在鼠标模式下调音量，默默地改掉这两个键的行为是越权。
+        /// 打开后：音量+ = 上滚、音量− = 下滚，按住会加速重复（翻长页很实用）。
+        /// </summary>
+        public bool WheelOnVolumeKeys { get; set; }
+        /// <summary>滚轮起步速度（格/秒）—— 每格 = 系统的一格（120）</summary>
+        public double WheelMinPerSec { get; set; } = 3;
+        /// <summary>滚轮满速（格/秒），与方向键共用同一个斜坡时长</summary>
+        public double WheelMaxPerSec { get; set; } = 16;
     }
 
     private const int VK_LBUTTON = 0x01, VK_RBUTTON = 0x02;
@@ -71,6 +82,15 @@ internal sealed class MouseEngine
     private bool _leftDown, _rightDown;
     private DateTime _leftAt = DateTime.MinValue, _rightAt = DateTime.MinValue;
     private readonly Dictionary<string, DateTime> _btnAt = new();
+
+    // 滚轮（音量± 当滚轮用时）：按住会按斜坡加速重复
+    private bool _wheelUp, _wheelDown;
+    private DateTime _wheelSince = DateTime.MinValue;
+    private double _wheelAcc;
+
+    // 界面「实时校准区」用的位移增量（自上次被取走起累计）
+    private double _deltaX, _deltaY;
+    private DateTime _deltaSince = DateTime.MinValue;
 
     private volatile bool _enabled;
     private volatile bool _stop;
@@ -138,9 +158,14 @@ internal sealed class MouseEngine
             _cfg.ButtonHoldTimeoutSec = D("buttonHoldTimeoutSec", _cfg.ButtonHoldTimeoutSec, 2, 60);
             _cfg.RememberMode = B("rememberMode", _cfg.RememberMode);
             _cfg.Calibrate = B("calibrate", _cfg.Calibrate);
+            _cfg.WheelOnVolumeKeys = B("wheelOnVolumeKeys", _cfg.WheelOnVolumeKeys);
+            _cfg.WheelMinPerSec = D("wheelMinPerSec", _cfg.WheelMinPerSec, 1, 30);
+            _cfg.WheelMaxPerSec = D("wheelMaxPerSec", _cfg.WheelMaxPerSec, 2, 60);
+            if (_cfg.WheelMinPerSec > _cfg.WheelMaxPerSec) _cfg.WheelMinPerSec = _cfg.WheelMaxPerSec;
             if (_cfg.MinPxPerSec > _cfg.MaxPxPerSec) _cfg.MinPxPerSec = _cfg.MaxPxPerSec;
             sb.Append($"已应用：{_cfg.MinPxPerSec:F0}→{_cfg.MaxPxPerSec:F0} px/秒 · 斜坡 {_cfg.RampMs:F0} ms"
                       + (_cfg.NormalizeDiagonal ? " · 斜向归一化" : "")
+                      + (_cfg.WheelOnVolumeKeys ? $" · 音量键当滚轮（{_cfg.WheelMinPerSec:F0}→{_cfg.WheelMaxPerSec:F0} 格/秒）" : "")
                       + $"（增益 {_gain:F2}）");
         }
         SaveConfig();
@@ -150,6 +175,10 @@ internal sealed class MouseEngine
     // ───────────────────────── 模式开关 ─────────────────────────
 
     public bool Enabled => _enabled;
+    /// <summary>实测增益（请求 1 px 实际走多少 px）—— 界面显示用</summary>
+    public double Gain => _gain;
+    /// <summary>小/大增量比值不一致 → 系统加速开着，会与斜坡叠加</summary>
+    public bool AccelSuspected => _accelSuspected;
 
     /// <summary>开/关鼠标模式。开启时启动引擎线程（并在需要时做一次自校准）。</summary>
     public string SetEnabled(bool on)
@@ -219,9 +248,13 @@ internal sealed class MouseEngine
 
     private static readonly HashSet<string> DirectionIds = new() { "up", "down", "left", "right" };
     private static readonly HashSet<string> MouseButtonIds = new() { "ok", "info" };
+    private static readonly HashSet<string> WheelKeyIds = new() { "volume_up", "volume_down" };
 
-    /// <summary>鼠标模式下本引擎接管哪些按键（其余仍走配置组）</summary>
-    public static bool Handles(string bid) => DirectionIds.Contains(bid) || MouseButtonIds.Contains(bid);
+    /// <summary>鼠标模式下本引擎接管哪些按键（其余仍走配置组）。
+    /// 音量键只有在"音量当滚轮"打开时才接管 —— 默认不碰它们。</summary>
+    public bool Handles(string bid)
+        => DirectionIds.Contains(bid) || MouseButtonIds.Contains(bid)
+           || (_cfg.WheelOnVolumeKeys && WheelKeyIds.Contains(bid));
 
     /// <summary>
     /// 处理一个按键事件。<returns>true = 已消费（不要再走键盘映射）</returns>
@@ -229,6 +262,16 @@ internal sealed class MouseEngine
     public bool HandleButton(string bid, bool pressed)
     {
         if (!_enabled || !Handles(bid)) return false;
+
+        // 音量± → 滚轮（可选）
+        if (WheelKeyIds.Contains(bid))
+        {
+            if (bid == "volume_up") _wheelUp = pressed; else _wheelDown = pressed;
+            var any = _wheelUp || _wheelDown;
+            if (any) _wheelSince = DateTime.UtcNow; else { _wheelSince = DateTime.MinValue; _wheelAcc = 0; }
+            Log($"滚轮 {bid} {(pressed ? "按下" : "松开")}");
+            return true;
+        }
 
         if (DirectionIds.Contains(bid))
         {
@@ -351,6 +394,7 @@ internal sealed class MouseEngine
                 _accX -= sx; _accY -= sy;
                 MouseInjector.Move(sx, sy);
                 PixelsMoved += Math.Sqrt((double)sx * sx + (double)sy * sy);
+                lock (_gate) { _deltaX += sx; _deltaY += sy; }   // 供界面实时校准区取数
             }
             Frames++;
         }
@@ -373,7 +417,33 @@ internal sealed class MouseEngine
             Log(msg); GuardLog(msg); LastNote = msg;
         }
 
-        // ⑦ 孤儿键回收（每 1 秒一次）：以**系统状态**为准
+        // ⑦ 滚轮（音量± 当滚轮用时）：按住按斜坡加速重复 —— 翻长页比一格一格点强得多
+        if (_wheelUp || _wheelDown)
+        {
+            if ((DateTime.UtcNow - _wheelSince).TotalSeconds > _cfg.DirectionHoldTimeoutSec)
+            {
+                _wheelUp = _wheelDown = false; _wheelSince = DateTime.MinValue; _wheelAcc = 0;
+                var msg = $"GUARD  滚轮键按住超时（>{_cfg.DirectionHoldTimeoutSec:F0}s）→ 已停止";
+                Log(msg); GuardLog(msg); LastNote = msg; _dirTimeouts++;
+            }
+            else
+            {
+                var heldMs = _wheelSince == DateTime.MinValue ? 0 : (DateTime.UtcNow - _wheelSince).TotalMilliseconds;
+                var t = _cfg.RampMs <= 0 ? 1.0 : Math.Min(heldMs / _cfg.RampMs, 1.0);
+                var e = Math.Pow(t, Math.Max(_cfg.RampExponent, 0.1));
+                var perSec = _cfg.WheelMinPerSec + (_cfg.WheelMaxPerSec - _cfg.WheelMinPerSec) * e;
+                _wheelAcc += perSec * dt;
+                var notches = (int)_wheelAcc;
+                if (notches > 0)
+                {
+                    _wheelAcc -= notches;
+                    MouseInjector.Wheel(_wheelUp ? 120 * notches : -120 * notches);
+                    lock (_gate) _deltaY += _wheelUp ? -notches * 3 : notches * 3;  // 校准区里也体现出来
+                }
+            }
+        }
+
+        // ⑧ 孤儿键回收（每 1 秒一次）：以**系统状态**为准
         if (DateTime.UtcNow >= _nextOrphanCheck)
         {
             _nextOrphanCheck = DateTime.UtcNow.AddSeconds(1);
@@ -428,10 +498,34 @@ internal sealed class MouseEngine
 
     // ───────────────────────── 收尾 ─────────────────────────
 
+    /// <summary>
+    /// 取走"自上次调用以来累计的位移"（界面**实时校准区**用）。
+    /// 校准区按住遥控器方向键就能看到光点跟着走、并显示实时速度 ——
+    /// 调滑条时手感**即时可感**，不用"改数字→保存→切出去试"。
+    /// </summary>
+    public (double dx, double dy, double px, double sec) TakeDelta()
+    {
+        lock (_gate)
+        {
+            var dx = _deltaX;
+            var dy = _deltaY;
+            var now = DateTime.UtcNow;
+            var sec = _deltaSince == DateTime.MinValue ? 0 : (now - _deltaSince).TotalSeconds;
+            _deltaX = _deltaY = 0;
+            _deltaSince = now;
+            return (dx, dy, Math.Sqrt(dx * dx + dy * dy), sec);
+        }
+    }
+
     /// <summary>把所有鼠标键抬起并清空方向（退出 / 切模式 / 紧急复位时调）</summary>
     public void ReleaseAll(string why)
     {
-        lock (_gate) { _dirHeld.Clear(); _dirSince = DateTime.MinValue; _accX = _accY = 0; _btnAt.Clear(); }
+        lock (_gate)
+        {
+            _dirHeld.Clear(); _dirSince = DateTime.MinValue; _accX = _accY = 0; _btnAt.Clear();
+            _deltaX = _deltaY = 0;
+        }
+        _wheelUp = _wheelDown = false; _wheelSince = DateTime.MinValue; _wheelAcc = 0;
         var had = _leftDown || _rightDown;
         if (_leftDown) { _leftDown = false; try { MouseInjector.Left(false); } catch { } }
         if (_rightDown) { _rightDown = false; try { MouseInjector.Right(false); } catch { } }
@@ -500,8 +594,14 @@ internal sealed class MouseEngine
             Log($"自校准：请求 6px→实际 {small:F0}px（比值 {smallRatio:F2}）｜"
                 + $"请求 48px→实际 {big:F0}px（比值 {gain:F2}）⇒ 采用增益 {_gain:F2}"
                 + (_accelSuspected ? "  ★ 两档比值不一致 → 系统「指针精确度」可能开着，速度会与你调的值有偏差" : ""));
+            LastNote = $"自校准完成：实测增益 {_gain:F2}×"
+                       + (_accelSuspected ? "（★ 两档比值不一致，系统「指针精确度」可能开着）" : "（相对移动精确可控）");
         }
-        catch (Exception e) { Log("自校准失败（按增益 1.0 继续）：" + e.Message); }
+        catch (Exception e)
+        {
+            Log("自校准失败（按增益 1.0 继续）：" + e.Message);
+            LastNote = "自校准失败（按增益 1.0 继续）：" + e.Message;
+        }
     }
 
     // ───────────────────────── 状态 / 日志 ─────────────────────────
@@ -527,6 +627,9 @@ internal sealed class MouseEngine
             buttonHoldTimeoutSec = _cfg.ButtonHoldTimeoutSec,
             rememberMode = _cfg.RememberMode,
             calibrate = _cfg.Calibrate,
+            wheelOnVolumeKeys = _cfg.WheelOnVolumeKeys,
+            wheelMinPerSec = _cfg.WheelMinPerSec,
+            wheelMaxPerSec = _cfg.WheelMaxPerSec,
             frames = Frames,
             pixelsMoved = Math.Round(PixelsMoved),
             dirTimeouts = _dirTimeouts,

@@ -76,6 +76,9 @@ function goto(page) {
   $$('.page').forEach((p) => p.classList.toggle('hidden', p.id !== 'page-' + page));
   const m = $('main');
   if (m) m.scrollTop = 0;
+  /* ★ 鼠标页的「实时校准区」只在页面可见时轮询。
+     本程序是常驻托盘应用 —— 不该在没人看的时候每 50ms 跨进程取一次数据。 */
+  if (page === 'mouse') startMousePad(); else stopMousePad();
 }
 
 /* ───────── 渲染：功能总览 ───────── */
@@ -622,6 +625,7 @@ async function refresh() {
   renderOverview(state);
   renderKeys(state);
   renderEnv(state);
+  renderMouse(state);
 }
 
 /* ── 窗口藏进托盘后停掉 2 秒轮询 ──
@@ -634,12 +638,172 @@ window.setUiVisible = function (v) {
   if (v) {
     refresh();
     timer = setInterval(refresh, 2000);
+    if (!$('#page-mouse') || !$('#page-mouse').classList.contains('hidden')) startMousePad();
+  } else {
+    stopMousePad();     // 窗口藏起来了就别再轮询校准区
   }
 };
+
+/* ───────── 鼠标模式页 ─────────
+   三块：模式开关 / 手感（滑条）+ 开关 / 实时校准区。
+   校准区是这一页的重点 —— 按住遥控器方向键就能看到光点跟着走、右下角给实时速度，
+   所以调滑条时**手感即时可感**，不用"改数字 → 保存 → 切出去试"。 */
+const MOUSE_DEFAULTS = {
+  tickHz: 60, minPxPerSec: 60, maxPxPerSec: 900, rampMs: 700, rampExponent: 2,
+  normalizeDiagonal: true, directionHoldTimeoutSec: 8, buttonHoldTimeoutSec: 10,
+  rememberMode: false, calibrate: true,
+  wheelOnVolumeKeys: false, wheelMinPerSec: 3, wheelMaxPerSec: 16,
+};
+let mousePadTimer = null;
+let mouseCfgTimer = null;
+let mouseDotPos = { x: 50, y: 50 };
+
+/* .note 只在出问题时显示 —— 所以清空时要摘掉 warn 类 */
+function setNote(id, msg) {
+  const n = $(id);
+  if (!n) return;
+  n.textContent = msg || '';
+  n.classList.toggle('warn', !!msg);
+}
+
+function paintSlider(el) {
+  const b = el.parentElement.querySelector('.val');
+  if (b) b.textContent = Number(el.value).toFixed(+(el.dataset.dec || 0)) + (el.dataset.unit || '');
+}
+
+/* 把页面上所有滑条/开关收成一个对象发给宿主（只有鼠标页的，用 #page-mouse 限定作用域） */
+function collectMouseCfg() {
+  const o = {};
+  for (const el of $$('#page-mouse input[type=range]')) o[el.dataset.k] = Number(el.value);
+  for (const el of $$('#page-mouse input[type=checkbox]')) o[el.dataset.k] = el.checked;
+  return o;
+}
+
+/* 拖动时只更新数字；松手（change）或 250ms 没动才真正下发 —— 免得拖一次发几十个包 */
+function pushMouseCfg(now) {
+  clearTimeout(mouseCfgTimer);
+  const send = async () => {
+    if (!B) return;
+    try {
+      setNote('#mouseCfgNote', '');
+      const msg = await B.setMouseConfig(JSON.stringify(collectMouseCfg()));
+      toast(msg, 3000);
+    } catch (e) {
+      setNote('#mouseCfgNote', '保存失败：' + (e && e.message ? e.message : e));
+    }
+  };
+  if (now) send(); else mouseCfgTimer = setTimeout(send, 250);
+}
+
+function renderMouse(s) {
+  const m = (s && s.mouse) || {};
+  const on = m.mode === 'mouse';
+  setDot('#d-mouse', on ? 'on' : '');
+  $('#mouseKv').innerHTML =
+    kvItem('当前模式', on ? '<b>鼠标模式</b>' : '键盘模式') +
+    kvItem('方向键', on ? '移动 · 按住越久越快' : '走当前配置组的映射') +
+    kvItem('确认 / info', on ? '鼠标左键 / 右键（按住即拖拽）' : '走当前配置组的映射') +
+    kvItem('其余 18 个键', '两个模式下都走当前配置组（语音照样能用）') +
+    kvItem('斜向', on ? '支持同时按住 上+左，且已归一化' : '—') +
+    kvItem('配置组切换', '在「按键映射」页的组标签上选');
+  $('#btnMouseToggle').textContent = on ? '切回键盘模式' : '切换到鼠标模式';
+
+  /* 回写控件状态：正在被用户拖动的那一个跳过，免得把他的手指"拽回去" */
+  for (const el of $$('#page-mouse input[type=range]')) {
+    const k = el.dataset.k;
+    if (m[k] === undefined || el.dataset.dirty === '1') continue;
+    el.value = m[k];
+    paintSlider(el);
+  }
+  for (const el of $$('#page-mouse input[type=checkbox]')) {
+    const k = el.dataset.k;
+    if (m[k] === undefined || el.dataset.dirty === '1') continue;
+    el.checked = !!m[k];
+    const sw = el.closest('.switch');
+    if (sw) sw.classList.toggle('on', el.checked);
+  }
+
+  $('#mouseLiveKv').innerHTML =
+    kvItem('实测增益', (m.gain === undefined ? 1 : m.gain) + '×'
+      + (m.accelSuspected ? ' ★ 系统「指针精确度」可能开着，速度会有偏差' : '')) +
+    kvItem('本次运行', (m.frames || 0) + ' 帧 · 累计 ' + (m.pixelsMoved || 0) + ' px') +
+    kvItem('安全网触发', '方向超时 ' + (m.dirTimeouts || 0)
+      + ' · 键超时 ' + (m.btnTimeouts || 0) + ' · 孤儿回收 ' + (m.orphanReaps || 0)) +
+    kvItem('最近一次回收', m.lastReap || '—');
+
+  if (!on) stopMousePad();
+}
+
+function startMousePad() {
+  if (mousePadTimer || !B) return;
+  const page = $('#page-mouse');
+  if (!page || page.classList.contains('hidden')) return;
+  mouseDotPos = { x: 50, y: 50 };
+  const apply = (dot) => { dot.style.left = mouseDotPos.x + '%'; dot.style.top = mouseDotPos.y + '%'; };
+  apply($('#mouseDot'));
+  mousePadTimer = setInterval(async () => {
+    if (!B) return;
+    let d;
+    try { d = JSON.parse(await B.mouseDelta()); } catch (e) { return; }
+    const dot = $('#mouseDot');
+    if (d.mode !== 'mouse') {
+      dot.classList.remove('on');
+      $('#mousePadHint').textContent = '先切到鼠标模式，再按住遥控器方向键试试';
+      $('#mouseSpeedLive').textContent = '';
+      return;
+    }
+    dot.classList.add('on');
+    $('#mousePadHint').textContent = '';
+    /* 增量按比例映射到画布百分比：900 px/秒 时约 0.45 秒扫过一格，能明显看出快慢 */
+    const k = 0.12;
+    mouseDotPos.x = Math.min(96, Math.max(4, mouseDotPos.x + (d.dx || 0) * k));
+    mouseDotPos.y = Math.min(92, Math.max(8, mouseDotPos.y + (d.dy || 0) * k));
+    apply(dot);
+    if (d.pxPerSec) $('#mouseSpeedLive').textContent = Math.round(d.pxPerSec) + ' px/秒';
+  }, 50);
+}
+
+function stopMousePad() {
+  if (mousePadTimer) { clearInterval(mousePadTimer); mousePadTimer = null; }
+  const dot = $('#mouseDot');
+  if (dot) dot.classList.remove('on');
+  const sp = $('#mouseSpeedLive');
+  if (sp) sp.textContent = '';
+}
 
 /* ───────── 绑定 ───────── */
 function bindUI() {
   $$('.nav-btn').forEach((b) => (b.onclick = () => goto(b.dataset.page)));
+
+  /* ── 鼠标模式页 ── */
+  for (const el of $$('#page-mouse input[type=range]')) {
+    el.addEventListener('input', () => { el.dataset.dirty = '1'; paintSlider(el); });
+    el.addEventListener('change', () => { el.dataset.dirty = '0'; pushMouseCfg(true); });
+  }
+  for (const el of $$('#page-mouse input[type=checkbox]')) {
+    el.addEventListener('change', () => {
+      const sw = el.closest('.switch');
+      if (sw) sw.classList.toggle('on', el.checked);
+      pushMouseCfg(true);
+    });
+  }
+  $('#btnMouseToggle').onclick = async () => {
+    try { toast(await B.setMouseMode('toggle'), 3400); }
+    catch (e) { toast('切换失败：' + (e && e.message ? e.message : e), 4000); }
+    await refresh();
+  };
+  $('#btnMouseCalib').onclick = async () => {
+    try { toast(await B.mouseCalibrate(), 4200); }
+    catch (e) { toast('自校准失败：' + (e && e.message ? e.message : e), 4000); }
+    await refresh();
+  };
+  $('#btnMouseReset').onclick = async () => {
+    for (const el of $$('#page-mouse input[type=range]')) el.dataset.dirty = '0';
+    for (const el of $$('#page-mouse input[type=checkbox]')) el.dataset.dirty = '0';
+    try { toast(await B.setMouseConfig(JSON.stringify(MOUSE_DEFAULTS)), 3600); }
+    catch (e) { toast('恢复失败：' + (e && e.message ? e.message : e), 4000); }
+    await refresh();
+  };
 
   $('#btnReset').onclick = async () => {
     if (!confirm('恢复所有按键的默认映射？')) return;
@@ -901,6 +1065,13 @@ function boot() {
         cable: { ok: true }, mic: { ok: true }, winuhid: { ok: true },
         device: { ok: true }, bridge: { ok: true } },
       stuckGuard: { watchdogMs: 800, unlockCount: 0, lastUnlock: null },
+      mouse: { mode: 'keyboard', enabled: false, held: [], gain: 1, accelSuspected: false,
+               tickHz: 60, minPxPerSec: 60, maxPxPerSec: 900, rampMs: 700, rampExponent: 2,
+               normalizeDiagonal: true, directionHoldTimeoutSec: 8, buttonHoldTimeoutSec: 10,
+               rememberMode: false, calibrate: true,
+               wheelOnVolumeKeys: false, wheelMinPerSec: 3, wheelMaxPerSec: 16,
+               frames: 0, pixelsMoved: 0, dirTimeouts: 0, btnTimeouts: 0, orphanReaps: 0,
+               lastReap: null, note: null },
       autoStart: true, autoRun: true, startMinimized: true, autoSwitchDriver: true,
       autoKeepMic: true,
       defaultMicName: 'CABLE Output (VB-Audio Virtual Cable)',
@@ -941,7 +1112,7 @@ function boot() {
       binding: sym, rect: { cx, cy, w, h }, img: IMG,
     }));
     state = demo;
-    renderOverview(demo); renderKeys(demo); renderEnv(demo);
+    renderOverview(demo); renderKeys(demo); renderEnv(demo); renderMouse(demo);
     if (qp) goto(qp);
     // ?modal=<按键id> → 预览时直接弹出该键的屏幕键盘（截图用，如 ?page=keys&modal=ok）
     const md = new URLSearchParams(location.search).get('modal');
