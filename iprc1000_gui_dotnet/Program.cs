@@ -75,6 +75,16 @@ internal static class Program
             return;
         }
 
+        // 抖动缓冲自检：--jitter-test [输出文件]
+        //   不需要声卡、不需要遥控器：纯内存驱动，验证"有界"的三个边界
+        //   （起播阈值 / 积压上限且丢最旧 / 静默超时判新会话）。
+        if (args.Length > 0 && args[0] == "--jitter-test")
+        {
+            var pj = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "jitter_test.txt");
+            File.WriteAllText(pj, JitterBuffer.SelfTest());
+            return;
+        }
+
         // 鼠标引擎自检：--mouse-engine-test [输出文件]
         //   不需要遥控器，直接驱动引擎并量真实光标：增速是否生效、松开是否停住、
         //   确认键是否真的按下系统左键、斜向是否归一化。

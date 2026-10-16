@@ -256,6 +256,27 @@ SRC_REQUIRED = [
     # 照它做内容匹配会一帧都命不中（macOS 版就因此一直报「音频帧 0」）。
     ("帧头可变字节已标注", "tools/etw_consumer/src/main.rs", "帧头不是常量"),
     ("界面能看到丢帧分类", "iprc1000_gui_dotnet/ui/app.js", "丢帧分类"),
+    # ★★ 回调隔离（2026-10-16）：把文件 I/O 移出 ETW 回调路径。
+    #    教训来自 macOS 版：他们把收包回调从主队列（还跑着 UI + tick + 落盘）挪走后，
+    #    到达延迟峰值 71→56 ms。我们这边的等价物就是"回调里做文件写"。
+    ("回调只入队不写文件", "tools/etw_consumer/src/main.rs", "pub fn log_async"),
+    ("异步队列由统计线程落盘", "tools/etw_consumer/src/main.rs", "pub fn drain"),
+    ("回调路径不再直接写文件", "tools/etw_consumer/src/main.rs", "diag::log_async(\"会话开始"),
+    ("tick 不再在锁内写文件", "tools/etw_consumer/src/main.rs", "diag::log_async(&format!(\n"),
+    # 阻塞式 send_to 会堵住 ETW 回调线程 → 缓冲溢出丢一整段；改非阻塞，宁可丢一包
+    ("UDP 发送非阻塞（不再堵住回调）", "tools/etw_consumer/src/main.rs", "set_nonblocking(true)"),
+    ("发送缓冲满有计数", "tools/etw_consumer/src/main.rs", "udpBlocked"),
+    # ★★ 有界抖动缓冲（2026-10-16）：顺手参数抄 macOS 版的实测定值
+    ("有界抖动缓冲存在", "iprc1000_gui_dotnet/JitterBuffer.cs", "internal sealed class JitterBuffer"),
+    ("起播攒 40 ms", "iprc1000_gui_dotnet/JitterBuffer.cs", "PreRollMs = 40"),
+    ("积压上限 64 ms", "iprc1000_gui_dotnet/JitterBuffer.cs", "CapMs = 64"),
+    ("静默 400 ms 判新会话", "iprc1000_gui_dotnet/JitterBuffer.cs", "StaleMs = 400"),
+    ("声卡 IO 缓冲降到 30 ms", "iprc1000_gui_dotnet/JitterBuffer.cs", "LatencyMs = 30"),
+    ("上限必须 ≥ 起播阈值（否则永久静音）", "iprc1000_gui_dotnet/JitterBuffer.cs", "if (CapMs < PreRollMs) CapMs = PreRollMs"),
+    ("抖动缓冲有自检", "iprc1000_gui_dotnet/JitterBuffer.cs", "public static string SelfTest"),
+    ("抖动自检有 CLI 入口", "iprc1000_gui_dotnet/Program.cs", "--jitter-test"),
+    ("路由改用有界缓冲（不再用 1 秒 BufferedWaveProvider）", "iprc1000_gui_dotnet/CableRouter.cs", "new JitterBuffer()"),
+    ("界面能看到抖动缓冲", "iprc1000_gui_dotnet/ui/app.js", "抖动缓冲"),
     # v1.0.7：卡键看门狗 v2。v1 盯「遥控器静默」，而 ETW 模式下遥控器按住时
     # 根本不上报（实测按住 30 秒上报 0 次）→ 丢一次 UP 就永久卡键。
     ("看门狗 v2 有独立登记集合", "iprc1000_gui_dotnet/KeyFilter.cs", "_heldButtons"),

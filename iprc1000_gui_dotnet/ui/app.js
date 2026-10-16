@@ -494,6 +494,16 @@ function renderEnv(s) {
            (b.lostCont || 0) + (b.oddFrag || 0) + (b.truncCont || 0) + (b.truncatedFirst || 0) > 0
              ? 'bad' : 'ok') +
     kvItem('写入 CABLE', (rt.packets || 0) + ' 包') +
+    kvItem('抖动缓冲', (rt.jitter
+              ? `积压 ${rt.jitter.backlogMs || 0} ms（峰值 ${rt.jitter.peakBacklogMs || 0}）`
+              : '未启用'),
+           !rt.jitter ? '' :
+             ((rt.jitter.peakBacklogMs || 0) > (rt.jitter.capMs || 64) * 0.95 ? 'warn' : 'ok'),
+           rt.jitter
+             ? `起播 ${rt.jitter.preRollMs} / 上限 ${rt.jitter.capMs} ms`
+               + ` · 补静音 ${rt.jitter.underruns || 0} 次`
+               + ` · 丢最旧 ${rt.jitter.droppedBytes || 0} 字节`
+             : '') +
     kvItem('管理员权限', a ? '已具备' : '缺失', a ? 'ok' : 'bad');
   $('#bridgeNote').className = 'note' + (a ? '' : ' warn');
   $('#bridgeNote').innerHTML = a
@@ -1069,9 +1079,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.0',
+      version: '1.2.1',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.0（构建于 2026-10-16 09:50）',
+      versionLine: 'v1.2.1（构建于 2026-10-16 12:58）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
@@ -1089,6 +1099,9 @@ function boot() {
                 hint: '正在监听 BthPort ETW（180 ms 前收到音频）' },
       inject: true,
       router: { online: true, packets: 1152, bytes: 4423680, error: null, session: true,
+                jitter: { preRollMs: 40, capMs: 64, staleMs: 400, latencyMs: 30,
+                          backlogMs: 44.0, peakBacklogMs: 63, playing: true,
+                          underruns: 3, droppedBytes: 1920, staleResets: 1, primings: 5 },
                 device: 'CABLE Input (VB-Audio Virtual Cable)' },
       swallow: { running: true, deviceSeen: true, swallowed: 128, passed: 46,
                  lastButton: '语音', pressed: true, spuriousLeaked: 0 },

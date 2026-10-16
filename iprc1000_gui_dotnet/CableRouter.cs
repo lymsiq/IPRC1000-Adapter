@@ -15,7 +15,8 @@ internal sealed class CableRouter : IDisposable
 {
     private readonly UdpClient _udp = new(new IPEndPoint(IPAddress.Loopback, Env.PcmPort));
     private WasapiOut? _out;
-    private BufferedWaveProvider? _buf;
+    /// <summary>有界抖动缓冲（替代原来的 BufferedWaveProvider）</summary>
+    private JitterBuffer? _jit;
     private Thread? _thread;
     private volatile bool _running;
     private long _packets;
@@ -115,18 +116,19 @@ internal sealed class CableRouter : IDisposable
             }
             try
             {
-                _buf = new BufferedWaveProvider(new WaveFormat(48000, 16, 1))
-                {
-                    DiscardOnBufferOverflow = true,
-                    BufferDuration = TimeSpan.FromSeconds(1),
-                    ReadFully = true,
-                };
-                _out = new WasapiOut(dev, AudioClientShareMode.Shared, false, 50);
-                _out.Init(_buf);
+                // ★ 有界抖动缓冲（替换原来的 BufferedWaveProvider：`BufferDuration = 1 秒` +
+                //   `DiscardOnBufferOverflow` 要攒满整整 1 秒才裁 ⇒ 最坏 1 秒延迟）。
+                //   参数与理由见 JitterBuffer.cs 的类注释（起播 40 ms / 上限 64 ms /
+                //   静默 400 ms 判新会话 / 声卡 IO 缓冲 30 ms，均可由环境变量覆盖）。
+                _jit = new JitterBuffer();
+                _out = new WasapiOut(dev, AudioClientShareMode.Shared, false, _jit.Options.LatencyMs);
+                _out.Init(_jit);
                 _out.Play();
                 Device = dev.FriendlyName;
                 Error = null;
-                Log($"[+] 已打开输出设备：{Device}");
+                Log($"[+] 已打开输出设备：{Device} · 抖动缓冲 起播 {_jit.Options.PreRollMs} ms / "
+                    + $"上限 {_jit.Options.CapMs} ms / 判新会话 {_jit.Options.StaleMs} ms / "
+                    + $"声卡缓冲 {_jit.Options.LatencyMs} ms");
                 return true;
             }
             catch (Exception e)
@@ -151,7 +153,7 @@ internal sealed class CableRouter : IDisposable
         try { _out.Stop(); } catch { }
         _out?.Dispose();
         _out = null;
-        _buf = null;
+        _jit = null;
         Log($"[-] 已关闭输出设备（本次共写入 {Packets} 包 / {Bytes} 字节）");
     }
 
@@ -172,11 +174,11 @@ internal sealed class CableRouter : IDisposable
                                   (IPEndPoint)ep);
                     else if (n == 5 && asm[0] == (byte)'C')      // CLEAR
                     {
-                        // ★ 不要 ClearBuffer()。
-                        //   以前这里清缓冲，但会话是「松手 END → 再按 CLEAR」反复建立的，
-                        //   环里往往还压着上一次的真实音频 —— 一清就是一次可听的断音。
-                        //   缓冲只有 1 秒、且 ReadFully=true 会在空时补静音，
-                        //   不清也不会播出过期音频；而声卡重开时 EnsureSink 本来就换了新缓冲。
+                        // ★ 仍然**不在这里无条件清缓冲**（以前清过，会话是「松手 END → 再按
+                        //   CLEAR」反复建立的，环里往往还压着上一次的真实音频，一清就是一次断音）。
+                        //   现在改为**按静默时长判**：JitterBuffer 自己看"距上次写入 > 400 ms"
+                        //   才判定新会话并清空 —— 紧接上一次的 CLEAR（数据还新鲜）不会清，
+                        //   真隔了一段才按的则清掉旧尾巴。两边都占。
                         _inSession = true;
                         EnsureSink();
                         Log($"[CLEAR] 新会话开始（累计 {Packets} 包）");
@@ -206,7 +208,7 @@ internal sealed class CableRouter : IDisposable
                                 Log($"[LAT] 语音键按下 → 首包音频到达 {ms:F0} ms（声卡已就绪={ok}）");
                             _voiceDownAt = DateTime.MinValue;
                         }
-                        if (ok) _buf!.AddSamples(asm, 0, n);
+                        if (ok) _jit!.AddSamples(asm, 0, n);
                     }
                 }
             }
@@ -236,6 +238,7 @@ internal sealed class CableRouter : IDisposable
         error = Error,
         session = Session,
         device = Device,
+        jitter = _jit?.Status(),
     };
 
     public void Dispose()

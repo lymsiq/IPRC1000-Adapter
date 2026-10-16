@@ -183,6 +183,10 @@ mod diag {
     }
 
     /// 追加一行带时间戳的日志到 bridge.log
+    ///
+    /// ⚠ **不要在 ETW 回调里直接调它** —— 这里面是**文件写 + flush**，
+    /// 一次慢盘就能把回调卡住几十~几百毫秒，而回调一卡 ETW 缓冲就溢出、**整段音频被丢**。
+    /// 回调路径请用 [`log_async`]（只入内存队列，由统计线程落盘）。
     pub fn log(msg: &str) {
         if let Ok(mut g) = log_file().lock() {
             if let Some(f) = g.as_mut() {
@@ -190,6 +194,55 @@ mod diag {
                 let _ = f.flush();
             }
         }
+    }
+
+    // ── 异步日志队列：把文件 I/O 彻底移出 ETW 回调路径 ──
+    //
+    // 这条改动抄 macOS 版的教训：他们把收包回调从 `DispatchQueue.main`
+    // （还跑着 UI + 0.2s tick + 2s 落盘）挪到独立队列后，到达延迟峰值 71→56 ms。
+    // 我们这边的等价物就是"回调里做文件写" —— 回调只入队（一次短锁 + 一次 push），
+    // 统计线程每 2 秒 drain 一次落盘。
+    static QUEUE: OnceLock<Mutex<std::collections::VecDeque<String>>> = OnceLock::new();
+
+    /// 队列上限：统计线程若卡死，宁可丢日志也不要无限吃内存。
+    const QUEUE_MAX: usize = 512;
+
+    fn queue() -> &'static Mutex<std::collections::VecDeque<String>> {
+        QUEUE.get_or_init(|| Mutex::new(std::collections::VecDeque::new()))
+    }
+
+    /// **回调路径专用**：只入队，不做任何 I/O。由统计线程 drain 后写文件。
+    pub fn log_async(msg: &str) {
+        if let Ok(mut q) = queue().lock() {
+            if q.len() >= QUEUE_MAX {
+                q.pop_front();
+            }
+            q.push_back(format!("{}  {}", local_hms(), msg));
+        }
+    }
+
+    /// 统计线程调用：把队列里的行一次性落盘。
+    /// 返回落盘的行数（顺便当"回调到底有没有被卡住"的旁证）。
+    pub fn drain() -> usize {
+        let mut lines: Vec<String> = Vec::new();
+        if let Ok(mut q) = queue().lock() {
+            while let Some(l) = q.pop_front() {
+                lines.push(l);
+            }
+        }
+        if lines.is_empty() {
+            return 0;
+        }
+        let n = lines.len();
+        if let Ok(mut g) = log_file().lock() {
+            if let Some(f) = g.as_mut() {
+                for l in &lines {
+                    let _ = writeln!(f, "{l}");
+                }
+                let _ = f.flush();
+            }
+        }
+        n
     }
 
     /// 原子写统计文件（先写 .tmp 再 rename，读侧不会看到半个文件）
@@ -274,16 +327,26 @@ struct UdpSink {
     peer: String,
     sent: u64,
     pcm_bytes: u64,
+    /// 发送缓冲区满（接收端一时没跟上）导致**丢弃**的包数
+    ///
+    /// ★ 为什么套接字要设成非阻塞：阻塞式 `send_to` 在接收端不读的时候会**堵住调用线程**，
+    /// 而这个线程就是 **ETW 回调线程** —— 一堵，ETW 缓冲就溢出，丢的不是一帧而是**一整段**
+    /// （2026-10-16 那次 15 秒 / 511 帧的事故，量级就是这个）。
+    /// 改成非阻塞后：接收端跟不上 → 丢这一个包并计数，回调**绝不阻塞**。
+    blocked: u64,
 }
 
 impl UdpSink {
     fn new(addr: &str) -> Result<Self, String> {
         let sock = UdpSocket::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+        // 非阻塞：宁可丢包也不让 ETW 回调卡住（见 blocked 的注释）
+        sock.set_nonblocking(true).map_err(|e| e.to_string())?;
         Ok(Self {
             sock,
             peer: addr.to_string(),
             sent: 0,
             pcm_bytes: 0,
+            blocked: 0,
         })
     }
     fn cmd(&self, c: &[u8]) -> bool {
@@ -295,6 +358,10 @@ impl UdpSink {
                 self.sent += 1;
                 self.pcm_bytes += bytes.len() as u64;
                 true
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                self.blocked += 1;
+                false
             }
             Err(_) => false,
         }
@@ -611,15 +678,24 @@ impl Bridge {
             s.last_seq = Some(seq);
         }
         // ── 帧间空档统计：长录音里"说着说着没声"就是靠这个定位 ──
+        //
+        // ⚠ 这里**不能在锁内写文件**：`diag::log` 是文件写 + flush，慢盘一次几十~几百毫秒，
+        //   而这条路径就是 ETW 回调本身 —— 一卡 ETW 缓冲就溢出。现在锁内只改计数，
+        //   文案走 `log_async`（只入内存队列，由统计线程落盘）。
         if let Some(t) = self.last_frame_at {
             let gap = t.elapsed().as_millis() as u64;
+            let mut is_gap = false;
             {
                 let mut s = self.stats.lock().unwrap();
                 if gap > s.max_gap_ms { s.max_gap_ms = gap; }
                 if gap >= IDLE_END_MS {
                     s.gaps += 1;
-                    diag::log(&format!("音频空档 {gap} ms（>= IDLE_END_MS {IDLE_END_MS}），会触发 END→CLEAR"));
+                    is_gap = true;
                 }
+            }
+            if is_gap {
+                diag::log_async(&format!(
+                    "音频空档 {gap} ms（>= IDLE_END_MS {IDLE_END_MS}），会触发 END→CLEAR"));
             }
         }
         let body = &p[HDR..HDR + SAMPLES * 2];
@@ -652,7 +728,8 @@ impl Bridge {
                 self.in_session = true;
                 self.have_prev = false;
                 self.stats.lock().unwrap().sessions += 1;
-                diag::log("会话开始（CLEAR）");
+                // 回调路径 → 异步日志（见 diag::log 的警告）
+                diag::log_async("会话开始（CLEAR）");
             }
             // 16k → 48k：与 voice_pcm::push_16k 一致的三点线性内插
             let mut prev = if self.have_prev { self.prev } else { s16[0] };
@@ -680,7 +757,11 @@ impl Bridge {
         self.stats.lock().unwrap().last_frame_ms = diag::now_ms();
     }
 
-    /// 空闲检测：超过 IDLE_END_MS 没有帧就发 END，让 router 关掉 CABLE 流
+    /// 空闲检测：超过 IDLE_END_MS 没有帧就发 END，让 router 关掉 CABLE 流。
+    ///
+    /// ⚠ 它是**持有 bridge 互斥体**被调的（`bridge.lock().unwrap().tick()`），
+    /// 而 ETW 回调要抢同一个锁 —— 所以这里**绝不能做文件 I/O**：一次慢盘就等于
+    /// 把回调卡住，ETW 缓冲跟着溢出。文案一律走 `log_async`。
     fn tick(&mut self) {
         if !self.in_session {
             return;
@@ -691,7 +772,7 @@ impl Bridge {
                     u.cmd(b"END");
                 }
                 self.in_session = false;
-                diag::log(&format!(
+                diag::log_async(&format!(
                     "会话结束（END）—— 已静默 {} ms",
                     t.elapsed().as_millis()
                 ));
@@ -903,17 +984,19 @@ fn main() {
             //   "哪一秒开始丢、丢的是哪一类"完全看不见（2026-10-16 排查时就吃了这个亏：
             //   511 这个数字查到了，但判断不出是 ETW 丢事件还是分片长度变了）。
             let mut prev_loss = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+            let mut prev_blocked = 0u64;
             loop {
             std::thread::sleep(Duration::from_millis(2000));
             n += 1;
-            let (json, stat_line) = {
+            let (json, stat_line, blocked) = {
                 let Ok(s) = st.lock() else { continue };
                 let Ok(g) = br.lock() else { continue };
-                let (sent, bytes) = g
-                    .udp
-                    .as_ref()
-                    .map(|u| (u.sent, u.pcm_bytes))
-                    .unwrap_or((0, 0));
+            let (sent, bytes) = g
+                .udp
+                .as_ref()
+                .map(|u| (u.sent, u.pcm_bytes))
+                .unwrap_or((0, 0));
+            let blocked = g.udp.as_ref().map(|u| u.blocked).unwrap_or(0);
                 let now = diag::now_ms();
                 let silent: i64 = if s.last_frame_ms == 0 {
                     -1 // 从未收到过音频帧
@@ -924,7 +1007,7 @@ fn main() {
                     concat!(
                         "{{\"pid\":{},\"uptimeSec\":{},\"heartbeatMs\":{},",
                         "\"frames\":{},\"samples16\":{},\"seconds16\":{:.2},",
-                        "\"udpPackets\":{},\"udpBytes\":{},",
+                        "\"udpPackets\":{},\"udpBytes\":{},\"udpBlocked\":{},",
                         "\"sessions\":{},\"gaps\":{},\"maxGapMs\":{},",
                         "\"lostCont\":{},\"truncatedFirst\":{},\"udpErr\":{},",
                         "\"seqJumps\":{},\"seqLost\":{},\"seqDup\":{},",
@@ -940,6 +1023,7 @@ fn main() {
                     g.samples16 as f64 / 16000.0,
                     sent,
                     bytes,
+                    blocked,
                     s.sessions,
                     s.gaps,
                     s.max_gap_ms,
@@ -961,18 +1045,20 @@ fn main() {
                 let stat_line = format!(
                     "[STAT] 运行 {}s | 会话 {} 空档 {} 最长 {}ms | 帧 {} 丢帧 {}（seq跳 {} 帧）被截首片 {} \
                      · 截续片 {} · 未识别片 {} · 帧头异常 {} \
-                     | UDP {} 包 失败 {} | 距上次音频 {} | 会话中={}",
+                     | UDP {} 包 失败 {} 缓冲满丢 {} | 距上次音频 {} | 会话中={}",
                     t0.elapsed().as_secs(),
                     s.sessions, s.gaps, s.max_gap_ms,
                     s.frames, s.lost_cont, s.seq_lost, s.truncated_first,
                     s.trunc_cont, s.odd_frag, s.hdr_odd,
-                    sent, s.udp_err,
+                    sent, s.udp_err, blocked,
                     if silent < 0 { "从未".to_string() } else { format!("{silent}ms") },
                     if g.in_session { "是" } else { "否" }
                 );
-                (json, stat_line)
+                (json, stat_line, blocked)
             };
             diag::write_stats(&json);
+            // ★ 把回调**异步**写下的日志行落盘（文件 I/O 只在统计线程做，见 diag::log 的警告）
+            diag::drain();
             // ★ 丢失增量日志（2 秒一行，**只在有变化时**打）：
             //   把"哪一类在涨"直接写进日志，下一次复现不用再翻累计数。
             {
@@ -991,20 +1077,23 @@ fn main() {
                     cur.4.wrapping_sub(prev_loss.4),
                     cur.5.wrapping_sub(prev_loss.5),
                 );
-                if d != (0, 0, 0, 0, 0, 0) {
+                // 「发送缓冲满丢包」也算一类丢失（接收端一时没跟上 → 那一包没了）
+                let dblk = blocked.wrapping_sub(prev_blocked);
+                if d != (0, 0, 0, 0, 0, 0) || dblk > 0 {
                     let mut kinds: Vec<String> = cur.6.iter()
                         .map(|(f, l, c)| format!("flag={f} dlen={l}×{c}"))
                         .collect();
                     kinds.sort();
                     diag::log(&format!(
                         "★ 音频丢失明细: 组帧失败(续片没到) +{} · seq跳号 +{}（跳过 {} 帧）\
-                         · 续片被截断 +{} · 未识别分片 +{} [{}] · 帧头异常 +{}",
+                         · 续片被截断 +{} · 未识别分片 +{} [{}] · 帧头异常 +{} · UDP缓冲满丢 +{}",
                         d.0, d.1, d.2, d.3, d.4,
                         if kinds.is_empty() { "无".to_string() } else { kinds.join(", ") },
-                        d.5
+                        d.5, dblk
                     ));
                 }
                 prev_loss = (cur.0, cur.1, cur.2, cur.3, cur.4, cur.5);
+                prev_blocked = blocked;
             }
             // ★ 每 30 秒往 bridge.log 追加一行统计。
             //   bridge-stats.json 只保留"当前值"，看不出走势；
@@ -1263,6 +1352,7 @@ fn replay_mode(path: &str, bridge: Arc<Mutex<Bridge>>, realtime: bool, stats: Ar
         bridge.lock().unwrap().tick();
     }
     bridge.lock().unwrap().finish();
+    diag::drain();      // 回放很短，统计线程（2 s 一轮）可能来不及落盘 —— 这里补一次
     report(&stats, &bridge);
 }
 
