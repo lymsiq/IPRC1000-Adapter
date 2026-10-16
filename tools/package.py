@@ -347,6 +347,63 @@ def kill_busy():
     time.sleep(1.2)
 
 
+# 刚编译出来的语音桥 sha256 —— `build_bridge()` 填，`verify()` 用来断言包内就是它
+BRIDGE_SHA = None
+BRIDGE_SRC = os.path.join(ROOT, "tools", "etw_consumer", "target", "release", "etw_consumer.exe")
+BRIDGE_DST = os.path.join(ROOT, "iprc1000_gui_dotnet", "assets", "etw_consumer.exe")
+BRIDGE_RS = os.path.join(ROOT, "tools", "etw_consumer", "src", "main.rs")
+
+
+def build_bridge():
+    """**重新编译 Rust 语音桥**并刷新到 `iprc1000_gui_dotnet/assets/`。
+
+    ★★ 为什么必须做（2026-10-16 实测踩到）：
+
+      包里的 `assets/etw_consumer.exe` 是一把**签入仓库的二进制**，而 `dotnet publish`
+      只负责把它**复制**过去 —— 于是**改了桥的 Rust 源码、包里的桥还是旧的**。
+      这次给桥加了丢帧定位仪表与回调隔离，打完包一比对才发现包里那把还是两天前的，
+      发出去就是"改了没效果"，而且**从包外完全看不出来**。
+
+    同类坑以前也吃过（publish 增量跳过 ui/），所以这里同样是"先构建、再断言"。
+    """
+    global BRIDGE_SHA
+    print("=== 重新编译语音桥（Rust）===")
+    cargo = shutil.which("cargo")
+    if cargo is None:
+        # 没有 Rust 工具链时不直接放行 —— 只有"assets 里的桥比源码新"才允许继续，
+        # 否则就是在**静默发一个旧桥**（这正是本函数要防的事）。
+        if os.path.exists(BRIDGE_DST) and os.path.getmtime(BRIDGE_DST) > os.path.getmtime(BRIDGE_RS):
+            print("  ⚠ 没找到 cargo，但 assets 里的桥比源码新，按现状继续（未经重新编译）")
+        else:
+            print("  ✗ 没找到 cargo，而 assets\\etw_consumer.exe 比 main.rs 旧 —— "
+                  "继续下去就会发一个旧桥。请先装 Rust 工具链，或手工刷新 assets 里的桥。")
+            raise SystemExit(1)
+    else:
+        r = subprocess.run([cargo, "build", "--release"],
+                           cwd=os.path.join(ROOT, "tools", "etw_consumer"),
+                           capture_output=True, text=True, errors="replace")
+        if r.returncode != 0:
+            print("  ✗ 桥编译失败：")
+            print("   " + (r.stderr or r.stdout)[-1500:].replace("\n", "\n   "))
+            raise SystemExit(1)
+        # 编译警告也算不合格（项目基线：Rust 0 警告）
+        warn = [l for l in (r.stderr or "").splitlines() if l.strip().startswith("warning")]
+        for l in warn[:10]:
+            print("  ⚠ " + l.strip())
+        if warn:
+            print(f"  ✗ 桥编译有 {len(warn)} 条警告（基线是 0 警告）")
+            raise SystemExit(1)
+
+    if not os.path.exists(BRIDGE_SRC):
+        print(f"  ✗ 找不到编译产物 {BRIDGE_SRC}")
+        raise SystemExit(1)
+    shutil.copy2(BRIDGE_SRC, BRIDGE_DST)
+    BRIDGE_SHA = hashlib.sha256(open(BRIDGE_DST, "rb").read()).hexdigest()
+    st = os.stat(BRIDGE_DST)
+    print(f"  ✓ {BRIDGE_DST}  {st.st_size:,} 字节  "
+          f"{datetime.datetime.fromtimestamp(st.st_mtime):%H:%M:%S}  sha256 {BRIDGE_SHA[:16]}…")
+
+
 def publish_fresh(out=None, self_contained=False, compressed=False):
     """打包前强制重新编译发布 —— 否则可能把上一次的 publish 打进包。
 
@@ -575,6 +632,22 @@ def verify(zp=None, title="主包", self_contained=False, source_checks=True):
             print(f"  {'✓' if ok else '✗'} {label}")
         exe = z.getinfo("IPRC1000 Adapter.exe")
         print(f"  主程序 {exe.file_size:,} 字节 · 时间 {exe.date_time}")
+        # ★★ 包里的语音桥必须**就是刚编译出来的那把** ——
+        #    防"改了桥的 Rust 源码、包里的桥还是旧的"（2026-10-16 实测踩到：
+        #    桥上加了丢帧定位仪表，打完包才发现包里还是两天前的二进制）。
+        #    比 sha256 是唯一靠得住的判据：mtime 会被复制保留、大小可能一样。
+        if BRIDGE_SHA:
+            member = next((n for n in names if n.replace("\\", "/").endswith("assets/etw_consumer.exe")), None)
+            if member is None:
+                ok_all = False
+                print("  ✗ 包里没有 assets/etw_consumer.exe（语音桥缺失）")
+            else:
+                got = hashlib.sha256(z.read(member)).hexdigest()
+                ok = got == BRIDGE_SHA
+                ok_all &= ok
+                print(f"  {'✓' if ok else '✗'} 语音桥与源码同批"
+                      f"（sha256 {got[:16]}…）"
+                      + ("" if ok else f"  ← 期望 {BRIDGE_SHA[:16]}…（包里是旧的！）"))
         # ★ 变体自证：主包必须很小（说明是框架依赖），免运行时版必须很大（说明真带上了运行时）。
         #   这条防的是"打错发布参数"——比如免运行时版其实还是框架依赖，
         #   那用户在门店机器上就会遇到"装了却打不开"，而包里什么都看不出来。
@@ -655,6 +728,11 @@ def verify(zp=None, title="主包", self_contained=False, source_checks=True):
 
 if __name__ == "__main__":
     kill_busy()
+    # ── ⓪ 先重编译语音桥（Rust）并刷新到 assets/ ──
+    #    ★ 必须排在 dotnet publish 之前：publish 只是把 assets 里的二进制**复制**进包，
+    #      不重编译就等于发旧桥（2026-10-16 实测踩到）。
+    build_bridge()
+    print()
     # ── ① 主包（框架依赖，约 2.5 MB）──
     publish_fresh()
     tgt = build()
