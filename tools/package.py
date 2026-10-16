@@ -104,7 +104,7 @@ CHECKS = [
     # 固定快捷方式相关（见「升级说明.txt」）
     ("快捷方式生成器",      "创建桌面快捷方式.cmd", "IPRC1000 遥控器"),
     ("快捷方式在 tools 里", "tools/创建桌面快捷方式.cmd", "管理员身份运行"),
-    ("升级说明",           "升级说明.txt", "永久下载链接"),
+    ("升级说明",           "升级说明.txt", "怎么拿到最新版"),
     # ★ v1.1.1 启动引导：缺 .NET 桌面运行时时自动装。
     #   顶层与 tools/ 两处都要有 —— 快捷方式指向它，用户也习惯"解压后一眼看到"。
     ("启动引导在顶层",      "启动.cmd", "准备运行时"),
@@ -599,10 +599,13 @@ def build(pub=None, target=None, variant="main"):
         f.write("  1) 下载 IPRC1000_Adapter.zip（同一个链接，永远是最新版）\n")
         f.write("  2) 解压到 D:\\ ，选「全部覆盖」\n")
         f.write("     完事 —— 点桌面那个快捷方式就是新版。\n\n")
-        f.write("【永久下载链接】永远指向最新版，不用再找 release 页面：\n")
-        f.write("  https://github.com/lymsiq/IPRC1000-Adapter/releases/latest/download/IPRC1000_Adapter.zip\n\n")
-        f.write("【小技巧】把这个链接存成浏览器书签，或加进下载工具的任务列表，\n")
-        f.write("        升级就是「下载 → 覆盖解压」两步。\n")
+        f.write("【怎么拿到最新版】\n")
+        f.write("  找我要最新安装包即可 —— 包名固定是 IPRC1000_Adapter.zip，\n")
+        f.write("  覆盖解压就是升级，桌面快捷方式不用重建。\n")
+        # ⚠ 2026-10-17：仓库已转为私有，原来的
+        #   releases/latest/download/... 永久链接对外**已经 404**（实测），
+        #   所以这里改成"找我要"。**别改回去**，除非仓库重新公开。
+
 
     with open(os.path.join(target, "版本.txt"), "w", encoding="utf-8") as f:
         f.write("IPRC1000 Adapter" + ("（免运行时版）" if variant == "full" else "") + "\n")
@@ -614,7 +617,7 @@ def build(pub=None, target=None, variant="main"):
         f.write("包含：\n"
                 "  · 按键映射页：遥控器实体图（选中高亮）+ 每行按键截图 + 屏幕键盘选择器\n"
                 "  · 多组配置 Tab（+/双击重命名/−）、搜索、导出、导入\n"
-                "  · 方块键固定切换下一配置组\n"
+                "  · 方块键（出厂值 = 动作值「切换配置组」，可改绑成任意键/鼠标动作）\n"
                 "  · ETW 自适应填缓冲（按键延迟实测 ~13 ms）\n"
                 "  · 卡键三层防护（设备移除即时 / 800ms 看门狗 / 独立守卫）\n"
                 "  · 媒体键走 SendInput、启动自动切非键盘驱动\n"
