@@ -6,14 +6,21 @@
 //! [0..12]   13 字节帧头   A1 F7 01 <seq> 00 <roll> <n> <cnt> 00 00 00 40 01
 //! [13..652] 640 字节音频 = 320 个 16bit LE 样本 @16 kHz
 //! ```
-//! ACL 上拆两片：首片 `dlen=344`(PB=10) + 续片 `dlen=313`(PB=01) = 657 = L2CAP头(4)+负载(653)
+//! ACL 上**常见**是拆两片：首片 `dlen=344`(PB=10) + 续片 `dlen=313`(PB=01) = 657 = L2CAP头(4)+负载(653)
+//!
+//! ⚠⚠ **但这个切法不是固定的**：2026-10-16 实测同一个 657 字节 PDU 被拆成了
+//! **344 + 290 + 23 三片**（`flag=1 dlen=290` 与 `flag=1 dlen=23` 各 512 次）。老解析器
+//! 写死"续片必须 313"，于是**把一整分钟完好的音频全扔了**（那段时间 `seq跳号 = 0`，
+//! 说明上游一帧没丢 —— 是我们自己丢的）。现在**按 PB 标志 + L2CAP 声明长度组帧**：
+//! 起始分片（PB=10）开一个新 PDU、后续分片（PB=01）无脑往上拼，拼到 `4 + L2CAP长度` 就交出去。
+//! **分几片、每片多长，都不再影响正确性。**
 //!
 //! ⚠ **帧头不是常量**（2026-10-16 由 macOS 版实测纠正，见 `lymsiq/IPRC1000-Mac` 的
 //! `docs/MACOS_VOICE.md`）：第 5 字节 `<roll>` **逐帧在变**（0x42/0x82/0xC2/0x02…每帧 +0x40），
 //! 第 6 字节 `<n>` 也每帧 +9。早期笔记把它记成固定的 `00 81 00` —— **那是错的**，
 //! 照它做内容匹配会一帧都命中不了（macOS 版就因此一直报「音频帧 0」）。
 //! 真正恒定的是 `A1 F7 01` + `[4]==0` + 尾部 `00 00 00 40 01`。
-//! 我们这边是**按长度组帧**（344+313），所以不受影响；`HDR_SIG/HDR_TAIL` 只用来做**自检**。
+//! 我们**按 PB 标志组帧**，所以不受影响；`HDR_SIG/HDR_TAIL` 只用来做**自检**。
 //!
 //! ★ 第 3 字节 `<seq>` 是**逐帧 +1（1 字节回绕）的序号** —— 这是把"丢帧"从猜测
 //!   变成测量的关键：seq 连续就说明这期间一帧没丢，跳号才是真丢帧（见 `Stats::seq_*`）。
@@ -52,6 +59,14 @@ const HDR_SIG: [u8; 3] = [0xA1, 0xF7, 0x01];
 const HDR_TAIL: [u8; 2] = [0x40, 0x01];
 /// 帧头 `seq` 所在字节（1 字节、逐帧 +1、到 255 回绕）
 const HDR_SEQ_IDX: usize = 3;
+/// L2CAP 头长度（帧内容以它开头：长度 2 + CID 2）
+const L2CAP_HDR: usize = 4;
+/// 一帧音频的 ACL 总长 = L2CAP 头(4) + 负载(653)
+const AUDIO_TOTAL: usize = L2CAP_HDR + FRAME_LEN;
+/// 遥控器把音频与按键都发在 L2CAP CID 0x41（HID 控制通道）上
+const CID_HID: u16 = 0x0041;
+/// 按键报告（HID 输入报告）的 L2CAP 负载长度
+const HID_PAYLOAD_LEN: usize = 10;
 /// 无帧多久发 END。
 ///
 /// ⚠ 曾经是 250 ms —— 蓝牙链路正常抖动（RF 干扰、SCO 重传）很容易超过它，
@@ -137,15 +152,51 @@ struct Stats {
     seq_lost: u64,
     /// seq 重复 / 回退次数（重复帧或乱序）
     seq_dup: u64,
-    /// 续片自身被截断（负载 < 313 B）的次数 —— 老实现里这条路径**完全没有计数**
+    /// 后续分片自身被截断（负载短于 ACL 头声明的长度）的次数
     trunc_cont: u64,
     /// 没被任何规则识别的 ACL 分片数
     odd_frag: u64,
     /// 上面那些分片的 `(flag, dlen)` 分布（最多记 8 类）—— 长度一变就能看出来
     odd_kinds: Vec<(u8, u16, u64)>,
+    /// 第一条未识别分片的前 8 字节（十六进制）—— 光有长度不够，得看内容才能定性
+    odd_sample: String,
+    /// 没有起始分片就来了的后续分片（起始分片被 ETW 丢了）
+    orphan_cont: u64,
+    /// **后续分片的长度分布**（最多记 8 类）—— 2026-10-16 那次事故就是靠它定位的：
+    /// 续片从「一片 313」变成了「290 + 23」，写死长度的解析器一片都收不下。
+    cont_kinds: Vec<(u16, u64)>,
+    /// 拼够长度但长度不是我们认识的音频帧（比如换了音频配置）
+    short_pdu: u64,
     /// 上一次看到的 seq（None = 还没见过；用 Option 而不是哨兵值，
     /// 因为 `Stats` 是 `derive(Default)`，哨兵会被 0 顶掉）
     last_seq: Option<u8>,
+}
+
+/// 小直方图 +1（最多记 8 类）—— 用于"长度分布"这类要比对形状的计数
+fn bump_kind(v: &mut Vec<(u16, u64)>, k: u16) {
+    if let Some(e) = v.iter_mut().find(|e| e.0 == k) {
+        e.1 += 1;
+    } else if v.len() < 8 {
+        v.push((k, 1));
+    }
+}
+
+/// 记一条"谁都不认识"的 ACL 分片。
+///
+/// ★ 以前这里是"什么都不做" —— 于是"音频为什么没声音"最直接的一类证据被**静默吞掉**。
+/// 现在既记 `(flag, dlen)` 分布，也留**前 8 字节十六进制**：只看长度定不了性，
+/// 看内容才知道它是什么（比如 L2CAP 长度/CID/报告头分别是多少）。
+fn note_odd(s: &mut Stats, flag: u8, dlen: usize, acl: &[u8]) {
+    s.odd_frag += 1;
+    if let Some(e) = s.odd_kinds.iter_mut().find(|e| e.0 == flag && e.1 == dlen as u16) {
+        e.2 += 1;
+    } else if s.odd_kinds.len() < 8 {
+        s.odd_kinds.push((flag, dlen as u16, 1));
+    }
+    if s.odd_sample.is_empty() {
+        let n = acl.len().min(8);
+        s.odd_sample = acl[..n].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ");
+    }
 }
 
 // ───────────────────────── 运行统计落盘（定位"音频为什么断"） ─────────────────────────
@@ -555,59 +606,102 @@ impl Bridge {
     }
 
     /// 处理一个 ACL 分片（`acl` = 去掉 4 字节 ACL 头之后的数据）—— **实时与回放共用同一条路**
+    ///
+    /// ## ★ 2026-10-16：不要写死分片长度
+    ///
+    /// 老实现写死了"首片必须 `flag==2 && dlen==344`、续片必须 `flag==1 && dlen==313`"。
+    /// 实测（13:22 那次"卡了 1 分钟、语音没电平"）同一个 657 字节的 L2CAP PDU
+    /// **被拆成了三片：344 + 290 + 23** —— 续片长度不是 313，于是一片都匹配不上，
+    /// `pending` 永远凑不满，**整整一分钟我们主动把完好的音频全扔了**。
+    /// 而同一时间 `seqJumps = 0`（帧序号连续），说明**上游一帧都没丢**。
+    ///
+    /// 现在改成**按 PB 标志 + L2CAP 声明长度组帧**：起始分片（PB=10）开一个新 PDU，
+    /// 后续分片（PB=01）无脑往上拼，拼到 `4 + L2CAP长度` 就交出去。
+    /// 分几片、每片多长，都不再影响正确性 —— 而且长度不认识的会**留痕**，不再静默。
     fn handle_fragment(&mut self, flag: u8, dlen: usize, acl: &[u8]) {
-        // ── 音频：首片(344) + 续片(313) ──
-        if flag == 2 && dlen == 344 {
-            if acl.len() >= 344 {
-                // ★ 上一个首片还没等到续片，新首片就来了 → 那条续片被 ETW 丢了
-                //   （缓冲区不够大 / 消费跟不上时 ETW 会直接丢事件）
-                //   这就是"音频丢帧"的直接量化指标。
-                if self.pending.is_some() {
-                    self.stats.lock().unwrap().lost_cont += 1;
+        // `acl.len() < dlen` ⇒ 这条分片的负载被 ETW 截断（MaxEtwBytes 没生效时的老 bug）
+        let truncated = acl.len() < dlen;
+
+        match flag {
+            // ── 起始分片（PB=10）──
+            2 => {
+                // 用 L2CAP 头（acl 的前 4 字节）判断这是哪一路数据，比猜长度可靠
+                let l2cap_len = if acl.len() >= 2 {
+                    u16::from_le_bytes([acl[0], acl[1]]) as usize
+                } else { 0 };
+                let cid = if acl.len() >= 4 {
+                    u16::from_le_bytes([acl[2], acl[3]])
+                } else { 0 };
+
+                // ① 按键：单分片 HID 报告（L2CAP 负载 10 字节，报告头 a1 01）
+                if cid == CID_HID && l2cap_len == HID_PAYLOAD_LEN {
+                    if !truncated && acl.len() >= 6 && acl[4] == 0xa1 && acl[5] == 0x01 {
+                        self.stats.lock().unwrap().hid_reports += 1;
+                        let end = acl.len().min(14);
+                        let usages: Vec<u8> = acl[8..end].to_vec();
+                        self.handle_hid_report(&usages);
+                    }
+                    return;
                 }
-                self.pending = Some(acl[..344].to_vec());
-            } else {
-                self.pending = None;
-                self.stats.lock().unwrap().truncated_first += 1;
+
+                // ② 音频起始分片
+                if cid == CID_HID && l2cap_len == FRAME_LEN {
+                    if truncated {
+                        // 首片只带回了 L2CAP 头 → 这一帧不可能补齐
+                        self.pending = None;
+                        self.stats.lock().unwrap().truncated_first += 1;
+                        return;
+                    }
+                    if self.pending.is_some() {
+                        // 上一个 PDU 还没凑齐，新的起始分片就来了 ⇒ 那个 PDU 确实没收全
+                        self.stats.lock().unwrap().lost_cont += 1;
+                    }
+                    self.pending = Some(acl.to_vec());
+                    self.try_complete();
+                    return;
+                }
+
+                let mut s = self.stats.lock().unwrap();
+                note_odd(&mut s, flag, dlen, acl);
             }
+
+            // ── 后续分片（PB=01）：长度随便多少都收 ──
+            1 => {
+                if self.pending.is_none() {
+                    // 起始分片被丢了，续片成了孤儿
+                    self.stats.lock().unwrap().orphan_cont += 1;
+                    return;
+                }
+                {
+                    let (mut s, p) = (self.stats.lock().unwrap(), self.pending.as_mut().unwrap());
+                    if truncated { s.trunc_cont += 1; }
+                    bump_kind(&mut s.cont_kinds, acl.len() as u16);
+                    p.extend_from_slice(acl);
+                }
+                self.try_complete();
+            }
+
+            _ => {
+                let mut s = self.stats.lock().unwrap();
+                note_odd(&mut s, flag, dlen, acl);
+            }
+        }
+    }
+
+    /// 攒够一整帧就交出去（`pending` 里是 L2CAP 头 + 负载）
+    fn try_complete(&mut self) {
+        if self.pending.as_ref().map(|p| p.len()).unwrap_or(0) < AUDIO_TOTAL {
             return;
         }
-        if flag == 1 && dlen == 313 {
-            if let Some(mut head) = self.pending.take() {
-                // ★ 续片**自己**被 ETW 截断（负载不足 313 B）时，head 永远凑不满 657 →
-                //   这一帧**静默消失**。老实现里这条路径没有任何计数，是排查盲区。
-                if acl.len() < 313 {
-                    self.stats.lock().unwrap().trunc_cont += 1;
-                }
-                let n = acl.len().min(313);
-                head.extend_from_slice(&acl[..n]);
-                if head.len() == FRAME_LEN + 4 {
-                    self.push_payload(&head[4..]);
-                    self.stats.lock().unwrap().frames += 1;
-                }
-            }
+        let p = self.pending.take().unwrap();
+        if p.len() != AUDIO_TOTAL {
+            // 拼是拼够了，但长度不是我们认识的那一种（比如换了音频配置）——
+            // ★ 必须留痕：这正是"看着有声、其实解不出来"的那类情况。
+            self.stats.lock().unwrap().short_pdu += 1;
             return;
         }
-        // ── 按键：单分片 HID 报告（L2CAP CID 0x41，报告头 a1 01） ──
-        if flag == 2 && acl.len() >= 12 && acl[2] == 0x41 && acl[4] == 0xa1 && acl[5] == 0x01 {
-            self.stats.lock().unwrap().hid_reports += 1;
-            let end = acl.len().min(14);
-            let usages: Vec<u8> = acl[8..end].to_vec();
-            self.handle_hid_report(&usages);
-            return;
-        }
-        // ── 都不认识 ──
-        // ★ 以前这里的处理是"什么都不做" —— 于是"音频为什么没声音"最直接的一类证据
-        //   （分片长度/标志变了）被**静默吞掉**，只能靠猜。现在记 (flag, dlen) 分布。
-        {
-            let mut s = self.stats.lock().unwrap();
-            s.odd_frag += 1;
-            if let Some(e) = s.odd_kinds.iter_mut().find(|e| e.0 == flag && e.1 == dlen as u16) {
-                e.2 += 1;
-            } else if s.odd_kinds.len() < 8 {
-                s.odd_kinds.push((flag, dlen as u16, 1));
-            }
-        }
+        self.push_payload(&p[L2CAP_HDR..]);
+        self.stats.lock().unwrap().frames += 1;
     }
 
     /// HID 键盘报告 → 按下 / 松开事件（同一 usage 重复上报会被去重）
@@ -727,7 +821,14 @@ impl Bridge {
                 u.cmd(b"CLEAR");
                 self.in_session = true;
                 self.have_prev = false;
-                self.stats.lock().unwrap().sessions += 1;
+                {
+                    let mut s = self.stats.lock().unwrap();
+                    s.sessions += 1;
+                    // ★ 新会话要把帧序号基准清掉：实测每次会话边界都会看到一次
+                    //   「跳过 ~125 帧」的跳号，那不是丢帧，是上一段会话残留的序号。
+                    //   不清它，`seqLost` 会被这些假跳号淹没（实测 41 次会话 → 39 次跳号）。
+                    s.last_seq = None;
+                }
                 // 回调路径 → 异步日志（见 diag::log 的警告）
                 diag::log_async("会话开始（CLEAR）");
             }
@@ -983,7 +1084,8 @@ fn main() {
             // ★ 2 秒粒度的"丢失增量"快照。原来只有一个 30 秒粒度的累计数 ——
             //   "哪一秒开始丢、丢的是哪一类"完全看不见（2026-10-16 排查时就吃了这个亏：
             //   511 这个数字查到了，但判断不出是 ETW 丢事件还是分片长度变了）。
-            let mut prev_loss = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+            let mut prev_loss = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64,
+                                 (0u64, 0u64, 0u64, 0u64, 0u64));
             let mut prev_blocked = 0u64;
             loop {
             std::thread::sleep(Duration::from_millis(2000));
@@ -1012,6 +1114,7 @@ fn main() {
                         "\"lostCont\":{},\"truncatedFirst\":{},\"udpErr\":{},",
                         "\"seqJumps\":{},\"seqLost\":{},\"seqDup\":{},",
                         "\"truncCont\":{},\"oddFrag\":{},\"hdrOdd\":{},",
+                        "\"orphanCont\":{},\"shortPdu\":{},",
                         "\"hidReports\":{},\"keyEvents\":{},\"otherEvents\":{},",
                         "\"silentMs\":{},\"inSession\":{}}}"
                     ),
@@ -1036,6 +1139,8 @@ fn main() {
                     s.trunc_cont,
                     s.odd_frag,
                     s.hdr_odd,
+                    s.orphan_cont,
+                    s.short_pdu,
                     s.hid_reports,
                     s.key_events,
                     s.other,
@@ -1044,12 +1149,12 @@ fn main() {
                 );
                 let stat_line = format!(
                     "[STAT] 运行 {}s | 会话 {} 空档 {} 最长 {}ms | 帧 {} 丢帧 {}（seq跳 {} 帧）被截首片 {} \
-                     · 截续片 {} · 未识别片 {} · 帧头异常 {} \
+                     · 截续片 {} · 未识别片 {} · 帧头异常 {} · 孤续片 {} · 怪长帧 {} \
                      | UDP {} 包 失败 {} 缓冲满丢 {} | 距上次音频 {} | 会话中={}",
                     t0.elapsed().as_secs(),
                     s.sessions, s.gaps, s.max_gap_ms,
                     s.frames, s.lost_cont, s.seq_lost, s.truncated_first,
-                    s.trunc_cont, s.odd_frag, s.hdr_odd,
+                    s.trunc_cont, s.odd_frag, s.hdr_odd, s.orphan_cont, s.short_pdu,
                     sent, s.udp_err, blocked,
                     if silent < 0 { "从未".to_string() } else { format!("{silent}ms") },
                     if g.in_session { "是" } else { "否" }
@@ -1065,7 +1170,9 @@ fn main() {
                 let cur = match st.lock() {
                     Ok(s) => (
                         s.lost_cont, s.seq_jumps, s.seq_lost,
-                        s.trunc_cont, s.odd_frag, s.hdr_odd, s.odd_kinds.clone(),
+                        s.trunc_cont, s.odd_frag, s.hdr_odd,
+                        (s.odd_kinds.clone(), s.odd_sample.clone(),
+                         s.cont_kinds.clone(), s.orphan_cont, s.short_pdu),
                     ),
                     Err(_) => continue,
                 };
@@ -1079,20 +1186,35 @@ fn main() {
                 );
                 // 「发送缓冲满丢包」也算一类丢失（接收端一时没跟上 → 那一包没了）
                 let dblk = blocked.wrapping_sub(prev_blocked);
-                if d != (0, 0, 0, 0, 0, 0) || dblk > 0 {
-                    let mut kinds: Vec<String> = cur.6.iter()
+                let dorphan = cur.6.3.wrapping_sub(prev_loss.6.3);
+                let dshort = cur.6.4.wrapping_sub(prev_loss.6.4);
+                if d != (0, 0, 0, 0, 0, 0) || dblk > 0 || dorphan > 0 || dshort > 0 {
+                    let (odd, sample, conts, orphan, short_pdu) = &cur.6;
+                    let mut kinds: Vec<String> = odd.iter()
                         .map(|(f, l, c)| format!("flag={f} dlen={l}×{c}"))
                         .collect();
                     kinds.sort();
+                    // ★ 续片长度分布 —— 2026-10-16 那次"卡一分钟"就是靠它定性的：
+                    //   续片从「一片 313」变成了「290 + 23」，而解析器写死了 313。
+                    let mut cl: Vec<String> = conts.iter()
+                        .map(|(l, c)| format!("{l}B×{c}")).collect();
+                    cl.sort();
                     diag::log(&format!(
                         "★ 音频丢失明细: 组帧失败(续片没到) +{} · seq跳号 +{}（跳过 {} 帧）\
-                         · 续片被截断 +{} · 未识别分片 +{} [{}] · 帧头异常 +{} · UDP缓冲满丢 +{}",
+                         · 续片被截断 +{} · 未识别分片 +{} [{}] · 帧头异常 +{} · \
+                         孤续片 +{} · 怪长帧 +{} · 续片长度分布 [{}]{} · UDP缓冲满丢 +{}",
                         d.0, d.1, d.2, d.3, d.4,
                         if kinds.is_empty() { "无".to_string() } else { kinds.join(", ") },
-                        d.5, dblk
+                        d.5,
+                        orphan.wrapping_sub(prev_loss.6.3),
+                        short_pdu.wrapping_sub(prev_loss.6.4),
+                        if cl.is_empty() { "无".to_string() } else { cl.join(", ") },
+                        if sample.is_empty() { String::new() } else { format!(" · 首条未识别 {sample}") },
+                        dblk
                     ));
                 }
-                prev_loss = (cur.0, cur.1, cur.2, cur.3, cur.4, cur.5);
+                prev_loss = (cur.0, cur.1, cur.2, cur.3, cur.4, cur.5,
+                             (cur.6.0.len() as u64, 0, 0, cur.6.3, cur.6.4));
                 prev_blocked = blocked;
             }
             // ★ 每 30 秒往 bridge.log 追加一行统计。
@@ -1370,10 +1492,18 @@ fn report(stats: &Arc<Mutex<Stats>>, bridge: &Arc<Mutex<Bridge>>) {
     );
     println!(
         "[i] 丢帧定位: 组帧失败(续片没到) {} · seq跳号 {} 次（跳过 {} 帧）· seq重复 {} \
-         · 续片被截断 {} · 未识别分片 {} · 帧头异常 {}",
+         · 续片被截断 {} · 未识别分片 {} · 帧头异常 {} · 孤续片 {} · 怪长帧 {}",
         st.lost_cont, st.seq_jumps, st.seq_lost, st.seq_dup,
-        st.trunc_cont, st.odd_frag, st.hdr_odd
+        st.trunc_cont, st.odd_frag, st.hdr_odd, st.orphan_cont, st.short_pdu
     );
+    if !st.cont_kinds.is_empty() {
+        let mut k: Vec<String> = st.cont_kinds.iter().map(|(l, c)| format!("{l}B×{c}")).collect();
+        k.sort();
+        println!("[i] 续片长度分布: {}", k.join(", "));
+    }
+    if !st.odd_sample.is_empty() {
+        println!("[i] 首条未识别分片前 8 字节: {}", st.odd_sample);
+    }
     if !st.odd_kinds.is_empty() {
         let mut k: Vec<String> = st.odd_kinds.iter()
             .map(|(f, l, c)| format!("flag={f} dlen={l}×{c}")).collect();

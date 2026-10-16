@@ -56,25 +56,33 @@ def build_frame(seq, faulty_cont_len=None, truncate_cont=0):
     return payload
 
 
-def emit_frame(out, seq, faulty_cont_len=None, truncate_cont=0):
-    """把一帧写成回放格式的两条 ACL 分片。
+def emit_frame(out, seq, split=None, truncate_cont=0, force_len=None):
+    """把一帧写成回放格式的若干条 ACL 分片。
 
     回放格式：repeat { u8 flag; u8 pad; u16 dlen(LE); u32 dt_ms(LE); u16 acl_len(LE); u8 acl[] }
     `acl` 从 L2CAP 头开始（= 真机上 BIP_Data 去掉 4 字节 ACL 头之后的部分）。
+
+    `split` 指定起始分片之后的切法，默认 `[313]`（一片续片）。
+    ★ 真机实测见过 `[290, 23]` —— 同一个 657 字节 PDU 被拆成三片。
     """
     payload = build_frame(seq)
-    l2cap_hdr = struct.pack("<HH", PAYLOAD, 0x0041)   # 长度 653 / CID 0x41
+    l2cap_hdr = struct.pack("<HH", force_len if force_len is not None else PAYLOAD, 0x0041)
 
-    first = l2cap_hdr + payload[:ACL_FIRST - 4]
+    whole = l2cap_hdr + payload            # 657 字节
+    split = split or [ACL_CONT]
+
+    first = whole[:ACL_FIRST]
     assert len(first) == ACL_FIRST
     out += _rec(2, ACL_FIRST, first)
 
-    cont = payload[ACL_FIRST - 4:]
-    assert len(cont) == ACL_CONT
-    dlen = faulty_cont_len if faulty_cont_len is not None else ACL_CONT
-    if truncate_cont:
-        cont = cont[:truncate_cont]
-    out += _rec(1, dlen, cont)
+    rest = whole[ACL_FIRST:]
+    for i, n in enumerate(split):
+        chunk = rest[:n]
+        rest = rest[n:]
+        if truncate_cont and i == 0:
+            chunk = chunk[:truncate_cont]
+        out += _rec(1, n, chunk)
+    assert not rest, f"切法没覆盖完（剩 {len(rest)} 字节）"
     return out
 
 
@@ -99,14 +107,47 @@ def scenario_seq_jump(n=50, at=25, gap=5):
     return out
 
 
-def scenario_cont_len_changed(n=50, lo=20, hi=40, bad_len=330):
-    """续片长度变了（假设②）：首片仍 344，续片不是 313 → 组帧失败 + 未识别分片。
+def scenario_three_frag_split(n=50):
+    """★ 同一个 657 字节 PDU 被拆成**三片**：344 + 290 + 23。
 
-    这正是 2026-10-16 事故的指纹：`lost_cont` 一帧一帧涨，而 frames 不动。
+    这是 2026-10-16 13:22 那次"卡了一分钟、语音没电平"的真机指纹
+    （日志里 `flag=1 dlen=290` 与 `flag=1 dlen=23` 各 512 次，而 `seq跳号 = 0`）。
+    老解析器写死"续片必须 313"，于是**整段完好的音频被我们自己扔掉**。
+    现在按 PB 标志 + L2CAP 长度组帧 ⇒ **一帧都不该丢**。
     """
     out = b""
     for i in range(n):
-        out = emit_frame(out, i, faulty_cont_len=bad_len if lo <= i < hi else None)
+        out = emit_frame(out, i, split=[290, 23])
+    return out
+
+
+def emit_hid_report(out, usage=0x10):
+    """一条按键报告：单分片，ACL 负载 14 字节（L2CAP 10 + 报告头 a1 01 + 6 个 usage 槽）。
+
+    ★ 重写音频解析器（改成按 PB 标志组帧）之后，**必须**证明按键路径没被弄坏 ——
+      音频与按键同走 L2CAP CID 0x41，区分只能靠 L2CAP 长度（653 vs 10）。
+    """
+    acl = struct.pack("<HH", 10, 0x0041) + bytes([0xA1, 0x01, 0x00, 0x00, usage, 0, 0, 0, 0, 0])
+    assert len(acl) == 14
+    return _rec(2, 14, acl)
+
+
+def scenario_audio_with_keys(audio=20, keys=10):
+    """音频与按键**交替**到达：音频一帧不丢、按键一条不落。"""
+    out = b""
+    for i in range(audio):
+        out = emit_frame(out, i)
+        if i < keys:
+            out += emit_hid_report(out, 0x10)
+    return out
+
+
+def scenario_unknown_pdu(n=10):
+    """L2CAP 长度不是我们认识的 653（比如换了音频配置）→ 必须**留痕**（未识别），
+    而且不能当成音频帧交出去（宁可不响，也不要放出解错的数据）。"""
+    out = b""
+    for i in range(n):
+        out = emit_frame(out, i, force_len=700)   # 声明的 L2CAP 长度不是 653
     return out
 
 
@@ -133,20 +174,25 @@ def scenario_first_truncated(n=50, lo=10, hi=20):
 def parse(text):
     """从桥的输出里抠出各类计数。"""
     g = {}
-    m = re.search(r"音频帧 (\d+)\s+被截断首片 (\d+)", text)
+    m = re.search(r"音频帧 (\d+)\s+被截断首片 (\d+)\s+HID报告 (\d+)", text)
     if m:
         g["frames"] = int(m.group(1))
         g["trunc_first"] = int(m.group(2))
+        g["hid_reports"] = int(m.group(3))
     m = re.search(
         r"组帧失败\(续片没到\) (\d+) · seq跳号 (\d+) 次（跳过 (\d+) 帧）· seq重复 (\d+)"
-        r"\s*· 续片被截断 (\d+) · 未识别分片 (\d+) · 帧头异常 (\d+)", text)
+        r"\s*· 续片被截断 (\d+) · 未识别分片 (\d+) · 帧头异常 (\d+)"
+        r"(?: · 孤续片 (\d+) · 怪长帧 (\d+))?", text)
     if m:
         g.update(lost_cont=int(m.group(1)), seq_jumps=int(m.group(2)),
                  seq_lost=int(m.group(3)), seq_dup=int(m.group(4)),
                  trunc_cont=int(m.group(5)), odd_frag=int(m.group(6)),
-                 hdr_odd=int(m.group(7)))
+                 hdr_odd=int(m.group(7)),
+                 orphan_cont=int(m.group(8) or 0), short_pdu=int(m.group(9) or 0))
     m = re.search(r"未识别分片分布: (.+)", text)
     g["odd_kinds"] = m.group(1).strip() if m else ""
+    m = re.search(r"续片长度分布: (.+)", text)
+    g["cont_kinds"] = m.group(1).strip() if m else ""
     return g
 
 
@@ -177,10 +223,12 @@ def run(name, blob, expect):
     detail = " ".join(
         f"{k}={got.get(k)}" for k in
         ("frames", "lost_cont", "seq_jumps", "seq_lost", "trunc_cont",
-         "odd_frag", "trunc_first", "hdr_odd") if k in got)
+         "odd_frag", "trunc_first", "hdr_odd", "orphan_cont", "short_pdu") if k in got)
     print(f"       {detail}")
     if got.get("odd_kinds"):
         print(f"       未识别分片: {got['odd_kinds']}")
+    if got.get("cont_kinds"):
+        print(f"       续片长度分布: {got['cont_kinds']}")
     for b in bad:
         print(f"       ★ {b}")
     return not bad
@@ -201,15 +249,27 @@ CASES = [
      # 25→30 是 5 步，中间 **少了 4 帧**（26/27/28/29）
      dict(frames=50, lost_cont=0, seq_jumps=1, seq_lost=4, odd_frag=0)),
 
-    ("③ 续片长度变了（今天事故的指纹）：组帧失败 + 未识别分片",
-     scenario_cont_len_changed(50, 20, 40, 330),
-     # 这 20 帧没能组出来 ⇒ 输出流里也少了 20 帧（seq 从 19 直接跳到 40）
-     dict(frames=30, lost_cont=20, seq_jumps=1, seq_lost=20,
-          odd_frag=20, odd_kinds_has="flag=1 dlen=330")),
+    ("③ 同一个 PDU 被拆成三片（344+290+23）—— 今天事故的真机指纹，修复后必须一帧不丢",
+     scenario_three_frag_split(50),
+     dict(frames=50, lost_cont=0, seq_jumps=0, seq_lost=0, odd_frag=0,
+          orphan_cont=0, short_pdu=0)),
+
+    ("⑥ L2CAP 长度不认识（换了配置）→ 留痕、不当音频交出去",
+     scenario_unknown_pdu(10),
+     # 10 条起始分片的 L2CAP 长度都是 700 ≠ 653 ⇒ 全部落到"未识别"，
+     # 且**一帧都不许交出去**（宁可不响，也别放出解错的数据）
+     dict(frames=0, odd_frag=10, short_pdu=0, lost_cont=0)),
+
+    ("⑦ 音频与按键交替到达：音频一帧不丢、按键一条不落（重写解析器后的回归保护）",
+     scenario_audio_with_keys(20, 10),
+     dict(frames=20, hid_reports=10, lost_cont=0, odd_frag=0, orphan_cont=0)),
 
     ("④ 续片被截断（负载不足）：以前完全没有计数",
      scenario_cont_truncated(50, 10, 20, 200),
-     dict(frames=40, trunc_cont=10, lost_cont=0, odd_frag=0, seq_lost=10)),
+     # 续片短了 ⇒ 这一帧拼不齐：`trunc_cont` 说明**为什么**（被截断），
+     # `lost_cont` 说明**结果**（下一帧的首片来时它还挂着 ⇒ 这一帧没交出去）。
+     # 老代码在这条路上连计数都没有（`take()` 一清就当无事发生）。
+     dict(frames=40, trunc_cont=10, lost_cont=10, odd_frag=0, seq_lost=10)),
 
     ("⑤ 首片被截断（MaxEtwBytes 没生效的老 bug）", scenario_first_truncated(50, 10, 20),
      dict(frames=40, trunc_first=10, odd_frag=0, lost_cont=0, seq_lost=10)),

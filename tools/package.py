@@ -156,6 +156,9 @@ SRC_FORBIDDEN = [
     #    ⇒ 进鼠标模式那一刻光标猛地跳走（多显示器下那儿还是两块屏的接缝）。
     #    用户当场指出："要先计算鼠标的当前位置，再在当前位置进行移动，而不是固定位置"。
     ("鼠标移动不得走绝对定位", "iprc1000_gui_dotnet/MouseEngine.cs", "MoveAbsolute"),
+    # ★ 解析器不得再写死音频分片长度（见上）—— 这两行是老 bug 的指纹
+    ("音频解析不得写死首片长度", "tools/etw_consumer/src/main.rs", "dlen == 344"),
+    ("音频解析不得写死续片长度", "tools/etw_consumer/src/main.rs", "dlen == 313"),
     ("鼠标模式不得把光标搬到固定点", "iprc1000_gui_dotnet/MouseEngine.cs", "CenterAndSettle"),
 ]
 
@@ -256,6 +259,17 @@ SRC_REQUIRED = [
     # 照它做内容匹配会一帧都命不中（macOS 版就因此一直报「音频帧 0」）。
     ("帧头可变字节已标注", "tools/etw_consumer/src/main.rs", "帧头不是常量"),
     ("界面能看到丢帧分类", "iprc1000_gui_dotnet/ui/app.js", "丢帧分类"),
+    # ★★ 2026-10-16：解析器不得再写死分片长度。真机实测同一帧被拆成 344+290+23 三片，
+    #    写死"续片必须 313"的老代码把**一整分钟完好的音频全扔了**（同期 seq 跳号 = 0）。
+    ("音频按 PB 标志组帧", "tools/etw_consumer/src/main.rs", "按 PB 标志 + L2CAP 声明长度组帧"),
+    ("后续分片长度不写死", "tools/etw_consumer/src/main.rs", "长度随便多少都收"),
+    ("续片长度分布有统计", "tools/etw_consumer/src/main.rs", "cont_kinds"),
+    ("孤续片有计数", "tools/etw_consumer/src/main.rs", "orphan_cont"),
+    ("怪长帧有计数", "tools/etw_consumer/src/main.rs", "short_pdu"),
+    ("未识别分片留内容样本", "tools/etw_consumer/src/main.rs", "odd_sample"),
+    ("新会话重置帧序号基准", "tools/etw_consumer/src/main.rs", "s.last_seq = None"),
+    ("自检覆盖三片拆分", "tools/bridge_loss_selftest.py", "scenario_three_frag_split"),
+    ("自检有按键回归保护", "tools/bridge_loss_selftest.py", "scenario_audio_with_keys"),
     # ★★ 回调隔离（2026-10-16）：把文件 I/O 移出 ETW 回调路径。
     #    教训来自 macOS 版：他们把收包回调从主队列（还跑着 UI + tick + 落盘）挪走后，
     #    到达延迟峰值 71→56 ms。我们这边的等价物就是"回调里做文件写"。

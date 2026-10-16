@@ -490,9 +490,12 @@ function renderEnv(s) {
            (b.seqJumps || 0) > 0 ? `序号跳了 ${b.seqJumps} 次` : '') +
     kvItem('丢帧分类', '组装失败 ' + (b.lostCont || 0)
                         + ' · 长度不认识 ' + (b.oddFrag || 0)
-                        + ' · 分片被截断 ' + ((b.truncCont || 0) + (b.truncatedFirst || 0)),
-           (b.lostCont || 0) + (b.oddFrag || 0) + (b.truncCont || 0) + (b.truncatedFirst || 0) > 0
-             ? 'bad' : 'ok') +
+                        + ' · 分片被截断 ' + ((b.truncCont || 0) + (b.truncatedFirst || 0))
+                        + ' · 孤续片 ' + (b.orphanCont || 0),
+           (b.lostCont || 0) + (b.oddFrag || 0) + (b.truncCont || 0)
+             + (b.truncatedFirst || 0) + (b.orphanCont || 0) + (b.shortPdu || 0) > 0
+             ? 'bad' : 'ok',
+           (b.shortPdu || 0) > 0 ? `怪长帧 ${b.shortPdu}` : '') +
     kvItem('写入 CABLE', (rt.packets || 0) + ' 包') +
     kvItem('抖动缓冲', (rt.jitter
               ? `积压 ${rt.jitter.backlogMs || 0} ms（峰值 ${rt.jitter.peakBacklogMs || 0}）`
@@ -1079,9 +1082,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.1',
+      version: '1.2.2',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.1（构建于 2026-10-16 12:58）',
+      versionLine: 'v1.2.2（构建于 2026-10-16 13:35）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
@@ -1096,6 +1099,7 @@ function boot() {
                 silentMs: 180, sessions: 3, gaps: 1, maxGapMs: 820,
                 lostCont: 0, truncatedFirst: 0, udpPackets: 18422, uptimeSec: 421,
                 seqJumps: 0, seqLost: 0, seqDup: 0, truncCont: 0, oddFrag: 0, hdrOdd: 0,
+                orphanCont: 0, shortPdu: 0,
                 hint: '正在监听 BthPort ETW（180 ms 前收到音频）' },
       inject: true,
       router: { online: true, packets: 1152, bytes: 4423680, error: null, session: true,

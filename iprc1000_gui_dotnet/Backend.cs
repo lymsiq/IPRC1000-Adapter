@@ -887,6 +887,8 @@ internal sealed class Backend : IDisposable
             ["truncCont"] = L("truncCont"),
             ["oddFrag"] = L("oddFrag"),
             ["hdrOdd"] = L("hdrOdd"),
+            ["orphanCont"] = L("orphanCont"),
+            ["shortPdu"] = L("shortPdu"),
             ["udpPackets"] = L("udpPackets"),
             ["udpBytes"] = L("udpBytes"),
             ["hint"] = !running ? "待启动"
