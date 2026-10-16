@@ -133,6 +133,7 @@ internal sealed class Backend : IDisposable
                 _keySource = "etw";
                 _filter.SetSourceMode(true);
                 _keySourceGuard = "设备已不是键盘 → 按键来源切到 ETW";
+                DeviceLog("按键来源 → ETW（设备已不是键盘，延迟最低）");
             }
         }
         else if (stillKb && _keySource != "hook" && _filter.KeySourceIsEtw)
@@ -140,6 +141,7 @@ internal sealed class Backend : IDisposable
             _keySource = "hook";
             _filter.SetSourceMode(false);
             _keySourceGuard = "设备仍是键盘（驱动未换）且模式是 ETW → 已自动启用钩子拦截，否则 m 会漏进应用";
+            DeviceLog("按键来源 → 钩子拦截（设备仍是键盘，防止 m/i 漏进前台应用）");
         }
     }
 
@@ -206,7 +208,19 @@ internal sealed class Backend : IDisposable
             while (!_disposed)
             {
                 try { RefreshProbes(true); } catch { }
-                for (var i = 0; i < 80 && !_disposed; i++) Thread.Sleep(100);   // 8 秒一轮
+                try { RecheckDeviceDriver(); } catch { }
+                for (var i = 0; i < 80 && !_disposed; i++)     // 8 秒一轮
+                {
+                    Thread.Sleep(100);
+                    // 设备变更事件把复查间隔压到 ≤500ms；否则每 2 秒兜底复查一次。
+                    // ★ 这些都在**后台线程**上：SetDeviceDriver 要 1~2 秒，
+                    //   放到 UI 线程（WndProc 会调 OnDeviceMayChanged）会把界面冻住。
+                    if ((_deviceRecheckRequested && i % 5 == 4) || i % 20 == 19)
+                    {
+                        _deviceRecheckRequested = false;
+                        try { RecheckDeviceDriver(); } catch { }
+                    }
+                }
             }
         }) { IsBackground = true, Name = "iprc1000-probe", Priority = ThreadPriority.BelowNormal };
         _probeThread.Start();
@@ -242,15 +256,98 @@ internal sealed class Backend : IDisposable
     {
         if (!Settings.AutoSwitchDriver) return;
         if (!Env.IsAdmin()) { _driverNote = "需要管理员权限才能自动切换驱动"; return; }
-        if (!Env.RemoteStillKeyboard()) { _driverNote = null; return; }
+        if (!Env.RemoteStillKeyboard())
+        {
+            _driverNote = null;
+            DeviceLog("启动检查：遥控器已是非键盘设备 ✓");
+            return;
+        }
         var (ok, msg) = Env.SetDeviceDriver(false);
         _driverNote = ok ? "启动时已自动把遥控器驱动切成「非键盘」（零 m）" : $"自动切驱动失败：{msg}";
+        DeviceLog(ok ? "✓ 启动时自动把遥控器驱动切成「非键盘」"
+                     : $"★ 启动时自动切驱动失败：{msg}");
         _probeAt = DateTime.MinValue;
         RefreshProbes(true);
     }
 
     /// <summary>自动切驱动的结果说明（给界面显示）</summary>
     private string? _driverNote;
+
+    /// <summary>设备变更事件请求"立刻复查"（WndProc → OnDeviceMayChanged 置位，探针线程消费）</summary>
+    private volatile bool _deviceRecheckRequested;
+    private DateTime _nextDriverCheck = DateTime.MinValue;
+    private DateTime _driverBackoffUntil = DateTime.MinValue;
+    private int _driverSwitchCount;              // 本次运行里"重连后自动切回"成功了几次
+
+    /// <summary>
+    /// 设备/驱动生命周期日志（写 key-events.log，前缀 `DEV`）。
+    /// 以前驱动切换**完全静默** —— 事后根本查不出"什么时候变的、变了几次、为什么没生效"。
+    /// </summary>
+    private static void DeviceLog(string msg)
+    {
+        try { EtwKeySource.AppendLog("DEV  " + msg); } catch { }
+    }
+
+    /// <summary>
+    /// 复查遥控器的驱动绑定 —— **蓝牙重连之后它会自己退回键盘，必须再看一遍**。
+    ///
+    /// 为什么必须复查（2026-10-16 排查确认）：
+    ///   蓝牙重连时 Windows 会**销毁旧的 HID 子设备实例、建一个新的**
+    ///   （注册表实例后缀 `&N&` 递增，实测 `&2&` → `&4&`）。
+    ///   我们那次"换成非键盘"的驱动绑定挂在**旧实例**上，已随实例一起消失；
+    ///   新实例重新做驱动匹配，可选只有 inbox INF → `keyboard.inf`
+    ///   （靠兼容 ID `HID_DEVICE_SYSTEM_KEYBOARD`）胜出 → **又变回键盘**。
+    ///   而按键来源此时仍是 ETW（ETW 模式下钩子不装），于是 m / i 会直接漏进前台应用
+    ///   —— 老问题复发。以前**只能靠重启程序**或手点界面按钮才会好。
+    ///
+    /// 两步（顺序重要）：
+    ///   ① 先调 AutoSelectKeySource() 兜住 —— 设备是键盘时它会自动切回钩子模式拦截。
+    ///      这一步**不依赖驱动切换是否成功**，是立刻生效的保护。
+    ///   ② 再把驱动切回非键盘；成功后 AutoSelectKeySource() 把来源切回 ETW（延迟更低）。
+    ///
+    /// 后退策略：切了但没生效（设备刚好睡着之类）→ 10 分钟内不再重试，
+    /// 绝不反复重枚举把设备搞乱；这期间由钩子模式兜底，不会漏 m。
+    /// ⚠ 本方法会阻塞 1~2 秒（真的重装驱动），**只能在探针线程上调**，不可在 UI 线程调。
+    /// </summary>
+    private void RecheckDeviceDriver()
+    {
+        if (_disposed) return;
+        var now = DateTime.UtcNow;
+        if (now < _nextDriverCheck) return;
+        _nextDriverCheck = now.AddMilliseconds(500);
+        if (!Env.RemotePresent()) return;               // 遥控器不在，什么都别做
+
+        var stillKb = Env.RemoteStillKeyboard();
+        AutoSelectKeySource();                          // ① 保护优先（幂等：只在需要时才真切）
+
+        if (!stillKb) return;
+        if (!Settings.AutoSwitchDriver) return;
+        if (now < _driverBackoffUntil) return;
+        if (!Env.IsAdmin())
+        {
+            _driverBackoffUntil = now.AddMinutes(10);
+            DeviceLog("★ 遥控器退回键盘，但没有管理员权限、无法自动切回（请以管理员身份运行）");
+            return;
+        }
+
+        var (ok, msg) = Env.SetDeviceDriver(false);
+        _driverSwitchCount++;
+        if (ok && !Env.RemoteStillKeyboard())
+        {
+            AutoSelectKeySource();                      // 成功 → 来源切回 ETW
+            RefreshProbes(true);
+            _driverNote = "检测到遥控器重连后退回键盘，已自动切回「非键盘」。";
+            DeviceLog($"✓ 重连后自动切回非键盘驱动（本次运行第 {_driverSwitchCount} 次）");
+            _driverBackoffUntil = now.AddSeconds(30);
+        }
+        else
+        {
+            _driverBackoffUntil = now.AddMinutes(10);
+            _driverNote = "遥控器退回键盘且自动切换未生效，已启用钩子拦截兜底。";
+            DeviceLog($"★ 重连后自动切驱动未生效（{msg}）—— 10 分钟内不再重试；" +
+                      "当前由钩子模式兜底拦截（不会漏 m）");
+        }
+    }
 
     private void RefreshProbes(bool force)
     {
@@ -786,10 +883,23 @@ internal sealed class Backend : IDisposable
 
     public string SetDeviceDriver(string? revert)
     {
-        var (ok, msg) = Env.SetDeviceDriver(revert is "true" or "1" or "True");
+        var wantKeyboard = revert is "true" or "1" or "True";
+        var (ok, msg) = Env.SetDeviceDriver(wantKeyboard);
+        var extra = "";
+        if (ok && wantKeyboard && Settings.AutoSwitchDriver)
+        {
+            // ★ 用户手动还原成键盘 → 必须**同时关掉**"自动切回非键盘"，
+            //   否则 2 秒后的周期复查会立刻把这次操作覆盖掉（按钮等于没用）。
+            Settings.AutoSwitchDriver = false;
+            extra = "（已同时关闭「自动切回非键盘」—— 否则周期复查会立刻把它改回去）";
+        }
+        // 手动操作后给一个短暂的静默期，避免立刻被复查逻辑打扰
+        _driverBackoffUntil = DateTime.UtcNow.AddSeconds(10);
+        DeviceLog($"手动{(wantKeyboard ? "还原为键盘" : "切为非键盘")}：" +
+                  $"{(ok ? "成功" : "失败")} {msg}{extra}");
         _probeAt = DateTime.MinValue;
         AutoSelectKeySource();
-        return Env.Json(new { ok, message = msg });
+        return Env.Json(new { ok, message = msg + extra });
     }
 
     private string? _bindBid;
@@ -818,7 +928,15 @@ internal sealed class Backend : IDisposable
         if ((DateTime.UtcNow - _lastDevCheck).TotalMilliseconds < 200) return;
         _lastDevCheck = DateTime.UtcNow;
 
-        if (Env.RemotePresent()) return;          // 设备还在，不动
+        if (Env.RemotePresent())
+        {
+            // ★ 「设备还在」不等于「没变」：蓝牙重连会销毁旧的 HID 子设备实例、建一个新的，
+            //   我们设的驱动绑定随旧实例一起消失 → 退回键盘。
+            //   这里只**请求**探针线程复查 —— 本方法是 WndProc（UI 线程）调的，
+            //   而驱动切换要 1~2 秒，在这里做会把界面冻住。
+            _deviceRecheckRequested = true;
+            return;
+        }
         var n = _filter?.ClearHeld("遥控器已断开（设备移除）") ?? 0;
         if (n > 0)
         {

@@ -165,6 +165,12 @@ SRC_REQUIRED = [
     ("虚拟 HID 创建失败会自愈重试", "iprc1000_gui_dotnet/WinUhidInjector.cs", "ScheduleBackgroundRetry"),
     ("单实例保护存在", "iprc1000_gui_dotnet/Program.cs", "MainForm.SingleInstanceMutex"),
     ("单实例有唤起窗口的监听", "iprc1000_gui_dotnet/MainForm.cs", "StartShowWindowListener"),
+    # ★★ 重连后退回键盘的自愈（2026-10-16）。蓝牙重连会换掉设备实例、驱动绑定随之消失，
+    #    退回键盘后 m/i 会漏进前台应用；以前只能重启程序。
+    ("重连后退回键盘会自动切回", "iprc1000_gui_dotnet/Backend.cs", "RecheckDeviceDriver"),
+    ("设备变更事件会触发驱动复查", "iprc1000_gui_dotnet/Backend.cs", "_deviceRecheckRequested"),
+    ("驱动/按键来源变化有日志", "iprc1000_gui_dotnet/Backend.cs", "\"DEV  \""),
+    ("手动还原键盘会关掉自动切换", "iprc1000_gui_dotnet/Backend.cs", "已同时关闭"),
     # 诊断盲区：这三个"静默降级"以前完全查不出来
     ("注入开关变化会留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "InjectEnabled"),
     ("虚拟 HID 失败会留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "虚拟 HID 下发失败"),
