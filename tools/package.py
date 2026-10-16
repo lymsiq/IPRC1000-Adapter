@@ -151,6 +151,12 @@ SRC_FORBIDDEN = [
     #    旧的单槽实现会让"按住语音键(→右Alt) + 再按确认 + 先松语音"把右 Alt 永久卡住，
     #    而且会把它在 _heldButtons 里的登记一起删掉 —— 看门狗也救不回来。
     ("单槽 _injectedNow 不得复活", "iprc1000_gui_dotnet/KeyFilter.cs", "_injectedNow"),
+    # ★★ 鼠标模式的根本约束：移动必须**从光标此刻所在处**起算（相对位移）。
+    #    第一版 SetEnabled(true) 里做主动自校准 → 绝对定位到"虚拟桌面中心"
+    #    ⇒ 进鼠标模式那一刻光标猛地跳走（多显示器下那儿还是两块屏的接缝）。
+    #    用户当场指出："要先计算鼠标的当前位置，再在当前位置进行移动，而不是固定位置"。
+    ("鼠标移动不得走绝对定位", "iprc1000_gui_dotnet/MouseEngine.cs", "MoveAbsolute"),
+    ("鼠标模式不得把光标搬到固定点", "iprc1000_gui_dotnet/MouseEngine.cs", "CenterAndSettle"),
 ]
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
@@ -199,6 +205,14 @@ SRC_REQUIRED = [
     ("方块键两选项互斥单选", "iprc1000_gui_dotnet/ui/index.html", "squareKeySeg"),
     ("方块键分派在 Backend", "iprc1000_gui_dotnet/Backend.cs", "SquareKeySwitchesMode"),
     ("方块键仍可切配置组", "iprc1000_gui_dotnet/Backend.cs", "Keymaps.NextGroup()"),
+    # ★ 移动必须从光标当前位置起算（2026-10-16 用户指正后重做）
+    ("被动标定用真实使用学增益", "iprc1000_gui_dotnet/MouseEngine.cs", "CalibrateFromUse"),
+    ("开模式不再触发主动校准", "iprc1000_gui_dotnet/MouseEngine.cs", "这里**不做**主动校准"),
+    ("移动注入有计数（判据不受人手干扰）", "iprc1000_gui_dotnet/MouseInjector.cs", "public static long MoveEvents"),
+    ("自检断言「开模式不发移动注入」", "iprc1000_gui_dotnet/MouseEngine.cs", "开启鼠标模式不发出任何移动注入"),
+    ("自检断言「松开后不再注入」", "iprc1000_gui_dotnet/MouseEngine.cs", "松开后引擎立即停止注入"),
+    ("校准区光点=光标真实位置", "iprc1000_gui_dotnet/ui/app.js", "(d.x - d.vx)"),
+    ("界面取数用 mouseSample", "iprc1000_gui_dotnet/MainForm.cs", "\"mouseSample\""),
     # 诊断盲区：这三个"静默降级"以前完全查不出来
     ("注入开关变化会留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "InjectEnabled"),
     ("虚拟 HID 失败会留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "虚拟 HID 下发失败"),

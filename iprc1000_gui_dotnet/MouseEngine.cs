@@ -237,7 +237,11 @@ internal sealed class MouseEngine
             _enabled = true;
             _stop = false;
             lock (_gate) { _dirHeld.Clear(); _dirSince = DateTime.MinValue; _accX = _accY = 0; }
-            if (_cfg.Calibrate) Calibrate();
+            ResetUseCalibration();              // 重新开始被动标定
+            _useRatios.Clear();
+            // ★ 这里**不做**主动校准 —— 那会把光标搬到屏幕中心再弹回，用户看得见。
+            //   增益改由 CalibrateFromUse() 在真实使用中学习（一次都不多动光标）。
+            //   想立刻量一次，用界面的「重新自校准」（那种就地测法）。
             if (_thread == null || !_thread.IsAlive)
             {
                 _thread = new Thread(Loop) { IsBackground = true, Name = "iprc1000-mouse", Priority = ThreadPriority.AboveNormal };
@@ -386,6 +390,10 @@ internal sealed class MouseEngine
 
     private void Step(double dt)
     {
+        // ⓪ 被动标定：**帧首**读光标。上一帧发出去的位移早在这 16 ms 里生效了，
+        //    此时读到的才是最新的真实位置；放在 Move() 之后紧接着读会读到尚未生效的旧值。
+        if (_cfg.Calibrate) CalibrateFromUse();
+
         string[] dirs;
         DateTime since;
         lock (_gate) { dirs = _dirHeld.ToArray(); since = _dirSince; }
@@ -395,6 +403,7 @@ internal sealed class MouseEngine
             && (DateTime.UtcNow - since).TotalSeconds > _cfg.DirectionHoldTimeoutSec)
         {
             lock (_gate) { _dirHeld.Clear(); _dirSince = DateTime.MinValue; _accX = _accY = 0; }
+            _wantValid = false;
             _dirTimeouts++;
             var msg = $"GUARD  鼠标方向键按住超时（>{_cfg.DirectionHoldTimeoutSec:F0}s）→ 已停止移动"
                       + $"（之前是 {string.Join("+", dirs)}；多为遥控器 UP 丢失）";
@@ -443,6 +452,7 @@ internal sealed class MouseEngine
                 MouseInjector.Move(sx, sy);
                 PixelsMoved += Math.Sqrt((double)sx * sx + (double)sy * sy);
                 lock (_gate) { _deltaX += sx; _deltaY += sy; }   // 供界面实时校准区取数
+                _wantX = sx; _wantY = sy; _wantValid = true;      // 下一帧首去对账
             }
             Frames++;
         }
@@ -547,12 +557,16 @@ internal sealed class MouseEngine
     // ───────────────────────── 收尾 ─────────────────────────
 
     /// <summary>
-    /// 取走"自上次调用以来累计的位移"（界面**实时校准区**用）。
-    /// 校准区按住遥控器方向键就能看到光点跟着走、并显示实时速度 ——
-    /// 调滑条时手感**即时可感**，不用"改数字→保存→切出去试"。
+    /// 取走"自上次调用以来累计的鼠标位移" + **光标当前的真实位置与虚拟桌面尺寸**
+    /// （界面「实时校准区」按 ~20 Hz 轮询用）。
+    ///
+    /// 为什么要把光标位置也带上：校准区的光点应该**映射到光标的真实位置**（一台小地图），
+    /// 而不是"从一个固定点开始累加位移" —— 后者会漂移，而且跟真实光标对不上。
     /// </summary>
-    public (double dx, double dy, double px, double sec) TakeDelta()
+    public Sample TakeSample()
     {
+        var (x, y) = MouseInjector.CursorPos();
+        var (vx, vy, vw, vh) = MouseInjector.VirtualScreen();
         lock (_gate)
         {
             var dx = _deltaX;
@@ -561,9 +575,14 @@ internal sealed class MouseEngine
             var sec = _deltaSince == DateTime.MinValue ? 0 : (now - _deltaSince).TotalSeconds;
             _deltaX = _deltaY = 0;
             _deltaSince = now;
-            return (dx, dy, Math.Sqrt(dx * dx + dy * dy), sec);
+            return new Sample(dx, dy, Math.Sqrt(dx * dx + dy * dy), sec, x, y, vx, vy, vw, vh);
         }
     }
+
+    /// <summary>界面校准区的一次采样：位移 + 光标真实位置 + 虚拟桌面</summary>
+    public readonly record struct Sample(
+        double Dx, double Dy, double Px, double Sec,
+        int X, int Y, int Vx, int Vy, int Vw, int Vh);
 
     /// <summary>把所有鼠标键抬起并清空方向（退出 / 切模式 / 紧急复位时调）</summary>
     public void ReleaseAll(string why)
@@ -574,6 +593,7 @@ internal sealed class MouseEngine
             _deltaX = _deltaY = 0;
         }
         _wheelUp = _wheelDown = false; _wheelSince = DateTime.MinValue; _wheelAcc = 0;
+        ResetUseCalibration();              // 方向停了，下一次位移重新起算
         var had = _leftDown || _rightDown;
         if (_leftDown) { _leftDown = false; try { MouseInjector.Left(false); } catch { } }
         if (_rightDown) { _rightDown = false; try { MouseInjector.Right(false); } catch { } }
@@ -592,64 +612,131 @@ internal sealed class MouseEngine
     // ───────────────────────── 自校准 ─────────────────────────
 
     /// <summary>
-    /// 实测"请求 1 px → 实际走多少 px"的增益。
+    /// 主动自校准：实测"请求 1 px → 实际走多少 px"的增益。
     ///
-    /// 为什么必须做：阶段 0 实测本机是**严格 1:1**，但那是在「指针精确度关 + 指针速度默认档」
-    /// 的前提下；门店机器这两项都可能不同，写死像素就会走得太快或太慢。
-    /// 另外如果**小增量和大增量的比值不一致**，说明系统加速开着（我们的斜坡会与之叠加），
-    /// 这时把 `_accelSuspected` 置起来，界面上会提示用户。
+    /// ★ **就在光标当前位置测，绝不把光标搬到屏幕中心。**
+    ///   绝对定位会让用户看到光标猛地跳走再弹回（进鼠标模式那一刻尤其突兀），
+    ///   多显示器下"虚拟桌面中心"还可能落在另一块屏上。
+    ///   做法：只做 **+d / −d 成对移动，净位移为 0**；靠近屏幕边缘时某一侧会被裁，
+    ///   就取**没被裁的那一侧**的幅度。
     ///
-    /// 做法：把光标挪到虚拟桌面中心 → 发 ±d 各测几次取中位数 → 还原光标。约 0.3 秒。
+    /// ⚠ 这个函数只在**用户主动点「重新自校准」**时才跑（会有 ±24 px 的轻微抖动，用户预期之内）。
+    ///   自动路径走 <see cref="CalibrateFromUse"/> —— 用用户自己的移动去学，**一次都不多动光标**。
     /// </summary>
     public void Calibrate()
     {
         try
         {
-            var (vx, vy, vw, vh) = MouseInjector.VirtualScreen();
-            if (vw <= 0 || vh <= 0) return;
-            var start = MouseInjector.CursorPos();
+            const int D1 = 6, D2 = 24;
 
-            double Measure(int d)
+            // 返回 (+d 方向实际走了多少, 回到原位时实际走了多少)；被屏幕边缘裁掉的一侧为 0
+            (double fwd, double back) MeasurePair(int d)
             {
-                var got = new List<double>();
-                for (var i = 0; i < 3; i++)
-                {
-                    MouseInjector.MoveAbsolute((vx + vw / 2) * 65535 / Math.Max(vw - 1, 1),
-                                               (vy + vh / 2) * 65535 / Math.Max(vh - 1, 1));
-                    Thread.Sleep(25);
-                    var (x0, _) = MouseInjector.CursorPos();
-                    MouseInjector.Move(d, 0);
-                    Thread.Sleep(20);
-                    var (x1, _) = MouseInjector.CursorPos();
-                    got.Add(x1 - x0);
-                }
-                got.Sort();
-                return got[got.Count / 2];
+                var (x0, _) = MouseInjector.CursorPos();
+                MouseInjector.Move(d, 0);
+                Thread.Sleep(20);
+                var (x1, _) = MouseInjector.CursorPos();
+                MouseInjector.Move(-d, 0);      // 立刻退回原位 → 净位移 0
+                Thread.Sleep(20);
+                var (x2, _) = MouseInjector.CursorPos();
+                return (x1 - x0, x1 - x2);
             }
 
-            var small = Measure(6);
-            var big = Measure(48);
-            var gain = big <= 0 ? 1.0 : big / 48.0;
+            double GainAt(int d)
+            {
+                var rs = new List<double>();
+                for (var i = 0; i < 3; i++)
+                {
+                    var (f, b) = MeasurePair(d);
+                    var got = Math.Max(Math.Abs(f), Math.Abs(b));   // 取没被裁的那一侧
+                    if (got > 0) rs.Add(got / d);
+                }
+                if (rs.Count == 0) return 0;
+                rs.Sort();
+                return rs[rs.Count / 2];
+            }
+
+            var smallRatio = GainAt(D1);
+            var bigRatio = GainAt(D2);
+            if (bigRatio <= 0 && smallRatio <= 0)
+            {
+                LastNote = "自校准失败：两次测量都没测到位移（光标可能在屏幕边缘或注入被挡）。";
+                Log(LastNote);
+                return;
+            }
+            var gain = bigRatio > 0 ? bigRatio : smallRatio;
             _gain = Math.Clamp(gain, 0.2, 5.0);
-            // 小增量与大增量的比值差得多 → 增益不是常数 → 系统加速在起作用
-            var smallRatio = small / 6.0;
-            _accelSuspected = Math.Abs(smallRatio - gain) / Math.Max(gain, 0.01) > 0.25;
+            _accelSuspected = smallRatio > 0 && bigRatio > 0
+                              && Math.Abs(smallRatio - bigRatio) / Math.Max(bigRatio, 0.01) > 0.25;
 
-            if (start.X >= 0 && start.Y >= 0)
-                MouseInjector.MoveAbsolute((start.X - vx) * 65535 / Math.Max(vw - 1, 1),
-                                           (start.Y - vy) * 65535 / Math.Max(vh - 1, 1));
-
-            Log($"自校准：请求 6px→实际 {small:F0}px（比值 {smallRatio:F2}）｜"
-                + $"请求 48px→实际 {big:F0}px（比值 {gain:F2}）⇒ 采用增益 {_gain:F2}"
+            Log($"主动自校准（就地，未搬动光标）：请求 {D1}px → ×{smallRatio:F2}｜"
+                + $"请求 {D2}px → ×{bigRatio:F2} ⇒ 采用增益 {_gain:F2}"
                 + (_accelSuspected ? "  ★ 两档比值不一致 → 系统「指针精确度」可能开着，速度会与你调的值有偏差" : ""));
             LastNote = $"自校准完成：实测增益 {_gain:F2}×"
                        + (_accelSuspected ? "（★ 两档比值不一致，系统「指针精确度」可能开着）" : "（相对移动精确可控）");
         }
         catch (Exception e)
         {
-            Log("自校准失败（按增益 1.0 继续）：" + e.Message);
-            LastNote = "自校准失败（按增益 1.0 继续）：" + e.Message;
+            Log("自校准失败（按当前增益继续）：" + e.Message);
+            LastNote = "自校准失败（按当前增益继续）：" + e.Message;
         }
+    }
+
+    // ── 被动标定：用**用户自己的移动**去学增益 ──
+    private (int X, int Y)? _lastCursor;
+    private int _wantX, _wantY;
+    private bool _wantValid;
+    private readonly List<double> _useRatios = new();
+
+    /// <summary>
+    /// 从**真实使用**中学习增益 —— 我们本来就要知道光标实际走了多少，
+    /// 顺手对一下"上一帧发出去的位移"与"光标实际位移"，就得到增益，**不需要额外动一下光标**。
+    ///
+    /// 这也是唯一能满足"绝不移动到固定位置"的做法：进鼠标模式时光标纹丝不动，
+    /// 移动全都是 SendInput 的**相对位移**（MOUSEEVENTF_MOVE），起点永远是光标此刻在哪。
+    ///
+    /// 判据细节：
+    /// · 样本必须**成对间隔一帧**（帧首发位移 → 下一帧首读结果），否则读到的是没生效的旧位置；
+    /// · 靠近屏幕边缘且朝外移动时位移会被系统裁掉 → 这种样本直接作废；
+    /// · 用户同时还在推自己的鼠标会污染样本 → 取 40 个样本的中位数，野值自然被压掉。
+    /// </summary>
+    private void CalibrateFromUse()
+    {
+        var (nx, ny) = MouseInjector.CursorPos();
+        if (_wantValid && _lastCursor is { } last)
+        {
+            var want = Math.Abs(_wantX) + Math.Abs(_wantY);
+            var got = Math.Abs(nx - last.X) + Math.Abs(ny - last.Y);
+            var (vx, vy, vw, vh) = MouseInjector.VirtualScreen();
+            var clamped =
+                (nx <= vx && _wantX < 0) || (nx >= vx + vw - 1 && _wantX > 0) ||
+                (ny <= vy && _wantY < 0) || (ny >= vy + vh - 1 && _wantY > 0);
+            if (!clamped && want > 0 && got > 0 && got < want * 4)
+            {
+                _useRatios.Add((double)got / want);
+                if (_useRatios.Count >= 40)
+                {
+                    _useRatios.Sort();
+                    var med = _useRatios[_useRatios.Count / 2];
+                    _useRatios.Clear();
+                    if (Math.Abs(med - _gain) > Math.Max(_gain, 1) * 0.05)
+                    {
+                        var old = _gain;
+                        _gain = Math.Clamp(med, 0.2, 5.0);
+                        Log($"被动标定：增益 {old:F2} → {_gain:F2}（用你自己的移动学的，全程没动光标）");
+                    }
+                }
+            }
+        }
+        _lastCursor = (nx, ny);
+        _wantValid = false;      // 这一帧还没发位移，下一帧首别拿它对账
+    }
+
+    /// <summary>位移断了（松手 / 复位）→ 对账链断掉，下一帧重新起算</summary>
+    private void ResetUseCalibration()
+    {
+        _lastCursor = null;
+        _wantValid = false;
     }
 
     // ───────────────────────── 状态 / 日志 ─────────────────────────
@@ -726,11 +813,13 @@ internal sealed class MouseEngine
     /// <summary>
     /// 引擎端到端自检 —— **不需要遥控器**，直接驱动引擎并量真实光标。
     /// 断言：
-    ///   ① 不开引擎时按住方向键，光标不动（路由没消费）
-    ///   ② 开引擎后按住 right 1.2 s，光标向右移动，且**后半段比前半段快**（自适应增速生效）
-    ///   ③ 松开后**立即停住**（不漂移）
-    ///   ④ 确认键 → 系统左键真的按下/抬起（`GetAsyncKeyState(VK_LBUTTON)`）
-    ///   ⑤ 斜向不超速（同时按 right+down，合速度与单方向同量级）
+    ///   ① 开引擎**一次移动注入都不发**（起点必须是"光标此刻在哪"，不许跳到屏幕中心之类的固定点）
+    ///   ② 不开引擎时按住方向键，光标不动（路由没消费）
+    ///   ③ 开引擎后按住 right 1.2 s，光标向右移动，且**后半段比前半段快**（自适应增速生效）
+    ///   ④ 松开后**一次注入都不再发**（不漂移）
+    ///   ⑤ 确认键 → 系统左键真的按下/抬起（`GetAsyncKeyState(VK_LBUTTON)`）
+    ///   ⑥ 斜向不超速（同时按 right+down，合速度与单方向同量级）
+    ///   ⑦ 收尾后没有卡住的按键
     /// </summary>
     public static string SelfTest()
     {
@@ -743,6 +832,9 @@ internal sealed class MouseEngine
         sb.AppendLine($"读取到的配置（mouse.json）：方块键作用={e.Cfg.SquareKeyAction}"
                       + $"（=={e.Cfg.SquareKeyAction} 时方块键{(e.SquareKeySwitchesMode ? "切键鼠模式" : "切配置组")}）"
                       + $" · 音量键当滚轮={(e.Cfg.WheelOnVolumeKeys ? "开" : "关")}");
+        sb.AppendLine("跑这个自检会真的驱动光标，期间请**不要碰鼠标/触控板**：");
+        sb.AppendLine("  · 「该不该动」的断言看的是**注入计数**（我方账本），人手干扰不影响；");
+        sb.AppendLine("  · 「动了多少」的断言只能靠量真实光标，人手一动就被污染 → 会自动重试 3 次取最好的一次。");
         sb.AppendLine();
         var ok = true;
         void Check(bool pass, string what, string detail)
@@ -752,48 +844,106 @@ internal sealed class MouseEngine
             sb.AppendLine($"       {detail}");
         }
 
-        /// <summary>按住某个方向集合 ms 毫秒，返回这段时间的位移（基准用"归位并停稳"取）</summary>
+        /// <summary>
+        /// 给"向右 / 向下"留出足够的活动空间 —— **只用相对位移**，绝不做绝对定位。
+        /// （自检也不该把用户的光标搬到屏幕中心：多显示器下那儿是两块屏的接缝。）
+        /// </summary>
+        void EnsureRoom()
+        {
+            var (x, y) = MouseInjector.CursorPos();
+            var (vx, vy, vw, vh) = MouseInjector.VirtualScreen();
+            var roomRight = vx + vw - 1 - x;
+            if (roomRight < 900) MouseInjector.Move(-(900 - roomRight + 200), 0);
+            var roomDown = vy + vh - 1 - y;
+            if (roomDown < 320) MouseInjector.Move(0, -(320 - roomDown + 120));
+            if (y - vy < 320) MouseInjector.Move(0, 320 - (y - vy) + 120);
+            MouseInjector.WaitCursorSettled();
+        }
+
+        /// <summary>按住某个方向集合 ms 毫秒，返回这段时间的位移（基准就地取，不归位）</summary>
         (double dist, double dx, double dy) Hold(string[] dirs, int ms)
         {
-            var (x0, y0) = MouseInjector.CenterAndSettle();
+            EnsureRoom();
+            var (x0, y0) = MouseInjector.CursorPos();
             foreach (var d in dirs) e.HandleButton(d, true);
             Thread.Sleep(ms);
-            (int X, int Y) p = MouseInjector.CursorPos();
             foreach (var d in dirs) e.HandleButton(d, false);
             Thread.Sleep(120);                       // 让引擎真的停下来再取终值
             var (x1, y1) = MouseInjector.CursorPos();
             return (Math.Sqrt(Math.Pow(x1 - x0, 2) + Math.Pow(y1 - y0, 2)), x1 - x0, y1 - y0);
         }
 
+        /// <summary>同一段测量最多跑 3 次，取"位移最大"的那次（人手同时动鼠标会污染样本）</summary>
+        T BestOf<T>(Func<T> f, Func<T, double> score, int tries = 3)
+        {
+            var best = f();
+            var bs = score(best);
+            for (var i = 1; i < tries && bs <= 0; i++)
+            {
+                var t = f();
+                var s = score(t);
+                if (s > bs) { best = t; bs = s; }
+            }
+            return best;
+        }
+
         try
         {
-            // ① 未启用 → 不消费
+            // ① 开启鼠标模式**不能发出任何移动注入** —— 起点永远是"光标此刻在哪"。
+            //    曾经在 SetEnabled(true) 里做主动自校准（绝对定位到屏幕中心）→ 进模式那一刻光标猛跳。
+            //    判据用注入计数（我方账本）而不是光标位移：人手同时在动鼠标也判得准。
             e.SetEnabled(false);
+            Thread.Sleep(120);
+            var (bx, by) = MouseInjector.CursorPos();
+            var mv0 = MouseInjector.MoveEvents;
+            e.SetEnabled(true);
+            Thread.Sleep(250);
+            var mvA = MouseInjector.MoveEvents;
+            var (ax, ay) = MouseInjector.CursorPos();
+            var jump = Math.Abs(ax - bx) + Math.Abs(ay - by);
+            Check(mvA == mv0, "开启鼠标模式不发出任何移动注入（不会跳到固定点）",
+                  $"开启期间新增移动注入 {mvA - mv0} 次（期望 0）；"
+                  + $"光标 ({bx},{by}) → ({ax},{ay}) 位移 {jump} px"
+                  + (jump > 2 && mvA == mv0 ? "（★ 这次位移不是本引擎干的 —— 期间有人动过鼠标）" : ""));
+            e.SetEnabled(false);
+            Thread.Sleep(120);
+
+            // ② 未启用 → 不消费
             var consumed = e.HandleButton("right", true);
             Check(!consumed, "未开鼠标模式时方向键不被引擎消费", $"HandleButton(right) 返回 {consumed}（期望 false）");
 
-            // ② 启用后按住 right：分两段量，看增速
+            // ③ 启用后按住 right：分两段量，看增速
             e.SetEnabled(true);
-            var (x0, _) = MouseInjector.CenterAndSettle();
-            e.HandleButton("right", true);
-            Thread.Sleep(600);
-            var (xm, _) = MouseInjector.CursorPos();
-            Thread.Sleep(600);
-            var (x2, _) = MouseInjector.CursorPos();
-            e.HandleButton("right", false);
-            var first = xm - x0;
-            var second = x2 - xm;
-            Check(first > 0 && second > 0, "按住 right 光标向右移动",
-                  $"前 0.6s 走 {first} px，后 0.6s 走 {second} px（合计 {x2 - x0} px）");
-            Check(second > first, "自适应增速生效（后半段更快）",
-                  $"前半 {first} px < 后半 {second} px（比值 {(double)second / Math.Max(first, 1):F2}）");
+            (int first, int second, int total) Ramp()
+            {
+                EnsureRoom();
+                var (x0, _) = MouseInjector.CursorPos();
+                e.HandleButton("right", true);
+                Thread.Sleep(600);
+                var (xm, _) = MouseInjector.CursorPos();
+                Thread.Sleep(600);
+                var (x2, _) = MouseInjector.CursorPos();
+                e.HandleButton("right", false);
+                Thread.Sleep(120);
+                return (xm - x0, x2 - xm, x2 - x0);
+            }
+            var run = BestOf(Ramp, r => r.first > 0 && r.second > 0 ? r.total : 0);
+            Check(run.first > 0 && run.second > 0, "按住 right 光标向右移动",
+                  $"前 0.6s 走 {run.first} px，后 0.6s 走 {run.second} px（合计 {run.total} px）");
+            Check(run.second > run.first, "自适应增速生效（后半段更快）",
+                  $"前半 {run.first} px < 后半 {run.second} px（比值 {(double)run.second / Math.Max(run.first, 1):F2}）");
 
-            // ③ 松开后停住
-            Thread.Sleep(400);
+            // ④ 松开后引擎必须**一次都不再注入**（判据同样是账本，不受人手干扰）
+            var mvB = MouseInjector.MoveEvents;
             var (x3, _) = MouseInjector.CursorPos();
-            Check(Math.Abs(x3 - x2) <= 2, "松开后立即停住（无漂移）", $"松开后 0.4 s 又动了 {x3 - x2} px");
+            Thread.Sleep(400);
+            var mvC = MouseInjector.MoveEvents;
+            var (x4, _) = MouseInjector.CursorPos();
+            Check(mvC == mvB, "松开后引擎立即停止注入（不再漂移）",
+                  $"松开后 0.4 s 内新增移动注入 {mvC - mvB} 次（期望 0）"
+                  + $"；光标 {(Math.Abs(x4 - x3) <= 2 ? "稳定" : $"又动了 {x4 - x3} px（★ 期间有人动过鼠标）")}");
 
-            // ④ 确认键 → 左键
+            // ⑤ 确认键 → 左键
             e.HandleButton("ok", true);
             Thread.Sleep(80);
             var down = LeftSys();
@@ -802,7 +952,7 @@ internal sealed class MouseEngine
             var up = LeftSys();
             Check(down && !up, "确认键 → 系统左键按下/抬起", $"按下时系统左键={down}，抬起后={up}");
 
-            // ⑤ 斜向归一化：**同样时长**下比较单方向与斜向的位移
+            // ⑥ 斜向归一化：**同样时长**下比较单方向与斜向的位移
             //   （时长必须一样，否则斜坡进度不同，比出来没意义 —— 第一版就是这么比错的）
             const int T = 800;
             var single = Hold(new[] { "right" }, T);
@@ -812,7 +962,7 @@ internal sealed class MouseEngine
                   $"{T}ms 单方向 {single.dist:F0} px vs 斜向 {diag.dist:F0} px"
                   + $"（比值 {diag.dist / Math.Max(single.dist, 1):F2}，归一化后应 ≈1.00）");
 
-            // ⑥ 全部抬起
+            // ⑦ 全部抬起
             e.ReleaseAll("自检收尾");
             Thread.Sleep(80);
             Check(!LeftSys(), "收尾后系统左键已抬起", $"系统左键={LeftSys()}");

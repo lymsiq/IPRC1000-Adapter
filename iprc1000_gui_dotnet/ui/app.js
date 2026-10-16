@@ -757,7 +757,7 @@ function startMousePad() {
   mousePadTimer = setInterval(async () => {
     if (!B) return;
     let d;
-    try { d = JSON.parse(await B.mouseDelta()); } catch (e) { return; }
+    try { d = JSON.parse(await B.mouseSample()); } catch (e) { return; }
     const dot = $('#mouseDot');
     if (d.mode !== 'mouse') {
       dot.classList.remove('on');
@@ -767,11 +767,13 @@ function startMousePad() {
     }
     dot.classList.add('on');
     $('#mousePadHint').textContent = '';
-    /* 增量按比例映射到画布百分比：900 px/秒 时约 0.45 秒扫过一格，能明显看出快慢 */
-    const k = 0.12;
-    mouseDotPos.x = Math.min(96, Math.max(4, mouseDotPos.x + (d.dx || 0) * k));
-    mouseDotPos.y = Math.min(92, Math.max(8, mouseDotPos.y + (d.dy || 0) * k));
-    apply(dot);
+    /* 光点 = **光标真实位置**映射到校准区（一台小地图），不是从固定点累加位移 ——
+       累加会漂、而且和真实光标对不上。留 4%/8% 边距免得贴边被裁。 */
+    const vw = Math.max(d.vw - 1, 1), vh = Math.max(d.vh - 1, 1);
+    const px = Math.min(1, Math.max(0, (d.x - d.vx) / vw));
+    const py = Math.min(1, Math.max(0, (d.y - d.vy) / vh));
+    dot.style.left = (4 + px * 92) + '%';
+    dot.style.top = (8 + py * 84) + '%';
     if (d.pxPerSec) $('#mouseSpeedLive').textContent = Math.round(d.pxPerSec) + ' px/秒';
   }, 50);
 }

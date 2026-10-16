@@ -73,6 +73,16 @@ internal static class MouseInjector
     /// <summary>最近一次注入是否被系统接受（false 多为 UIPI 拦截）</summary>
     public static string? LastError { get; private set; }
 
+    /// <summary>
+    /// 本进程累计发出的**移动类**注入次数（相对 + 绝对都算）。
+    /// 用途：自检里判"该动的时候动了 / 不该动的时候一次都没动"，
+    /// 这个计数**完全由我们控制**，不受"用户同时在推鼠标"干扰 —— 比量光标位置可靠。
+    /// </summary>
+    public static long MoveEvents;
+
+    /// <summary>本进程累计发出的按键类注入次数（左/右/中键的按下与抬起）</summary>
+    public static long ButtonEvents;
+
     /// <summary>复用的输入数组 —— 避免每帧分配（引擎会每秒调上百次）</summary>
     private static readonly INPUT[] One = new INPUT[1];
 
@@ -84,9 +94,22 @@ internal static class MouseInjector
             mi = new MOUSEINPUT { dx = dx, dy = dy, mouseData = data, dwFlags = flags, dwExtraInfo = IntPtr.Zero },
         };
         var n = SendInput(1, One, Marshal.SizeOf<INPUT>());
-        if (n == 1) { LastError = null; return true; }
-        LastError = $"SendInput 返回 {n}，Win32 错误 {Marshal.GetLastWin32Error()}";
-        return false;
+        if (n != 1)
+        {
+            LastError = $"SendInput 返回 {n}，Win32 错误 {Marshal.GetLastWin32Error()}";
+            return false;
+        }
+        LastError = null;
+        Count(flags);
+        return true;
+    }
+
+    private static void Count(uint flags)
+    {
+        if ((flags & MOUSEEVENTF_MOVE) != 0) MoveEvents++;
+        else if ((flags & (MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP
+                           | MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_RIGHTUP
+                           | MOUSEEVENTF_MIDDLEDOWN | MOUSEEVENTF_MIDDLEUP)) != 0) ButtonEvents++;
     }
 
     /// <summary>相对移动（像素；受系统「指针精确度」+ 指针速度档位影响）</summary>
@@ -108,9 +131,14 @@ internal static class MouseInjector
                 mi = new MOUSEINPUT { dx = dx, dy = dy, dwFlags = MOUSEEVENTF_MOVE },
             };
         var n = SendInput((uint)times, arr, Marshal.SizeOf<INPUT>());
-        if (n == times) { LastError = null; return true; }
-        LastError = $"SendInput 批 {times} 返回 {n}，Win32 错误 {Marshal.GetLastWin32Error()}";
-        return false;
+        if (n != times)
+        {
+            LastError = $"SendInput 批 {times} 返回 {n}，Win32 错误 {Marshal.GetLastWin32Error()}";
+            return false;
+        }
+        LastError = null;
+        MoveEvents += n;
+        return true;
     }
 
     /// <summary>绝对定位（归一化 0..65535，映射到**整个虚拟桌面**；不走加速曲线）</summary>

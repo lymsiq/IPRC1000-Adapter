@@ -207,18 +207,25 @@ internal sealed class Backend : IDisposable
     }
 
     /// <summary>
-    /// 取走"自上次调用以来累计的鼠标位移" —— 界面「实时校准区」按 ~20 Hz 轮询用。
-    /// 只回增量、不回绝对位置，所以不会因为界面刷新而干扰真实光标。
+    /// 界面「实时校准区」按 ~20 Hz 轮询：返回**自上次调用以来的位移** + **光标真实位置** +
+    /// 虚拟桌面尺寸。界面据此把光点映射到光标的**真实位置**（一台小地图），
+    /// 而不是"从一个固定点开始累加位移" —— 后者会漂，而且和真实光标对不上。
     /// </summary>
-    public string TakeMouseDelta()
+    public string TakeMouseSample()
     {
-        var (dx, dy, px, sec) = _mouse.TakeDelta();
+        var s = _mouse.TakeSample();
         return Env.Json(new
         {
-            dx = Math.Round(dx, 1),
-            dy = Math.Round(dy, 1),
-            px = Math.Round(px, 1),
-            pxPerSec = sec > 0.001 ? Math.Round(px / sec) : 0,
+            dx = Math.Round(s.Dx, 1),
+            dy = Math.Round(s.Dy, 1),
+            px = Math.Round(s.Px, 1),
+            pxPerSec = s.Sec > 0.001 ? Math.Round(s.Px / s.Sec) : 0,
+            x = s.X,
+            y = s.Y,
+            vx = s.Vx,
+            vy = s.Vy,
+            vw = s.Vw,
+            vh = s.Vh,
             mode = _mouse.Enabled ? "mouse" : "keyboard",
         });
     }
