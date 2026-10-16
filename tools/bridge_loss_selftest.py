@@ -121,6 +121,41 @@ def scenario_three_frag_split(n=50):
     return out
 
 
+def emit_frame_at(out, seq, dt_ms=0, **kw):
+    """同 emit_frame，但把间隔 dt_ms 写进**每一片**（回放按它判会话边界）。"""
+    blob = emit_frame(b"", seq, **kw)
+    out2, off = b"", 0
+    while off + 10 <= len(blob):
+        flag = blob[off]
+        dlen = struct.unpack_from("<H", blob, off + 2)[0]
+        acl_len = struct.unpack_from("<H", blob, off + 8)[0]
+        out2 += struct.pack("<BBHIH", flag, 0, dlen, dt_ms, acl_len) + blob[off + 10:off + 10 + acl_len]
+        off += 10 + acl_len
+    return out + out2
+
+
+def scenario_two_sessions(n=25, gap_ms=1000):
+    """★ 两段会话，中间停 1 秒：**不许把会话边界记成"丢帧"**。
+
+    真机实测：12 次会话 → 12~13 次「seq 跳号」，累计"跳过 1500 帧"，
+    于是界面「丢失帧数」误报成上千帧 —— 而同期「组帧失败」一直是 0，音频一帧没丢。
+    根因是"清序号基准"写在发 CLEAR 那一段（函数后半），而序号比较在函数**最前面**
+    ⇒ 每个会话的第一帧都拿上一段的 seq 去比。这条用例就是钉住这个位置。
+    """
+    out = b""
+    seq = 0
+    for i in range(n):
+        out = emit_frame_at(out, seq & 0xFF)
+        seq += 1
+    # 停 1 秒（> IDLE_END_MS）：遥控器这边的序号可能已经往前跑了一段，
+    # 但那段时间**根本没在收音**，所以那不是丢帧。
+    seq += 137
+    for i in range(n):
+        out = emit_frame_at(out, seq & 0xFF, dt_ms=gap_ms if i == 0 else 0)
+        seq += 1
+    return out
+
+
 def emit_hid_report(out, usage=0x10):
     """一条按键报告：单分片，ACL 负载 14 字节（L2CAP 10 + 报告头 a1 01 + 6 个 usage 槽）。
 
@@ -196,7 +231,7 @@ def parse(text):
     return g
 
 
-def run(name, blob, expect):
+def run(name, blob, expect, realtime=False):
     tmp = tempfile.mkdtemp(prefix="iprc-selftest-")
     rp = os.path.join(tmp, "replay.bin")
     with open(rp, "wb") as f:
@@ -204,9 +239,10 @@ def run(name, blob, expect):
     # ★ APPDATA 指到临时目录：自检不污染真机的 bridge.log / bridge-stats.json
     env = dict(os.environ)
     env["APPDATA"] = tmp
-    p = subprocess.run(
-        [EXE, "--replay", rp, "--no-feed", "--fast", "--key-udp", ""],
-        capture_output=True, env=env, timeout=120)
+    cmd = [EXE, "--replay", rp, "--no-feed", "--key-udp", ""]
+    if not realtime:
+        cmd.append("--fast")
+    p = subprocess.run(cmd, capture_output=True, env=env, timeout=180)
     text = p.stdout.decode("utf-8", "replace") + p.stderr.decode("utf-8", "replace")
     got = parse(text)
 
@@ -264,6 +300,12 @@ CASES = [
      scenario_audio_with_keys(20, 10),
      dict(frames=20, hid_reports=10, lost_cont=0, odd_frag=0, orphan_cont=0)),
 
+    # ⚠ 这条**必须按真实时间轴跑**（第 4 个元素 = realtime）：`--fast` 下 dt_ms 被忽略，
+    #   "停了 1 秒"在墙钟上不存在 ⇒ 桥判不出新会话 ⇒ 用例会**假通过**。
+    ("⑧ 跨会话的序号跳变**不算丢帧**（假仪表比没仪表更糟）",
+     scenario_two_sessions(25, 1000),
+     dict(frames=50, seq_jumps=0, seq_lost=0, lost_cont=0), True),
+
     ("④ 续片被截断（负载不足）：以前完全没有计数",
      scenario_cont_truncated(50, 10, 20, 200),
      # 续片短了 ⇒ 这一帧拼不齐：`trunc_cont` 说明**为什么**（被截断），
@@ -283,8 +325,10 @@ def main():
     print("语音桥「丢帧定位仪表」回归自检")
     print("=" * 62)
     ok = True
-    for name, blob, expect in CASES:
-        ok &= run(name, blob, expect)
+    for case in CASES:
+        name, blob, expect = case[0], case[1], case[2]
+        rt = case[3] if len(case) > 3 else False
+        ok &= run(name, blob, expect, realtime=rt)
     print()
     print("⇒ " + ("全部通过 ✓ —— 三类故障确实分得开" if ok else "★ 有断言失败"))
     return 0 if ok else 1

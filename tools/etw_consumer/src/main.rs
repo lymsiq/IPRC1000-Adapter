@@ -65,6 +65,8 @@ const L2CAP_HDR: usize = 4;
 const AUDIO_TOTAL: usize = L2CAP_HDR + FRAME_LEN;
 /// 遥控器把音频与按键都发在 L2CAP CID 0x41（HID 控制通道）上
 const CID_HID: u16 = 0x0041;
+/// L2CAP **信令**通道：建链/协商用的小包（`08 00 01 00 02 02 04 00` 这类），与音频/按键无关
+const CID_SIG: u16 = 0x0001;
 /// 按键报告（HID 输入报告）的 L2CAP 负载长度
 const HID_PAYLOAD_LEN: usize = 10;
 /// 无帧多久发 END。
@@ -167,6 +169,10 @@ struct Stats {
     cont_kinds: Vec<(u16, u64)>,
     /// 拼够长度但长度不是我们认识的音频帧（比如换了音频配置）
     short_pdu: u64,
+    /// L2CAP 信令包（CID 0x0001）—— **单独计数，不算"未识别"**：
+    /// 否则界面上会显示"长度不认识 N"，让人以为帧格式出了问题
+    /// （实测 86 条/100 分钟，全是建链协商用的小包）
+    sig_frag: u64,
     /// 上一次看到的 seq（None = 还没见过；用 Option 而不是哨兵值，
     /// 因为 `Stats` 是 `derive(Default)`，哨兵会被 0 顶掉）
     last_seq: Option<u8>,
@@ -661,6 +667,14 @@ impl Bridge {
                     return;
                 }
 
+                // L2CAP 信令通道：建链/协商用的小包，不是音频也不是按键。
+                // ★ 单独计数而不是丢进"未识别" —— 那会让界面显示"长度不认识 N"，
+                //   看起来像帧格式出了问题，实际完全无害。
+                if cid == CID_SIG {
+                    self.stats.lock().unwrap().sig_frag += 1;
+                    return;
+                }
+
                 let mut s = self.stats.lock().unwrap();
                 note_odd(&mut s, flag, dlen, acl);
             }
@@ -740,6 +754,24 @@ impl Bridge {
             return;
         }
 
+        // ★ 本帧是不是"新会话的第一帧"。
+        //
+        //   为什么要在**这里**判：发 CLEAR 在本函数后半段，而序号比较在最前面。
+        //   以前把"清序号基准"写在发 CLEAR 那一段 ⇒ 每个会话的**第一帧**仍会拿
+        //   上一段会话的 seq 去比，白记一次"跳号"。
+        //   实测（v1.2.4，100 分钟）：12 次会话 → 12~13 次跳号、累计"跳过 1500 帧"，
+        //   于是界面上的「丢失帧数」**误报**成上千帧 —— 而同期 `组帧失败` 一直是 0，
+        //   音频一帧没丢。假仪表比没仪表更糟。
+        //
+        //   ⚠ **判据必须是"距上一帧的空档"，不能用 `self.in_session`**：
+        //   `in_session` 只在写了 UDP 接收端时才被维护（在发 CLEAR 那一段里），
+        //   回放（不带 `--udp`）时它恒为 false ⇒ 每一帧都被当成新会话 ⇒ 序号比较全被跳过，
+        //   连"真跳号"都查不出来（这条被自检 ② 抓了个正着）。
+        //   用空档判则与 CLEAR/END 同一套语义，且与 UDP 无关。
+        let session_start = self.last_frame_at
+            .map(|t| t.elapsed() >= Duration::from_millis(IDLE_END_MS))
+            .unwrap_or(true);
+
         // ── 帧头自检 + seq 跟踪 ──
         //
         // 帧头 = `A1 F7 01 <seq> 00 <roll> <n> <cnt> 00 00 00 40 01`，
@@ -759,13 +791,15 @@ impl Bridge {
             let mut s = self.stats.lock().unwrap();
             if !sig_ok {
                 s.hdr_odd += 1;
-            } else if let Some(prev) = s.last_seq {
+            } else if !session_start {
+                if let Some(prev) = s.last_seq {
                 match (seq.wrapping_sub(prev)) as u64 {
                     1 => {}                       // 正常
                     0 => s.seq_dup += 1,          // 重复帧
                     n => {                        // 跳号 = 真丢帧
                         s.seq_jumps += 1;
                         s.seq_lost += n - 1;
+                    }
                     }
                 }
             }
@@ -824,10 +858,8 @@ impl Bridge {
                 {
                     let mut s = self.stats.lock().unwrap();
                     s.sessions += 1;
-                    // ★ 新会话要把帧序号基准清掉：实测每次会话边界都会看到一次
-                    //   「跳过 ~125 帧」的跳号，那不是丢帧，是上一段会话残留的序号。
-                    //   不清它，`seqLost` 会被这些假跳号淹没（实测 41 次会话 → 39 次跳号）。
-                    s.last_seq = None;
+                    // ★ 序号基准已在**本函数开头**按 `session_start` 跳过比较，
+                    //   这里不必再清（清了反而会少比一帧）。见那段的注释。
                 }
                 // 回调路径 → 异步日志（见 diag::log 的警告）
                 diag::log_async("会话开始（CLEAR）");
@@ -1114,7 +1146,7 @@ fn main() {
                         "\"lostCont\":{},\"truncatedFirst\":{},\"udpErr\":{},",
                         "\"seqJumps\":{},\"seqLost\":{},\"seqDup\":{},",
                         "\"truncCont\":{},\"oddFrag\":{},\"hdrOdd\":{},",
-                        "\"orphanCont\":{},\"shortPdu\":{},",
+                        "\"orphanCont\":{},\"shortPdu\":{},\"sigFrag\":{},",
                         "\"hidReports\":{},\"keyEvents\":{},\"otherEvents\":{},",
                         "\"silentMs\":{},\"inSession\":{}}}"
                     ),
@@ -1141,6 +1173,7 @@ fn main() {
                     s.hdr_odd,
                     s.orphan_cont,
                     s.short_pdu,
+                    s.sig_frag,
                     s.hid_reports,
                     s.key_events,
                     s.other,
@@ -1457,6 +1490,13 @@ fn replay_mode(path: &str, bridge: Arc<Mutex<Bridge>>, realtime: bool, stats: Ar
         off += acl_len;
         bridge.lock().unwrap().handle_fragment(flag, dlen, &acl);
         n += 1;
+        // ★ 回放也要**按时间轴判会话**：真实流里"松手 → 再按"之间隔着几百毫秒到几秒，
+        //   桥会发 END 并结束会话；回放若不补这一步，整段回放会被当成**一个**会话，
+        //   于是"跨会话的假跳号"这类问题在回放里永远复现不出来。
+        //   （自检 `scenario_two_sessions` 就靠这条。）
+        if dt >= IDLE_END_MS as u32 {
+            bridge.lock().unwrap().tick();
+        }
         if realtime {
             acc += Duration::from_millis(dt as u64);
             let got = t0.elapsed();
@@ -1492,9 +1532,9 @@ fn report(stats: &Arc<Mutex<Stats>>, bridge: &Arc<Mutex<Bridge>>) {
     );
     println!(
         "[i] 丢帧定位: 组帧失败(续片没到) {} · seq跳号 {} 次（跳过 {} 帧）· seq重复 {} \
-         · 续片被截断 {} · 未识别分片 {} · 帧头异常 {} · 孤续片 {} · 怪长帧 {}",
+         · 续片被截断 {} · 未识别分片 {} · 帧头异常 {} · 孤续片 {} · 怪长帧 {} · L2CAP信令 {}",
         st.lost_cont, st.seq_jumps, st.seq_lost, st.seq_dup,
-        st.trunc_cont, st.odd_frag, st.hdr_odd, st.orphan_cont, st.short_pdu
+        st.trunc_cont, st.odd_frag, st.hdr_odd, st.orphan_cont, st.short_pdu, st.sig_frag
     );
     if !st.cont_kinds.is_empty() {
         let mut k: Vec<String> = st.cont_kinds.iter().map(|(l, c)| format!("{l}B×{c}")).collect();

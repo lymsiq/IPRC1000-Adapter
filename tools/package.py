@@ -219,6 +219,11 @@ SRC_REQUIRED = [
     ("配置组状态带 kind", "iprc1000_gui_dotnet/Backend.cs", "[\"kind\"] = g.Kind"),
     ("界面认得出鼠标组的方向键", "iprc1000_gui_dotnet/ui/app.js", "鼠标移动"),
     ("弹窗能选「切换配置组」", "iprc1000_gui_dotnet/ui/app.js", "['切换配置组',-5]"),
+    # ★★ 假仪表修（2026-10-16 晚）：每个会话的第一帧曾被算成"跳号"，界面误报丢失上千帧
+    ("按空档判新会话（不再用 in_session）", "tools/etw_consumer/src/main.rs", "距上一帧的空档"),
+    ("回放也按时间轴判会话", "tools/etw_consumer/src/main.rs", "回放也要**按时间轴判会话**"),
+    ("L2CAP 信令单独计数", "tools/etw_consumer/src/main.rs", "sig_frag"),
+    ("自检覆盖跨会话假跳号", "tools/bridge_loss_selftest.py", "scenario_two_sessions"),
     # ★ 移动必须从光标当前位置起算（2026-10-16 用户指正后重做）
     ("被动标定用真实使用学增益", "iprc1000_gui_dotnet/MouseEngine.cs", "CalibrateFromUse"),
     ("开模式不再触发主动校准", "iprc1000_gui_dotnet/MouseEngine.cs", "这里**不做**主动校准"),

@@ -939,6 +939,7 @@ internal sealed class Backend : IDisposable
             ["oddFrag"] = L("oddFrag"),
             ["hdrOdd"] = L("hdrOdd"),
             ["orphanCont"] = L("orphanCont"),
+            ["sigFrag"] = L("sigFrag"),
             ["shortPdu"] = L("shortPdu"),
             ["udpPackets"] = L("udpPackets"),
             ["udpBytes"] = L("udpBytes"),
