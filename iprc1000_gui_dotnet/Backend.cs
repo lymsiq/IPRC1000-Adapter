@@ -44,10 +44,19 @@ internal sealed class Backend : IDisposable
         _router.Start();   // 常驻：随时接收语音桥推来的 PCM
     }
 
+    /// <summary>鼠标模式引擎：方向键按住拖动 = 移动（自适应增速）｜确认 = 左键｜info = 右键</summary>
+    private readonly MouseEngine _mouse = new();
+
+    /// <summary>模式变化通知（MainForm 用它更新托盘提示与气泡）</summary>
+    public event Action<string, bool>? MouseModeChanged;
+
     public void AttachFilter(KeyFilter f)
     {
         _filter = f;
         _filter.InjectEnabled = true;
+        // ★ 鼠标模式路由：方向键 / 确认 / info 由鼠标引擎接管（返回 true = 已消费，不走键盘映射）。
+        //   挂在 ApplyButton 这个"两种按键来源共用的唯一漏斗"上，所以 ETW / 钩子两种模式都成立。
+        _filter.MouseModeRouter = (bid, pressed) => _mouse.HandleButton(bid, pressed);
         // 语音键按下 → 立刻预热音频链路（提前打开 CABLE Input）。
         // 见 KeyFilter.VoiceKeyDown 的说明：不预热会丢掉"按住后立刻说的第一个字"。
         KeyFilter.VoiceKeyDown -= WarmAudio;   // 防重复订阅
@@ -169,16 +178,50 @@ internal sealed class Backend : IDisposable
 
     public void NoteButton(string bid, bool pressed)
     {
-        // ★ 遥控器最底部的「方块键」固定用于**切换到下一配置组**，循环切换、不注入任何按键。
+        // ★ 遥控器最底部的「方块键」= **切换键盘 / 鼠标模式**。
+        //   按下即生效（不等抬起）—— 因为遥控器丢 UP 是既知会发生的，
+        //   若等 UP 才切，丢一次 UP 就等于这个键失灵。
+        //   配置组**不再由它切换**，改为界面上的选项（用户 2026-10-16 明确要求）。
         if (bid == "square" && pressed)
         {
-            var g = Keymaps.NextGroup();
-            _groupToast = $"已切换到配置组「{g}」";
+            var msg = _mouse.Toggle();
+            _groupToast = msg;
             _groupToastAt = DateTime.UtcNow;
+            try { MouseModeChanged?.Invoke(msg, _mouse.Enabled); } catch { }
         }
 
         LastButton = bid;
         LastButtonPressed = pressed;
+    }
+
+    /// <summary>切换/设置鼠标模式（界面与桥接调）。<paramref name="v"/>: "on"/"off"/"toggle"</summary>
+    public string SetMouseMode(string? v)
+    {
+        var want = v?.Trim().ToLowerInvariant() switch
+        {
+            "on" or "true" or "1" => true,
+            "off" or "false" or "0" => false,
+            _ => !_mouse.Enabled,
+        };
+        var msg = _mouse.SetEnabled(want);
+        _groupToast = msg;
+        _groupToastAt = DateTime.UtcNow;
+        try { MouseModeChanged?.Invoke(msg, _mouse.Enabled); } catch { }
+        return msg;
+    }
+
+    /// <summary>应用鼠标参数（界面滑条调）。参数是一个 JSON 对象字符串。</summary>
+    public string SetMouseConfig(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return "没有收到参数。";
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var msg = _mouse.ApplyConfig(doc.RootElement);
+            MouseEngine.Log("参数已更新：" + msg);
+            return msg;
+        }
+        catch (Exception e) { return "参数解析失败：" + e.Message; }
     }
 
     public string SetInject(string? on)
@@ -519,6 +562,7 @@ internal sealed class Backend : IDisposable
             },
             ["groupToast"] = (DateTime.UtcNow - _groupToastAt).TotalSeconds < 4 ? _groupToast : null,
             ["driverNote"] = _driverNote,
+            ["mouse"] = JsonSerializer.SerializeToNode(_mouse.Status()),
             ["keysource"] = new JsonObject
             {
                 ["mode"] = _keySource,
@@ -1120,6 +1164,7 @@ internal sealed class Backend : IDisposable
         //   也正是编译警告 CS0649「从未对 _disposed 赋值」的根源。
         _disposed = true;
         try { _probeThread?.Join(600); } catch { }      // 给它一点时间自己退出
+        try { _mouse.Stop(); } catch { }                // 退出前把鼠标键全部抬起（卡住左键会点不了东西）
         StopBridge();
         _router.Dispose();
     }

@@ -178,6 +178,16 @@ SRC_REQUIRED = [
     # 探针必须先把进程设成 DPI 感知 —— 否则 GetCursorPos 返回虚拟化坐标，
     # 实测会把 1:1 的映射读成 5×（本机就这么误测过一轮，差点按错误的加速模型去设计）
     ("鼠标探针先设 DPI 感知", "iprc1000_gui_dotnet/MouseInjector.cs", "SetProcessDpiAwarenessContext"),
+    # ★ 鼠标模式引擎（阶段 1）：方向键拖动=移动+自适应增速，确认/info=左右键
+    ("鼠标引擎存在", "iprc1000_gui_dotnet/MouseEngine.cs", "internal sealed class MouseEngine"),
+    ("鼠标引擎按时间算位移", "iprc1000_gui_dotnet/MouseEngine.cs", "_cfg.TickHz"),
+    ("鼠标引擎有自适应增速", "iprc1000_gui_dotnet/MouseEngine.cs", "RampExponent"),
+    ("鼠标引擎有方向按住超时", "iprc1000_gui_dotnet/MouseEngine.cs", "DirectionHoldTimeoutSec"),
+    ("鼠标键孤儿回收存在", "iprc1000_gui_dotnet/MouseEngine.cs", "ReapOrphanButtons"),
+    ("方块键切模式", "iprc1000_gui_dotnet/Backend.cs", "_mouse.Toggle()"),
+    ("鼠标路由挂在 ApplyButton", "iprc1000_gui_dotnet/KeyFilter.cs", "MouseModeRouter"),
+    ("鼠标模式有引擎自检", "iprc1000_gui_dotnet/MouseEngine.cs", "static string SelfTest"),
+    ("引擎自检有 CLI 入口", "iprc1000_gui_dotnet/Program.cs", "--mouse-engine-test"),
     # 诊断盲区：这三个"静默降级"以前完全查不出来
     ("注入开关变化会留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "InjectEnabled"),
     ("虚拟 HID 失败会留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "虚拟 HID 下发失败"),

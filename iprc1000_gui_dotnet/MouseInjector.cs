@@ -150,11 +150,22 @@ internal static class MouseInjector
     }
 
     /// <summary>
+    /// 把光标移到虚拟桌面中心并**等它停稳**，返回停稳后的位置。
+    /// ★ 所有"量位移"的代码都必须用它取基准 —— 归位后不等停稳就读，
+    ///   拿到的是上一个位置（实测把向右的移动读成 −1234 px）。
+    /// </summary>
+    public static (int X, int Y) CenterAndSettle()
+    {
+        CenterCursor();
+        return WaitCursorSettled();
+    }
+
+    /// <summary>
     /// 等光标**真正停稳**再读位置。
     /// 为什么必须等：绝对定位之后系统还要做一轮指针处理，紧接着读会拿到过渡中的位置。
     /// 第一版探针就是因此把 1 px 的用例读成 5 px —— 那是**测量污染**，不是真加速。
     /// </summary>
-    private static (int X, int Y) WaitCursorSettled(int maxMs = 400)
+    public static (int X, int Y) WaitCursorSettled(int maxMs = 400)
     {
         var last = CursorPos();
         var sw = System.Diagnostics.Stopwatch.StartNew();

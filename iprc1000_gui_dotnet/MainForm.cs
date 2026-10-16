@@ -128,6 +128,20 @@ internal sealed class MainForm : Form
         _filter.OnButton += (bid, pressed) => _backend.NoteButton(bid, pressed);
         _backend.AttachFilter(_filter);
 
+        // ★ 模式指示必须显眼：托盘提示 + 气泡。否则用户按到方块键切了模式却不知道，
+        //   会以为遥控器坏了（方向键不动了 / 反过来光标乱跑）。
+        _backend.MouseModeChanged += (msg, mouse) =>
+        {
+            try
+            {
+                var t = $"{Env.AppName} · {(mouse ? "鼠标模式" : "键盘模式")}";
+                _tray.Text = t.Length > 63 ? t[..63] : t;      // NotifyIcon.Text 上限 63 字符
+                _tray.ShowBalloonTip(2500, Env.AppName, msg,
+                    mouse ? ToolTipIcon.Info : ToolTipIcon.None);
+            }
+            catch { }
+        };
+
         AttachWebView();
         StartupMark("窗口构造完成（托盘/钩子对象/WebView2 控件已建）");
 
@@ -569,6 +583,9 @@ internal sealed class MainForm : Form
             "setKeySource" => _backend.SetKeySource(Arg(0)),
             "runSetup" => _backend.RunSetup(),
             "setDeviceDriver" => _backend.SetDeviceDriver(Arg(0)),
+            // 鼠标模式（2026-10-16）：方块键切模式；参数与状态见 Backend.Mouse
+            "setMouseMode" => _backend.SetMouseMode(Arg(0)),
+            "setMouseConfig" => _backend.SetMouseConfig(Arg(0)),
             "setAutoStart" => _backend.SetAutoStart(Arg(0)),
             "clearKeyLog" => _backend.ClearKeyLog(),
             "beginBind" => _backend.BeginBind(Arg(0)),

@@ -75,6 +75,16 @@ internal static class Program
             return;
         }
 
+        // 鼠标引擎自检：--mouse-engine-test [输出文件]
+        //   不需要遥控器，直接驱动引擎并量真实光标：增速是否生效、松开是否停住、
+        //   确认键是否真的按下系统左键、斜向是否归一化。
+        if (args.Length > 0 && args[0] == "--mouse-engine-test")
+        {
+            var pe = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "mouse_engine_test.txt");
+            File.WriteAllText(pe, MouseEngine.SelfTest());
+            return;
+        }
+
         // 注入验证：--inject-verify <VK十六进制> <输出文件>
         if (args.Length > 1 && args[0] == "--inject-verify")
         {

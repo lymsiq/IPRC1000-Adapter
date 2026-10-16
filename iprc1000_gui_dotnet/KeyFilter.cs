@@ -234,6 +234,13 @@ internal sealed class KeyFilter : IDisposable
     /// 是否注入映射快捷键。**变化必须留痕** —— 注入关掉时按下的键不会被登记进按住集合，
     /// 看门狗也就看不到（历史隐患来源）；以前这里是静默属性，事后完全查不出来。
     /// </summary>
+    /// <summary>
+    /// 鼠标模式路由钩子：`(buttonId, pressed) => 是否已消费`。
+    /// 由 Backend 接到 <see cref="MouseEngine.HandleButton"/> 上。
+    /// 用委托而不是直接引用 MouseEngine，是为了让 KeyFilter 不必知道鼠标这回事。
+    /// </summary>
+    public Func<string, bool, bool>? MouseModeRouter { get; set; }
+
     private volatile bool _injectEnabled = true;
     public bool InjectEnabled
     {
@@ -657,6 +664,24 @@ internal sealed class KeyFilter : IDisposable
     /// </summary>
     public void ApplyButton(string bid, bool pressed, string src = "rawinput")
     {        try { OnButton?.Invoke(bid, pressed); } catch { }
+
+        // ★ 鼠标模式：方向键 / 确认 / info 交给 MouseEngine 接管（它有自己的线程按 tick 下发位移）。
+        //   必须在键盘映射**之前**分流，而且**不能**登记进 _heldButtons ——
+        //   那会把鼠标动作塞进键盘的「整份报告」，反而发出真的按键。
+        //   返回 true = 已消费，本函数直接结束。
+        if (MouseModeRouter is { } router)
+        {
+            try
+            {
+                if (router(bid, pressed))
+                {
+                    EtwKeySource.AppendLog(
+                        $"APPLY  {bid}  {(pressed ? "DOWN" : "UP")}  来源={src}  映射=（鼠标模式）");
+                    return;
+                }
+            }
+            catch { }
+        }
 
         // ★★ 关键修复：注入必须用**当前配置组**（Keymaps），不能用 Keys.Load()。
         //
