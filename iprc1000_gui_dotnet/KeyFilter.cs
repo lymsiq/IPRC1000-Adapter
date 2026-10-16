@@ -277,6 +277,14 @@ internal sealed class KeyFilter : IDisposable
     /// 不预热的话这段音频会被丢掉，用户看到的就是"按住后立刻说的第一个字识别不出来"。
     /// </summary>
     public static event Action? VoiceKeyDown;
+
+    /// <summary>
+    /// 按下绑定了动作值「切换配置组」的按键时触发（方块键的出厂值）。
+    /// 由 <c>Backend</c> 接上：切到下一组 + 同步鼠标模式。
+    /// 放在事件里而不是直接调 Keymaps 的原因：切组要顺带更新托盘提示与鼠标模式，
+    /// 那些状态都在 Backend 手上。
+    /// </summary>
+    public static event Action? SwitchGroupRequested;
     /// <summary>最近一次失败原因（Raw Input 注册 / 装钩子）</summary>
     public string? LastError { get; private set; }
 
@@ -683,17 +691,28 @@ internal sealed class KeyFilter : IDisposable
             catch { }
         }
 
-        // ★ 映射成**鼠标动作**的按键（左键 / 右键 / 滚轮上 / 滚轮下）。
-        //   走 SendInput（MouseInjector），**绝不登记进 _heldButtons** —— 那会把它塞进键盘的
-        //   「整份报告」，反而发出一个真的键盘按键。与上面鼠标模式的方向键分流是同一套做法。
-        //   放在这里（鼠标模式分流之后、键盘映射之前）的原因：鼠标模式里的方向键/确认/info
+        // ★ 映射成**动作值**的按键（鼠标左键/右键/滚轮上/滚轮下、切换配置组）。
+        //   鼠标类走 SendInput（MouseInjector）；切组走事件回调。
+        //   **绝不登记进 _heldButtons** —— 那会把它们塞进键盘的「整份报告」，
+        //   反而发出一个真的键盘按键。与上面鼠标模式的方向键分流是同一套做法。
+        //   放在这里（鼠标模式分流之后、键盘映射之前）的原因：鼠标模式里的方向键
         //   优先级更高，其余按键才轮到映射表。
         {
             var mv = Keymaps.Get(bid);
-            if (MouseAct.IsSingleMouseAction(mv))
+            if (KeyAct.IsSingleAction(mv))
             {
                 var dv = mv[0];
-                var name = MouseAct.NameOf(dv) ?? "?";
+                var name = KeyAct.NameOf(dv) ?? "?";
+
+                // 「切换配置组」：按下即生效（等抬起 = 丢一次 UP 这个键就失灵）
+                if (dv == KeyAct.SwitchGroup)
+                {
+                    EtwKeySource.AppendLog(
+                        $"APPLY  {bid}  {(pressed ? "DOWN" : "UP")}  来源={src}  映射={name}（动作）");
+                    if (pressed) { try { SwitchGroupRequested?.Invoke(); } catch { } }
+                    return;
+                }
+
                 EtwKeySource.AppendLog(
                     $"APPLY  {bid}  {(pressed ? "DOWN" : "UP")}  来源={src}  映射={name}（鼠标动作）");
                 if (pressed && !InjectEnabled)
@@ -701,10 +720,10 @@ internal sealed class KeyFilter : IDisposable
                     EtwKeySource.AppendLog($"INJ  {bid} 未注入：InjectEnabled=false（映射={name}）");
                     return;
                 }
-                // 滚轮的抬起什么都不做（只在按下时滚一格，见 MouseAct 的注释）
-                if (pressed || dv == MouseAct.Left || dv == MouseAct.Right)
+                // 滚轮的抬起什么都不做（只在按下时滚一格，见 KeyAct 的注释）
+                if (pressed || dv == KeyAct.Left || dv == KeyAct.Right)
                 {
-                    if (!MouseAct.Apply(dv, pressed))
+                    if (!KeyAct.Apply(dv, pressed))
                         EtwKeySource.AppendLog(
                             $"INJ  {bid} 鼠标动作未生效：{MouseInjector.LastError ?? "SendInput 被拒（前台窗口权限更高？）"}");
                 }

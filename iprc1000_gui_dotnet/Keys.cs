@@ -89,13 +89,13 @@ internal static class Keys
         return $"0x{vk:X2}";
     }
 
-    /// <summary>把映射值渲染成人能读的文字。鼠标动作走 <see cref="MouseAct"/> 的中文名。</summary>
+    /// <summary>把映射值渲染成人能读的文字。鼠标动作走 <see cref="KeyAct"/> 的中文名。</summary>
     public static string Format(int[] vks)
     {
         var mods = vks.Where(v => Mods.Contains(v)).Select(VkLabel);
         // ★ 鼠标动作不是虚拟键码，绝不能落到 VkLabel（那会显示成 0xFFFFFFFF）
         var rest = vks.Where(v => !Mods.Contains(v))
-                      .Select(v => MouseAct.NameOf(v) ?? VkLabel(v));
+                      .Select(v => KeyAct.NameOf(v) ?? VkLabel(v));
         return string.Join("+", mods.Concat(rest));
     }
 
@@ -117,18 +117,18 @@ internal static class Keys
             else
             {
                 // ★ 鼠标动作有两种写法：中文名（导出/手改 JSON 友好）或负数哨兵（界面保存用）
-                var m = MouseAct.FromName(p);
+                var m = KeyAct.FromName(p);
                 if (m != null) { outp.Add(m.Value); continue; }
                 if (!int.TryParse(p, out v))
                 {
                     // 负数只认那几个哨兵值 —— 其余的必须**明确报错**，
                     // 不能放进映射表里等注入时才炸（那会变成一个静默的怪故障）
-                    if (p.StartsWith('-') && int.TryParse(p, out var neg) && !MouseAct.Is(neg))
+                    if (p.StartsWith('-') && int.TryParse(p, out var neg) && !KeyAct.Is(neg))
                         throw new ArgumentException($"不认识的鼠标动作：{p}（只有 鼠标左键/右键/滚轮上/滚轮下）");
                     throw new ArgumentException($"无法解析：{p}");
                 }
             }
-            if (MouseAct.Is(v)) { outp.Add(v); continue; }
+            if (KeyAct.Is(v)) { outp.Add(v); continue; }
             if (v < 0 || v > 0xFE) throw new ArgumentException($"虚拟键码越界：{p}");
             outp.Add(v);
         }
@@ -201,7 +201,7 @@ internal static class Keys
                 case 0xA5: keys.Add("RAlt"); continue;                   // 右 Alt（豆包说话）单独显示
             }
             // ★ 鼠标动作（负数哨兵）→ 中文名；不认的话会显示成 0xFFFFFFFF
-            if (MouseAct.NameOf(vk) is { } mn) { keys.Add(mn); continue; }
+            if (KeyAct.NameOf(vk) is { } mn) { keys.Add(mn); continue; }
             keys.Add(VkLabel(vk));
         }
         return string.Join("+", mods.Concat(keys));   // 例：Ctrl+Shift+Q

@@ -81,7 +81,7 @@ internal static class Program
         if (args.Length > 0 && args[0] == "--mouseact-test")
         {
             var pm = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "mouseact_test.txt");
-            File.WriteAllText(pm, MouseAct.SelfTest());
+            File.WriteAllText(pm, KeyAct.SelfTest());
             return;
         }
 

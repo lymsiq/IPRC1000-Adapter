@@ -158,6 +158,8 @@ SRC_FORBIDDEN = [
     ("鼠标移动不得走绝对定位", "iprc1000_gui_dotnet/MouseEngine.cs", "MoveAbsolute"),
     # 方块键那行右侧以前**写死**成"切换配置组"，与设置里的实际值打架（2026-10-16 用户指出）
     ("方块键那行不得再写死行为", "iprc1000_gui_dotnet/ui/app.js", "it.id === 'square' ? '切换配置组'"),
+    # 鼠标模式不再有独立开关（模式 = 活动组），旧配置项不得复活
+    ("鼠标模式不得再有独立开关", "iprc1000_gui_dotnet/MouseEngine.cs", "SquareKeyAction"),
     # ★ 解析器不得再写死音频分片长度（见上）—— 这两行是老 bug 的指纹
     ("音频解析不得写死首片长度", "tools/etw_consumer/src/main.rs", "dlen == 344"),
     ("音频解析不得写死续片长度", "tools/etw_consumer/src/main.rs", "dlen == 313"),
@@ -206,10 +208,18 @@ SRC_REQUIRED = [
     ("预览分支也渲染鼠标页", "iprc1000_gui_dotnet/ui/app.js", "renderEnv(demo); renderMouse(demo)"),
     ("空 note 不显示", "iprc1000_gui_dotnet/ui/style.css", ".note:empty"),
     # ★ 方块键的作用：两个互斥选项（切配置组 / 切键鼠模式）
-    ("方块键作用可配置", "iprc1000_gui_dotnet/MouseEngine.cs", "SquareKeyAction"),
-    ("方块键两选项互斥单选", "iprc1000_gui_dotnet/ui/index.html", "squareKeySeg"),
-    ("方块键分派在 Backend", "iprc1000_gui_dotnet/Backend.cs", "SquareKeySwitchesMode"),
-    ("方块键仍可切配置组", "iprc1000_gui_dotnet/Backend.cs", "Keymaps.NextGroup()"),
+    # ★★ 鼠标模式变成一个配置组（v1.2.4）：模式与配置组合并成**一个状态来源**，
+    #    "方块键的作用"那个二选一设置随之取消，方块键回归普通可绑定键。
+    ("鼠标模式是一个配置组", "iprc1000_gui_dotnet/Keymaps.cs", "kind=\"mouse\""),
+    ("模式的唯一判据是活动组", "iprc1000_gui_dotnet/Keymaps.cs", "public static bool MouseGroupActive"),
+    ("切组会同步鼠标模式", "iprc1000_gui_dotnet/Backend.cs", "SyncMouseWithGroup"),
+    ("方块键是普通可绑定键", "iprc1000_gui_dotnet/Keymaps.cs", "KeyAct.SwitchGroup"),
+    ("鼠标组默认清空方向键（交给引擎）", "iprc1000_gui_dotnet/Keymaps.cs", "交给引擎，不注入按键"),
+    ("鼠标组不许删除", "iprc1000_gui_dotnet/Keymaps.cs", "是鼠标模式的入口，不能删除"),
+    ("旧配置会迁移出鼠标组", "iprc1000_gui_dotnet/Keymaps.cs", "if (s.Ver < 10)"),
+    ("配置组状态带 kind", "iprc1000_gui_dotnet/Backend.cs", "[\"kind\"] = g.Kind"),
+    ("界面认得出鼠标组的方向键", "iprc1000_gui_dotnet/ui/app.js", "鼠标移动"),
+    ("弹窗能选「切换配置组」", "iprc1000_gui_dotnet/ui/app.js", "['切换配置组',-5]"),
     # ★ 移动必须从光标当前位置起算（2026-10-16 用户指正后重做）
     ("被动标定用真实使用学增益", "iprc1000_gui_dotnet/MouseEngine.cs", "CalibrateFromUse"),
     ("开模式不再触发主动校准", "iprc1000_gui_dotnet/MouseEngine.cs", "这里**不做**主动校准"),

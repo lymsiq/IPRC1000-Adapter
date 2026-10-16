@@ -36,7 +36,14 @@ internal static class Keymaps
         /// 该组对应的**出厂映射**，决定「恢复默认」按钮恢复成什么：
         ///   "plain"     → <see cref="Defaults.Plain"/>     （Windows 日常）
         ///   "workbuddy" → <see cref="Defaults.WorkBuddy"/> （WorkBuddy 快捷键）
+        ///   "mouse"     → <see cref="Defaults.Mouse"/>     （★ 鼠标模式：**这就是"模式"本身**）
         ///   "custom"    → 同 plain（用户自己复制/新建的组，没有专属出厂映射）
+        ///
+        /// ★★ `"mouse"` 是 v1.2.4 引入的关键一项：**鼠标模式不再是一个独立的开关，
+        ///    而是"活动配置组是不是鼠标组"**。理由：模式与配置组各存一份状态时，
+        ///    会出现"在鼠标模式组里，但模式还是键盘"这类谁都说不清的组合。
+        ///    现在只有**一个**状态来源（活动组的 Kind），方块键切过去就自动开、
+        ///    切走就自动关。
         ///
         /// 没有这个字段之前，`ResetCurrent()` 一律恢复成 Plain() ——
         /// 于是用户在 WorkBuddy 组点「恢复默认」会拿到 Windows 日常映射，明显不合预期。
@@ -49,8 +56,10 @@ internal static class Keymaps
     /// <summary>
     /// 存档版本。每加一段迁移就 +1。
     ///   9 = **出厂映射定稿**：Defaults 已按用户逐键实测确认后的最终键位冻结。
+///  10 = **鼠标模式变成一个配置组**（Kind="mouse"）；方块键从"硬编码的特殊键"
+///       改为**普通可绑定键**，出厂值 = 动作值 `切换配置组`（`KeyAct.SwitchGroup`）。
     /// </summary>
-    private const int Ver_ = 9;
+    private const int Ver_ = 10;
 
     private sealed class Store
     {
@@ -166,6 +175,28 @@ internal static class Keymaps
                         s.Ver = 9;
                         Save(s);
                     }
+                    if (s.Ver < 10)
+                    {
+                        // Ver 10：鼠标模式变成一个配置组。
+                        //  ① 补一个 Kind="mouse" 的「鼠标模式」组（放在第一个普通组之后，
+                        //     让方块键"切下一组"的顺序是 默认 → 鼠标模式 → WorkBuddy）；
+                        //  ② 方块键从"固定用于切组、不注入"改为**普通可绑定键**，
+                        //     出厂值 = 动作值「切换配置组」。
+                        //     ★ 只在该键**当前为空**时才写 —— 用户若已手动绑过别的，不覆盖。
+                        if (!s.Groups.Any(g => g.Kind == "mouse"))
+                        {
+                            var at = s.Groups.FindIndex(g => g.Kind == "plain");
+                            s.Groups.Insert(at < 0 ? s.Groups.Count : at + 1,
+                                new Group { Name = MouseGroupName, Kind = "mouse", Map = Defaults.Mouse() });
+                        }
+                        foreach (var g in s.Groups)
+                        {
+                            if (!g.Map.TryGetValue("square", out var sq) || sq.Length == 0)
+                                g.Map["square"] = new[] { KeyAct.SwitchGroup };
+                        }
+                        s.Ver = 10;
+                        Save(s);
+                    }
                     return s;
                 }
             }
@@ -180,6 +211,7 @@ internal static class Keymaps
             Groups = new List<Group>
             {
                 new() { Name = "默认配置组 1", Kind = "plain", Map = Defaults.Plain() },
+                new() { Name = MouseGroupName, Kind = "mouse", Map = Defaults.Mouse() },
                 new() { Name = "WorkBuddy 快捷键", Kind = "workbuddy", Map = Defaults.WorkBuddy() },
             },
         };
@@ -217,6 +249,15 @@ internal static class Keymaps
     }
 
     // ─────────── 查询 ───────────
+    /// <summary>「鼠标模式」组的固定名字（它是功能的入口，改名会让用户找不到）</summary>
+    public const string MouseGroupName = "鼠标模式";
+
+    /// <summary>活动组是不是"鼠标组" —— **鼠标模式的唯一判据**</summary>
+    public static bool MouseGroupActive => Current.Kind == "mouse";
+
+    /// <summary>鼠标组的下标（没有则 -1）</summary>
+    public static int MouseGroupIndex => _s.Groups.FindIndex(g => g.Kind == "mouse");
+
     public static int ActiveIndex => _s.Active;
     public static IReadOnlyList<Group> Groups => _s.Groups;
     public static Group Current => _s.Groups[_s.Active];
@@ -280,6 +321,10 @@ internal static class Keymaps
     {
         if (_s.Groups.Count <= 1) return (false, "至少要保留一组配置。");
         if (idx < 0 || idx >= _s.Groups.Count) return (false, "配置组不存在。");
+        // ★ 鼠标组是"鼠标模式"这个功能的入口 —— 删了它就再也进不去鼠标模式了。
+        //   与其留个死状态，不如直接挡住（要恢复用「恢复默认」）。
+        if (_s.Groups[idx].Kind == "mouse")
+            return (false, $"「{MouseGroupName}」是鼠标模式的入口，不能删除。");
         _s.Groups.RemoveAt(idx);
         if (_s.Active >= _s.Groups.Count) _s.Active = _s.Groups.Count - 1;
         Save();
@@ -288,7 +333,9 @@ internal static class Keymaps
 
     /// <summary>某一组对应的出厂映射（由 <see cref="Group.Kind"/> 决定）</summary>
     public static Dictionary<string, int[]> FactoryOf(Group g)
-        => g.Kind == "workbuddy" ? Defaults.WorkBuddy() : Defaults.Plain();
+        => g.Kind == "workbuddy" ? Defaults.WorkBuddy()
+         : g.Kind == "mouse" ? Defaults.Mouse()
+         : Defaults.Plain();
 
     /// <summary>指定组的出厂映射（自检用）</summary>
     public static Dictionary<string, int[]> FactoryOf(int idx)
@@ -376,8 +423,27 @@ internal static class Defaults
         ["volume_down"] = new[] { 0xAE },              // 系统音量 -
         ["mute"] = new[] { 0xAD },                     // 系统静音
         ["last"] = new[] { 0x12, 0x09 },               // Alt+Tab 切换窗口
-        ["square"] = Array.Empty<int>(),               // 固定用于切换配置组，不注入
+        // ★ 方块键不再是"硬编码的特殊键"：它是一个**普通可绑定键**，
+        //   出厂值 = 动作值「切换配置组」（负数哨兵，见 KeyAct）。用户可以改绑成任何键。
+        ["square"] = new[] { KeyAct.SwitchGroup },
     };
+
+    /// <summary>
+    /// **鼠标模式组**（Kind = "mouse"）—— 这一组**就是鼠标模式本身**。
+    ///
+    /// 默认映射 = <see cref="Plain"/> 原样，**只把四个方向键清空**：
+    /// 方向键在鼠标组里由 <see cref="MouseEngine"/> 接管（按住加速移动），
+    /// 走不了普通映射；其余按键（含确认、info、语音…）**全部沿用默认组**，
+    /// 用户可以随时在弹窗里改成任何东西（比如把确认改成「鼠标左键」就能恢复
+    /// "按住方向 + 按住确认 = 拖拽"）。
+    /// </summary>
+    public static Dictionary<string, int[]> Mouse()
+    {
+        var m = Plain();
+        foreach (var d in new[] { "up", "down", "left", "right" })
+            m[d] = Array.Empty<int>();       // 交给引擎，不注入按键
+        return m;
+    }
 
     /// <summary>
     /// 第二组：**WorkBuddy 快捷键**（照 WorkBuddy 的快捷键表映射；mac 的 Cmd 在 Windows 上对应 Ctrl）。
@@ -410,6 +476,6 @@ internal static class Defaults
         ["volume_down"]  = new[] { 0xAE },               // 系统音量 -
         ["mute"]         = new[] { 0xAD },               // 系统静音
         ["last"]         = new[] { 0x10, 0x11, 0x57 },   // Shift+Ctrl+W  唤起快速输入窗口
-        ["square"]       = Array.Empty<int>(),           // 固定用于切换配置组
+        ["square"]       = new[] { KeyAct.SwitchGroup },  // 动作值：切换配置组
     };
 }

@@ -1,7 +1,8 @@
 namespace Iprc1000Adapter;
 
 /// <summary>
-/// **映射到鼠标动作**：让任意遥控器按键可以当鼠标用（左键 / 右键 / 滚轮上 / 滚轮下）。
+/// **动作值**：让任意按键直接执行一个"非键盘"动作 ——
+/// 鼠标左键 / 右键 / 滚轮上 / 滚轮下 / 切换配置组。
 ///
 /// ## 怎么存
 ///
@@ -14,6 +15,7 @@ namespace Iprc1000Adapter;
 /// | `-2` | 鼠标右键 |
 /// | `-3` | 滚轮上 |
 /// | `-4` | 滚轮下 |
+/// | `-5` | 切换配置组（方块键的出厂值）|
 ///
 /// **为什么用负数**：虚拟键码（VK）的取值范围是 `0x00..0xFF`，负数**永远不可能**是一个
 /// 真实按键。这样万一哪天漏了一处分派，它会立刻暴露成一个明确的越界值，
@@ -26,24 +28,32 @@ namespace Iprc1000Adapter;
 /// - **滚轮是"按下滚一格"**：按住不重复滚 —— 重复滚交给鼠标模式的滚轮/斜坡那套逻辑，
 ///   映射里只做一次，免得"按住不放"时滚到停不下来。
 ///
-/// ⚠ 与鼠标模式（<see cref="MouseEngine"/>）互不冲突：那边管的是方向键/确认/info，
-/// 这边管的是**其余按键**在映射表里被配成鼠标动作的情况；两边都走
-/// <see cref="MouseInjector"/>（SendInput），不经过虚拟 HID。
+/// ⚠ 与鼠标模式（<see cref="MouseEngine"/>）互不冲突：那边管的是**方向键**（移动，
+/// 由引擎线程按住加速），这边管的是**其余按键**在映射表里被配成动作的情况。
+/// 鼠标类动作走 <see cref="MouseInjector"/>（SendInput），不经过虚拟 HID。
 /// </summary>
-internal static class MouseAct
+internal static class KeyAct
 {
     public const int Left = -1;
     public const int Right = -2;
     public const int WheelUp = -3;
     public const int WheelDown = -4;
+    /// <summary>切换配置组（方块键的出厂值）。★ v1.2.4 起鼠标模式=一个配置组，
+    /// 于是"切配置组"成了普通可绑定动作，方块键不再硬编码。</summary>
+    public const int SwitchGroup = -5;
 
     /// <summary>一格滚轮（`WHEEL_DELTA`）</summary>
     public const int WheelStep = 120;
 
-    public static readonly int[] All = { Left, Right, WheelUp, WheelDown };
+    public static readonly int[] All = { Left, Right, WheelUp, WheelDown, SwitchGroup };
+    /// <summary>只属于"鼠标"的那几个（滚轮/左右键）</summary>
+    public static readonly int[] MouseOnes = { Left, Right, WheelUp, WheelDown };
 
-    /// <summary>是不是鼠标动作（负数哨兵只在 -1..-4 这一小段里算数）</summary>
-    public static bool Is(int vk) => vk >= WheelDown && vk <= Left;
+    /// <summary>是不是动作值（负数哨兵只在 -5..-1 这一小段里算数）</summary>
+    public static bool Is(int vk) => vk >= SwitchGroup && vk <= Left;
+
+    /// <summary>是不是鼠标类动作</summary>
+    public static bool IsMouse(int vk) => vk >= WheelDown && vk <= Left;
 
     /// <summary>中文名（界面与日志用）；不是鼠标动作返回 null</summary>
     public static string? NameOf(int vk) => vk switch
@@ -52,6 +62,7 @@ internal static class MouseAct
         Right => "鼠标右键",
         WheelUp => "滚轮上",
         WheelDown => "滚轮下",
+        SwitchGroup => "切换配置组",
         _ => null,
     };
 
@@ -63,6 +74,7 @@ internal static class MouseAct
         "鼠标右键" or "右键" or "mouseright" or "right" => Right,
         "滚轮上" or "滚轮向上" or "wheelup" => WheelUp,
         "滚轮下" or "滚轮向下" or "wheeldown" => WheelDown,
+        "切换配置组" or "nextgroup" or "group" => SwitchGroup,
         _ => null,
     };
 
@@ -78,14 +90,16 @@ internal static class MouseAct
         Right => MouseInjector.Right(down),
         WheelUp => down && MouseInjector.Wheel(WheelStep),
         WheelDown => down && MouseInjector.Wheel(-WheelStep),
+        // 切配置组**只在按下时**做一次（等抬起就等于"丢一次 UP 这个键就失灵"）
+        SwitchGroup => true,
         _ => false,
     };
 
     /// <summary>
-    /// 映射值是不是"单个鼠标动作" —— 鼠标动作**不能和其它键组合**
-    /// （Ctrl+鼠标左键 这种在遥控器上没法表达，也没有实际用例）。
+    /// 映射值是不是"单个动作" —— 动作**不能和其它键组合**
+    /// （Ctrl+鼠标左键 / Ctrl+切配置组 在遥控器上都没法表达，也没有实际用例）。
     /// </summary>
-    public static bool IsSingleMouseAction(int[] vks) => vks.Length == 1 && Is(vks[0]);
+    public static bool IsSingleAction(int[] vks) => vks.Length == 1 && Is(vks[0]);
 
     /// <summary>
     /// 映射层自检（`--mouseact-test`）：**纯逻辑，不注入任何东西**。
@@ -97,7 +111,7 @@ internal static class MouseAct
     public static string SelfTest()
     {
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("IPRC1000 鼠标动作映射自检（纯逻辑，不注入）");
+        sb.AppendLine("IPRC1000 动作值映射自检（纯逻辑，不注入）");
         sb.AppendLine(new string('=', 58));
         var ok = true;
         void Check(bool pass, string what, string detail)
@@ -109,7 +123,7 @@ internal static class MouseAct
 
         // ① 哨兵值都不在 VK 范围里
         var allNeg = All.All(v => v < 0);
-        Check(allNeg, "四个哨兵都是负数（VK 范围 0x00..0xFF 之外）",
+        Check(allNeg, "五个哨兵都是负数（VK 范围 0x00..0xFF 之外）",
               "值 = " + string.Join(" ", All));
 
         // ② 名字 ↔ 哨兵 互查
@@ -118,7 +132,7 @@ internal static class MouseAct
               string.Join(" · ", All.Select(v => $"{NameOf(v)}={v}")));
 
         // ③ Parse → Format 往返（这是"存得进、看得懂"的关键）
-        var cases = new[] { "鼠标左键", "鼠标右键", "滚轮上", "滚轮下" };
+        var cases = new[] { "鼠标左键", "鼠标右键", "滚轮上", "滚轮下", "切换配置组" };
         var bad = cases.Where(c => Keys.Format(Keys.Parse(c)) != c).ToArray();
         Check(bad.Length == 0, "Keys.Parse → Keys.Format 往返（导出/导入与手改 JSON 都靠它）",
               bad.Length == 0
@@ -133,19 +147,19 @@ internal static class MouseAct
 
         // ⑤ 越界负数必须被拒（不能让它变成某个"真实 VK"）
         var rejected = false;
-        foreach (var badVal in new[] { "-5", "-99", "-0x1" })
+        foreach (var badVal in new[] { "-6", "-99", "-0x1", "0xEE" })
         {
             try { Keys.Parse(badVal); } catch { rejected = true; }
             if (!rejected) { sb.AppendLine($"        ★ {badVal} 竟然被接受了"); break; }
             rejected = true;
         }
         Check(rejected, "越界负数被 Parse 拒绝（不会漏成真实 VK）",
-              "试过 -5 / -99 / -0x1，全部抛异常");
+              "试过 -6 / -99 / -0x1，全部抛异常（0xEE 是合法 VK，不受影响）");
 
         // ⑥ 组合语义：鼠标动作只能单独出现
-        var combo = IsSingleMouseAction(new[] { Left }) && !IsSingleMouseAction(new[] { 0x11, Left })
-                    && !IsSingleMouseAction(new[] { 0x11 });
-        Check(combo, "鼠标动作只认「单独一个」（Ctrl+鼠标左键 这种无法表达）",
+        var combo = IsSingleAction(new[] { Left }) && !IsSingleAction(new[] { 0x11, Left })
+                    && !IsSingleAction(new[] { 0x11 });
+        Check(combo, "动作只认「单独一个」（Ctrl+鼠标左键 这种无法表达）",
               "[-1]=单独✓ · [Ctrl,-1]=组合✗ · [Ctrl]=非鼠标✗");
 
         // ⑦ 普通键盘映射不受影响

@@ -22,12 +22,14 @@ const KB_EXTRA = [['播放/暂停',0xB3],['上一首',0xB1],['下一首',0xB0],[
                   ['↑',0x26],['↓',0x28],['←',0x25],['→',0x27],['PgUp',0x21],['PgDn',0x22]];
 const VK_SYM = {0x11:'Ctrl',0x12:'Alt',0x10:'Shift',0x5B:'Win'};
 
-/* ── 鼠标动作：映射值用**负数哨兵**（与 C# 侧 MouseAct.cs 一一对应）──
+/* ── 动作值：映射值用**负数哨兵**（与 C# 侧 KeyAct.cs 一一对应）──
    为什么用负数：虚拟键码（VK）是 0x00..0xFF，负数**永远不可能**是真实按键，
-   万一哪里漏了分派，它会立刻变成明确的越界值，而不是悄悄注入一个错的键盘键。 */
-const MOUSE_ACTS = [['鼠标左键',-1],['鼠标右键',-2],['滚轮上',-3],['滚轮下',-4]];
-const MOUSE_NAME = Object.fromEntries(MOUSE_ACTS.map(([n,v]) => [v, n]));
-const isMouseAct = (v) => Number.isInteger(v) && v >= -4 && v <= -1;
+   万一哪里漏了分派，它会立刻变成明确的越界值，而不是悄悄注入一个错的键盘键。
+   ★ 「切换配置组」(-5) 是**方块键的出厂值** —— v1.2.4 起方块键不再是硬编码的特殊键，
+     它就是个普通键，所以这里和鼠标动作放在同一行里供选择。 */
+const KEY_ACTS = [['切换配置组',-5],['鼠标左键',-1],['鼠标右键',-2],['滚轮上',-3],['滚轮下',-4]];
+const ACT_NAME = Object.fromEntries(KEY_ACTS.map(([n,v]) => [v, n]));
+const isKeyAct = (v) => Number.isInteger(v) && v >= -5 && v <= -1;
 let kbMods = new Set();    // 已选修饰键
 let kbKey = null;          // 已选主键 vk
 let kbKeyLabel = '';       // 主键显示名
@@ -208,15 +210,15 @@ function paintRemoteSel() {
 // 一行：缩略图（sprite 裁自 remote.png）+ 名称 + 组合键 + 箭头
 /// 列表右侧那行"这个键当前是什么动作"。
 ///
-/// ★ 方块键必须显示**实际生效**的那一个：它的"绑定"不是键盘映射，而是
-/// 「切配置组 / 切键鼠模式」（在「按键映射」页配置组那一行里选）。
-/// 这里以前写死成"切换配置组"，于是用户把设置改成"切键鼠模式"之后，
-/// 列表里仍写着"切换配置组" —— 同一份数据在两个页面上打架。
+/// ★ v1.2.4 起方块键就是**普通可绑定键**（出厂值 = 动作值「切换配置组」），
+/// 所以这里不再需要对它特殊照顾 —— 后端给的 `sym` 已经是真实映射。
+/// 唯一需要特殊说明的是**鼠标模式组里的四个方向键**：它们由引擎线程接管
+/// （按住加速移动），走不了普通映射，显示成"不执行"会让人以为坏了。
+const MOUSE_DIRS = ['up', 'down', 'left', 'right'];
 function bindSym(it) {
-  if (it.id === 'square') {
-    const act = (((state || {}).mouse) || {}).squareKeyAction || 'group';
-    return act === 'group' ? '切换配置组' : '切键鼠模式';
-  }
+  const g = ((state || {}).groups || {}).items || [];
+  const cur = g[((state || {}).groups || {}).active || 0] || {};
+  if (cur.kind === 'mouse' && MOUSE_DIRS.includes(it.id)) return '鼠标移动';
   return it.sym || '不执行';
 }
 
@@ -263,7 +265,6 @@ function renderKeys(s) {
     `<span class="pill">点某一行可在下方改快捷键</span>`;
 
   renderGroups(s);
-  renderSquareKey(s);
   layoutRemote(items, (items[0] || {}).img);
 
   // 搜索过滤：按键名 / 显示标注 / HID 值 / 当前映射动作
@@ -289,25 +290,6 @@ function renderKeys(s) {
   items.forEach(it => { if (!seen.has(it.id)) emit(it); });   // 兜底：未归类的键
 }
 
-/* 方块键的两个互斥选项（切配置组 / 切键鼠模式）。
-   ★ 控件在「按键映射」页的配置组标签那一行，所以渲染也放在这里 —— 与控件同页，
-   免得出现"页面看着没刷新"的假象。 */
-function renderSquareKey(s) {
-  const sqMode = ((((s || state || {}).mouse) || {}).squareKeyAction || 'group') === 'mode';
-  for (const el of $$('#squareKeySeg input')) {
-    const sel = (el.value === 'mode') === sqMode;
-    el.checked = sel;
-    const lab = el.closest('label');
-    if (lab) lab.classList.toggle('on', sel);
-  }
-  const hint = $('#mouseSquareHint');
-  if (hint) {
-    hint.textContent = sqMode
-      ? '按方块键 = 切键鼠模式（按下即生效）。想切配置组就点左边的组标签。'
-      : '按方块键 = 循环切换配置组。想用方块键切键鼠模式，就选上面那个「切键鼠模式」。';
-  }
-}
-
 // ── 配置组 Tab ──
 function renderGroups(s) {
   const box = $('#gTabs'); if (!box) return;
@@ -331,8 +313,8 @@ function renderGroups(s) {
 function kbPreviewText() {
   const parts = [...kbMods].map(v => VK_SYM[v] || String(v));
   if (kbKey !== null) {
-    parts.push(isMouseAct(kbKey)
-      ? (MOUSE_NAME[kbKey] || '鼠标动作')                                   // 负数不能当 VK 打印
+    parts.push(isKeyAct(kbKey)
+      ? (ACT_NAME[kbKey] || '动作值')                                       // 负数不能当 VK 打印
       : (kbKeyLabel || ('0x' + kbKey.toString(16).toUpperCase())));
   }
   return parts.length ? parts.join(' + ') : '';
@@ -345,7 +327,7 @@ function paintKb() {
   document.querySelectorAll('#kbMain .kb-key, #kbExtra .kb-key').forEach((e) => {
     e.classList.toggle('on', kbKey !== null && Number(e.dataset.vk) === kbKey && !e.dataset.mod);
   });
-  // 鼠标动作单独高亮：键盘那两行在选中鼠标动作时必须全部熄灭，否则会出现两个"选中"
+  // 动作单独高亮：键盘那两行在选中动作时必须全部熄灭，否则会出现两个"选中"
   document.querySelectorAll('#kbMouse .kb-key').forEach((e) => {
     e.classList.toggle('on', kbKey !== null && Number(e.dataset.mouse) === kbKey);
   });
@@ -386,14 +368,14 @@ function buildKeyboard() {
     k.onclick = () => { kbKey = vk; kbKeyLabel = label; kbMods.clear(); paintKb(); };
     extra.appendChild(k);
   });
-  // 鼠标动作：左键 / 右键 / 滚轮上 / 滚轮下
+  // 动作行：切换配置组 / 左键 / 右键 / 滚轮上 / 滚轮下
   const mo = $('#kbMouse');
   if (mo) {
     const cap = document.createElement('span');
     cap.className = 'kb-cap';
-    cap.textContent = '鼠标动作：';
+    cap.textContent = '动作：';
     mo.appendChild(cap);
-    MOUSE_ACTS.forEach(([label, vk]) => {
+    KEY_ACTS.forEach(([label, vk]) => {
       const k = document.createElement('div');
       k.className = 'kb-key'; k.style.minWidth = '74px';
       k.textContent = label; k.dataset.mouse = vk;
@@ -423,8 +405,8 @@ function selectKey(id) {
     else if (vk === 0xA5) { kbKey = vk; kbKeyLabel = 'RightAlt'; }        // 右 Alt（豆包说话）
     else { kbKey = vk; kbKeyLabel = null; }
   });
-  if (kbKey !== null && isMouseAct(kbKey)) {
-    kbKeyLabel = MOUSE_NAME[kbKey] || '鼠标动作';       // 负数：键盘表里根本没有它
+  if (kbKey !== null && isKeyAct(kbKey)) {
+    kbKeyLabel = ACT_NAME[kbKey] || '动作值';           // 负数：键盘表里根本没有它
   } else if (kbKey !== null && !kbKeyLabel) {
     // 从键盘表里反查显示名
     const all = KB_ROWS.flat().concat(KB_EXTRA);
@@ -435,7 +417,8 @@ function selectKey(id) {
   $('#comboTitle').textContent = `设置「${it.name}」的快捷键（${it.label}）`;
   $('#comboNote').textContent =
     '点修饰键（Ctrl / Alt / Shift / Win，可多选）再点主键；只选修饰键也可保存；点「不执行」= 该键不注入。'
-    + '鼠标动作只能单独用（左/右键是按住—抬起成对，滚轮是按下滚一格）。';
+    + '动作只能单独用：左/右键按住—抬起成对（按住方向 + 按住左键 = 拖拽），'
+    + '滚轮按下滚一格，「切换配置组」按下即生效（方块键的出厂值就是它）。';
   const th = $('#comboThumb');
   if (th && it.rect) {
     const { cx, cy, w, h } = it.rect;
@@ -768,8 +751,6 @@ function collectMouseCfg() {
   const o = {};
   for (const el of $$('#page-mouse input[type=range]')) o[el.dataset.k] = Number(el.value);
   for (const el of $$('#page-mouse input[type=checkbox]')) o[el.dataset.k] = el.checked;
-  const sq = $('#squareKeySeg input:checked');
-  if (sq) o.squareKeyAction = sq.value;      // 互斥单选：方块键切组 or 切键鼠模式
   return o;
 }
 
@@ -789,17 +770,28 @@ function pushMouseCfg(now) {
   if (now) send(); else mouseCfgTimer = setTimeout(send, 250);
 }
 
+/// 鼠标组在配置组列表里的显示名（找不到就退回固定名）—— 只用于按钮文案
+function KeymapsMouseName(groups) {
+  const g = (groups || []).find(x => x.kind === 'mouse');
+  return g ? g.name : '鼠标模式';
+}
+
 function renderMouse(s) {
   const m = (s && s.mouse) || {};
   const on = m.mode === 'mouse';
   setDot('#d-mouse', on ? 'on' : '');
+  const groups = ((s && s.groups) || {}).items || [];
+  const curG = groups[((s && s.groups) || {}).active || 0] || {};
   $('#mouseKv').innerHTML =
-    kvItem('当前模式', on ? '<b>鼠标模式</b>' : '键盘模式') +
+    kvItem('当前模式', on ? '<b>鼠标模式</b>' : '键盘模式',
+           on ? 'ok' : '') +
+    kvItem('由哪个配置组决定', `「${curG.name || '—'}」`
+           + (curG.kind === 'mouse' ? '（鼠标组）' : ''),
+           curG.kind === 'mouse' ? 'ok' : '') +
     kvItem('方向键', on ? '移动 · 按住越久越快' : '走当前配置组的映射') +
-    kvItem('确认 / info', on ? '鼠标左键 / 右键（按住即拖拽）' : '走当前配置组的映射') +
-    kvItem('其余 18 个键', '两个模式下都走当前配置组（语音照样能用）') +
+    kvItem('确认 / info', '走当前配置组的映射（可改成鼠标左/右键）') +
     kvItem('斜向', on ? '支持同时按住 上+左，且已归一化' : '—');
-  $('#btnMouseToggle').textContent = on ? '切回键盘模式' : '切换到鼠标模式';
+  $('#btnMouseToggle').textContent = on ? '切回上一个配置组' : `切到「${KeymapsMouseName(groups)}」`;
 
 
   /* 回写控件状态：正在被用户拖动的那一个跳过，免得把他的手指"拽回去" */
@@ -880,16 +872,6 @@ function bindUI() {
     el.addEventListener('change', () => {
       const sw = el.closest('.switch');
       if (sw) sw.classList.toggle('on', el.checked);
-      pushMouseCfg(true);
-    });
-  }
-  /* 方块键的两个互斥选项：选了就立刻下发（另一种自动失效） */
-  for (const el of $$('#squareKeySeg input')) {
-    el.addEventListener('change', () => {
-      for (const r of $$('#squareKeySeg input')) {
-        const lab = r.closest('label');
-        if (lab) lab.classList.toggle('on', r.checked);
-      }
       pushMouseCfg(true);
     });
   }
@@ -1139,9 +1121,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.3',
+      version: '1.2.4',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.3（构建于 2026-10-16 15:05）',
+      versionLine: 'v1.2.4（构建于 2026-10-16 15:15）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
@@ -1176,21 +1158,21 @@ function boot() {
         cable: { ok: true }, mic: { ok: true }, winuhid: { ok: true },
         device: { ok: true }, bridge: { ok: true } },
       stuckGuard: { watchdogMs: 800, unlockCount: 0, lastUnlock: null },
-      mouse: { mode: 'keyboard', enabled: false, held: [], gain: 1, accelSuspected: false,
+      mouse: { mode: 'mouse', enabled: true, held: [], gain: 1, accelSuspected: false,
                tickHz: 60, minPxPerSec: 60, maxPxPerSec: 900, rampMs: 700, rampExponent: 2,
                normalizeDiagonal: true, directionHoldTimeoutSec: 8, buttonHoldTimeoutSec: 10,
                rememberMode: false, calibrate: true,
                wheelOnVolumeKeys: false, wheelMinPerSec: 3, wheelMaxPerSec: 16,
-               squareKeyAction: 'mode',
-               frames: 0, pixelsMoved: 0, dirTimeouts: 0, btnTimeouts: 0, orphanReaps: 0,
+                              frames: 0, pixelsMoved: 0, dirTimeouts: 0, btnTimeouts: 0, orphanReaps: 0,
                lastReap: null, note: null },
       autoStart: true, autoRun: true, startMinimized: true, autoSwitchDriver: true,
       autoKeepMic: true,
       defaultMicName: 'CABLE Output (VB-Audio Virtual Cable)',
       driverNote: '设备已是非键盘模式',
-      groups: { active: 0, items: [
-        { name: '默认配置组 1', configured: 22 },
-        { name: 'WorkBuddy 快捷键', configured: 21 } ] },
+      groups: { active: 1, items: [
+        { name: '默认配置组 1', kind: 'plain', configured: 22 },
+        { name: '鼠标模式', kind: 'mouse', configured: 19 },
+        { name: 'WorkBuddy 快捷键', kind: 'workbuddy', configured: 21 } ] },
     };
     // [id, 遥控器标注, 中文名, HID, 注入的组合键, 缩略图中心x, 中心y, 宽, 高]
     const rows = [
@@ -1216,7 +1198,7 @@ function boot() {
       ['volume_down','vol−','音量 -','0x20','音量-',39,478,46,30],
       ['mute','🔇','静音','0x0a','静音',91,428,42,42],
       ['last','last','上一频道','0x06','Alt+Tab',105,478,48,42],
-      ['square','▭','方块键','0x16','',90,617,46,36],
+      ['square','▭','方块键','0x16','切换配置组',90,617,46,36],   // 出厂值 = 动作值「切换配置组」
     ];
     const IMG = { w: 179, h: 663 };
     demo.keys.items = rows.map(([id, label, name, hid, sym, cx, cy, w, h]) => ({

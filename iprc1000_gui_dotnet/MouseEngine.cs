@@ -67,14 +67,10 @@ internal sealed class MouseEngine
         /// <summary>滚轮满速（格/秒），与方向键共用同一个斜坡时长</summary>
         public double WheelMaxPerSec { get; set; } = 16;
 
-        /// <summary>
-        /// **方块键的作用**（两个互斥选项）：
-        ///   "group"（默认）→ 切换到下一配置组（原行为，不动它以免影响已部署的机器）
-        ///   "mode"         → 切换键盘 / 鼠标模式
-        /// 为什么是互斥的单选而不是"两个都做"：一次按下只能表达一个意图，
-        /// 同时切组又切模式会让用户完全失去方向感。
-        /// </summary>
-        public string SquareKeyAction { get; set; } = "group";
+        // ★ v1.2.4 起**没有** `squareKeyAction` 这个配置了：
+        //   鼠标模式 = 活动配置组是不是"鼠标组"（Keymaps.MouseGroupActive），
+        //   方块键则是一个普通可绑定键（出厂值 = 动作值「切换配置组」）。
+        //   旧 mouse.json 里残留的这个字段会被静默忽略（System.Text.Json 默认行为）。
     }
 
     private const int VK_LBUTTON = 0x01, VK_RBUTTON = 0x02;
@@ -177,9 +173,6 @@ internal sealed class MouseEngine
         if (c.WheelMinPerSec > c.WheelMaxPerSec) c.WheelMinPerSec = c.WheelMaxPerSec;
         c.DirectionHoldTimeoutSec = Math.Clamp(c.DirectionHoldTimeoutSec, 2, 60);
         c.ButtonHoldTimeoutSec = Math.Clamp(c.ButtonHoldTimeoutSec, 2, 60);
-        // 非 group/mode 一律回落 group（安全默认：不动已部署机器的行为）
-        c.SquareKeyAction = string.Equals((c.SquareKeyAction ?? "").Trim(), "mode",
-            StringComparison.OrdinalIgnoreCase) ? "mode" : "group";
     }
 
     public string ApplyConfig(JsonElement el)
@@ -206,8 +199,6 @@ internal sealed class MouseEngine
             _cfg.WheelOnVolumeKeys = B("wheelOnVolumeKeys", _cfg.WheelOnVolumeKeys);
             _cfg.WheelMinPerSec = D("wheelMinPerSec", _cfg.WheelMinPerSec);
             _cfg.WheelMaxPerSec = D("wheelMaxPerSec", _cfg.WheelMaxPerSec);
-            if (el.TryGetProperty("squareKeyAction", out var sq) && sq.ValueKind == JsonValueKind.String)
-                _cfg.SquareKeyAction = sq.GetString() ?? "";
             Sanitize(_cfg);     // 夹范围 + 校验枚举：与文件路径共用同一道闸
             sb.Append($"已应用：{_cfg.MinPxPerSec:F0}→{_cfg.MaxPxPerSec:F0} px/秒 · 斜坡 {_cfg.RampMs:F0} ms"
                       + (_cfg.NormalizeDiagonal ? " · 斜向归一化" : "")
@@ -226,8 +217,6 @@ internal sealed class MouseEngine
     /// <summary>小/大增量比值不一致 → 系统加速开着，会与斜坡叠加</summary>
     public bool AccelSuspected => _accelSuspected;
     /// <summary>方块键是不是用来切键鼠模式（否则就是切配置组）</summary>
-    public bool SquareKeySwitchesMode => !string.Equals(_cfg.SquareKeyAction, "group", StringComparison.OrdinalIgnoreCase);
-
     /// <summary>开/关鼠标模式。开启时启动引擎线程（并在需要时做一次自校准）。</summary>
     public string SetEnabled(bool on)
     {
@@ -765,7 +754,6 @@ internal sealed class MouseEngine
             wheelOnVolumeKeys = _cfg.WheelOnVolumeKeys,
             wheelMinPerSec = _cfg.WheelMinPerSec,
             wheelMaxPerSec = _cfg.WheelMaxPerSec,
-            squareKeyAction = _cfg.SquareKeyAction,
             frames = Frames,
             pixelsMoved = Math.Round(PixelsMoved),
             dirTimeouts = _dirTimeouts,
@@ -829,8 +817,8 @@ internal sealed class MouseEngine
 
         sb.AppendLine("IPRC1000 鼠标引擎自检");
         sb.AppendLine(new string('=', 58));
-        sb.AppendLine($"读取到的配置（mouse.json）：方块键作用={e.Cfg.SquareKeyAction}"
-                      + $"（=={e.Cfg.SquareKeyAction} 时方块键{(e.SquareKeySwitchesMode ? "切键鼠模式" : "切配置组")}）"
+        sb.AppendLine($"活动配置组=「{Keymaps.Current.Name}」（Kind={Keymaps.Current.Kind}）"
+                      + $" ⇒ 鼠标模式={Keymaps.MouseGroupActive}（引擎={e.Enabled}）"
                       + $" · 音量键当滚轮={(e.Cfg.WheelOnVolumeKeys ? "开" : "关")}");
         sb.AppendLine("跑这个自检会真的驱动光标，期间请**不要碰鼠标/触控板**：");
         sb.AppendLine("  · 「该不该动」的断言看的是**注入计数**（我方账本），人手干扰不影响；");

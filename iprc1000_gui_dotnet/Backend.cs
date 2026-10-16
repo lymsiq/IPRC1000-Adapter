@@ -54,13 +54,22 @@ internal sealed class Backend : IDisposable
     {
         _filter = f;
         _filter.InjectEnabled = true;
-        // ★ 鼠标模式路由：方向键 / 确认 / info 由鼠标引擎接管（返回 true = 已消费，不走键盘映射）。
+        // ★ 鼠标模式路由：**只有四个方向键**由鼠标引擎接管（返回 true = 已消费，不走键盘映射）。
         //   挂在 ApplyButton 这个"两种按键来源共用的唯一漏斗"上，所以 ETW / 钩子两种模式都成立。
-        _filter.MouseModeRouter = (bid, pressed) => _mouse.HandleButton(bid, pressed);
+        //
+        //   ⚠ v1.2.4 起**不再接管 确认 / info**：鼠标模式已合并成一个配置组，
+        //   组里"除方向键外全部沿用默认组的映射"（用户明确要求），所以 ok/info
+        //   应该走映射表（默认 enter / Ctrl+Enter），想当鼠标左右键就在弹窗里配成
+        //   「鼠标左键 / 鼠标右键」—— 那样"按住方向 + 按住确认 = 拖拽"照样成立。
+        _filter.MouseModeRouter = (bid, pressed) =>
+            (bid is "up" or "down" or "left" or "right") && _mouse.HandleButton(bid, pressed);
         // 语音键按下 → 立刻预热音频链路（提前打开 CABLE Input）。
         // 见 KeyFilter.VoiceKeyDown 的说明：不预热会丢掉"按住后立刻说的第一个字"。
         KeyFilter.VoiceKeyDown -= WarmAudio;   // 防重复订阅
         KeyFilter.VoiceKeyDown += WarmAudio;
+        // 动作值「切换配置组」（方块键的出厂值）→ 切组 + 同步鼠标模式
+        KeyFilter.SwitchGroupRequested -= CycleGroup;
+        KeyFilter.SwitchGroupRequested += CycleGroup;
         // ★ 卡键看门狗 v2 的音频判据：语音键按住期间蓝牙 SCO 一定在传帧，
         // 「按着 + 静默 >3s」= UP 丢了 → 看门狗会强制放开。
         // 只认当前这个桥进程写的统计（pid 匹配），避免读到上一个实例的残留。
@@ -178,32 +187,44 @@ internal sealed class Backend : IDisposable
 
     public void NoteButton(string bid, bool pressed)
     {
-        // ★ 遥控器最底部的「方块键」——**两个互斥选项，在界面「鼠标模式」页里选**：
-        //     · "group"（默认）→ 切换到下一配置组（原行为，不动它以免影响已部署的机器）
-        //     · "mode"         → 切换键盘 / 鼠标模式
-        //   为什么互斥：一次按下只能表达一个意图；同时切组又切模式会让人完全失去方向感。
-        //   无论哪种，都是**按下即生效**（不等抬起）—— 遥控器丢 UP 是既知会发生的，
-        //   等 UP 才动作等于"丢一次 UP 这个键就失灵"。
-        if (bid == "square" && pressed)
-        {
-            if (_mouse.SquareKeySwitchesMode)
-            {
-                var msg = _mouse.Toggle();
-                _groupToast = msg;
-                _groupToastAt = DateTime.UtcNow;
-                try { MouseModeChanged?.Invoke(msg, _mouse.Enabled); } catch { }
-            }
-            else
-            {
-                var g = Keymaps.NextGroup();
-                _groupToast = $"已切换到配置组「{g}」";
-                _groupToastAt = DateTime.UtcNow;
-                MouseEngine.Log($"方块键 → 切配置组「{g}」（当前设置为「切配置组」）");
-            }
-        }
-
+        // ★ v1.2.4 起这里**不再有方块键的特例**。
+        //   以前方块键是"硬编码的特殊键"（行为由 `squareKeyAction` 决定，切组 or 切模式），
+        //   现在它就是个**普通可绑定键**，出厂值 = 动作值「切换配置组」，
+        //   由 KeyFilter 走到动作分派 → 回调 <see cref="CycleGroup"/>。
+        //   好处：① 状态只有一个来源（活动组的 Kind）；② 用户想改绑就改绑。
         LastButton = bid;
         LastButtonPressed = pressed;
+    }
+
+    /// <summary>
+    /// 切到下一个配置组，并**让鼠标模式跟着组走**。
+    ///
+    /// 为什么"切组"要顺带同步模式：v1.2.4 起鼠标模式 = 活动组是不是"鼠标组"，
+    /// 所以切到鼠标组就自动开、切走就自动关。这是**唯一**的模式来源。
+    /// **按下即生效**（不等抬起）—— 遥控器丢 UP 是既知会发生的。
+    /// </summary>
+    private void CycleGroup()
+    {
+        var g = Keymaps.NextGroup();
+        SyncMouseWithGroup();
+        _groupToast = _mouse.Enabled ? $"已切换到「{g}」（鼠标模式）" : $"已切换到配置组「{g}」";
+        _groupToastAt = DateTime.UtcNow;
+        MouseEngine.Log($"切配置组 → 「{g}」（鼠标模式={_mouse.Enabled}）");
+    }
+
+    /// <summary>
+    /// **鼠标模式的唯一判据**：活动配置组的 Kind 是不是 "mouse"。
+    ///
+    /// 以前"模式"和"配置组"各存一份状态，于是会出现
+    /// "在鼠标模式组里但模式还是键盘"这种谁都说不清的组合（用户在实测里明确要求合并）。
+    /// </summary>
+    private void SyncMouseWithGroup()
+    {
+        var want = Keymaps.MouseGroupActive;
+        if (_mouse.Enabled == want) return;
+        var msg = _mouse.SetEnabled(want);
+        MouseEngine.Log($"鼠标模式跟随配置组 → {(want ? "开" : "关")}（组「{Keymaps.Current.Name}」）");
+        try { MouseModeChanged?.Invoke(msg, _mouse.Enabled); } catch { }
     }
 
     /// <summary>
@@ -237,7 +258,13 @@ internal sealed class Backend : IDisposable
         return _mouse.LastNote ?? "自校准完成。";
     }
 
-    /// <summary>切换/设置鼠标模式（界面与桥接调）。<paramref name="v"/>: "on"/"off"/"toggle"</summary>
+    /// <summary>
+    /// 切换/设置鼠标模式（界面与桥接调）。<paramref name="v"/>: "on"/"off"/"toggle"。
+    ///
+    /// ★ v1.2.4 起"模式"就是"活动配置组"，所以这个接口实际做的是**切组**：
+    ///   开 = 切到「鼠标模式」组；关 = 切回上一个非鼠标组（记不住就回第 0 组）。
+    ///   保留这个接口是为了不破坏既有调用方（界面按钮 / 桥接命令）。
+    /// </summary>
     public string SetMouseMode(string? v)
     {
         var want = v?.Trim().ToLowerInvariant() switch
@@ -246,12 +273,30 @@ internal sealed class Backend : IDisposable
             "off" or "false" or "0" => false,
             _ => !_mouse.Enabled,
         };
-        var msg = _mouse.SetEnabled(want);
+        var mi = Keymaps.MouseGroupIndex;
+        if (mi < 0) return "找不到「鼠标模式」配置组。";
+        if (want)
+        {
+            if (!Keymaps.MouseGroupActive) _lastNonMouseGroup = Keymaps.ActiveIndex;
+            Keymaps.SwitchTo(mi);
+        }
+        else if (Keymaps.MouseGroupActive)
+        {
+            var back = _lastNonMouseGroup;
+            if (back == mi || back < 0 || back >= Keymaps.Groups.Count) back = mi == 0 ? 1 : 0;
+            Keymaps.SwitchTo(back);
+        }
+        SyncMouseWithGroup();
+        var msg = _mouse.Enabled
+            ? $"已切到配置组「{Keymaps.Current.Name}」—— 鼠标模式已开启。"
+            : $"已切回配置组「{Keymaps.Current.Name}」—— 键盘模式。";
         _groupToast = msg;
         _groupToastAt = DateTime.UtcNow;
-        try { MouseModeChanged?.Invoke(msg, _mouse.Enabled); } catch { }
         return msg;
     }
+
+    /// <summary>进鼠标组之前待在哪个组 —— "关掉鼠标模式"要能回到原处</summary>
+    private int _lastNonMouseGroup = 0;
 
     /// <summary>应用鼠标参数（界面滑条调）。参数是一个 JSON 对象字符串。</summary>
     public string SetMouseConfig(string? json)
@@ -600,6 +645,9 @@ internal sealed class Backend : IDisposable
                 ["items"] = new JsonArray(Keymaps.Groups.Select(g => (JsonNode)new JsonObject
                 {
                     ["name"] = g.Name,
+                    // ★ kind 必须给界面：鼠标模式 = "活动组是不是鼠标组"，
+                    //   界面要靠它显示"鼠标移动"、拼按钮文案（v1.2.4）
+                    ["kind"] = g.Kind,
                     ["configured"] = g.Map.Count(kv => kv.Value.Length > 0),
                 }).ToArray()),
             },
@@ -669,12 +717,15 @@ internal sealed class Backend : IDisposable
     public string SwitchGroup(string? idx)
     {
         var name = Keymaps.SwitchTo(int.TryParse(idx, out var i) ? i : 0);
-        return Env.Json(new { ok = true, message = $"已切换到配置组「{name}」。" });
+        SyncMouseWithGroup();
+        return Env.Json(new { ok = true, message = $"已切换到配置组「{name}」"
+            + (Keymaps.MouseGroupActive ? "（鼠标模式已开启）" : "") + "。" });
     }
 
     public string NewGroup()
     {
         var name = Keymaps.Duplicate();
+        SyncMouseWithGroup();
         return Env.Json(new { ok = true, message = $"已复制当前映射并新建配置组「{name}」。" });
     }
 
