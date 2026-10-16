@@ -66,6 +66,15 @@ internal sealed class MouseEngine
         public double WheelMinPerSec { get; set; } = 3;
         /// <summary>滚轮满速（格/秒），与方向键共用同一个斜坡时长</summary>
         public double WheelMaxPerSec { get; set; } = 16;
+
+        /// <summary>
+        /// **方块键的作用**（两个互斥选项）：
+        ///   "group"（默认）→ 切换到下一配置组（原行为，不动它以免影响已部署的机器）
+        ///   "mode"         → 切换键盘 / 鼠标模式
+        /// 为什么是互斥的单选而不是"两个都做"：一次按下只能表达一个意图，
+        /// 同时切组又切模式会让用户完全失去方向感。
+        /// </summary>
+        public string SquareKeyAction { get; set; } = "group";
     }
 
     private const int VK_LBUTTON = 0x01, VK_RBUTTON = 0x02;
@@ -113,12 +122,24 @@ internal sealed class MouseEngine
 
     private static string Path_ => Path.Combine(Env.ConfigDir, CfgFile);
 
+    private static readonly JsonSerializerOptions ReadOpts = new()
+    {
+        // ★ 名字大小写不敏感：程序自己写出的 mouse.json 是 PascalCase，
+        //   但**手改配置**时很自然写成 camelCase（和界面发来的 payload 一致）。
+        //   不设这个的话，手写的 camelCase 键会被**静默忽略** —— 实测踩到过。
+        PropertyNameCaseInsensitive = true,
+    };
+
     private static Config Load()
     {
         try
         {
             if (File.Exists(Path_))
-                return JsonSerializer.Deserialize<Config>(File.ReadAllText(Path_)) ?? new Config();
+            {
+                var c = JsonSerializer.Deserialize<Config>(File.ReadAllText(Path_), ReadOpts) ?? new Config();
+                Sanitize(c);      // ★ 文件里的非法值必须也在这一道闸里被夹住，不能静默生效
+                return c;
+            }
         }
         catch { }
         return new Config();
@@ -137,32 +158,57 @@ internal sealed class MouseEngine
     public Config Cfg { get { lock (_gate) return _cfg; } }
 
     /// <summary>改配置（界面调）—— 只接受合法范围，避免把速度设成 0 或几十万</summary>
+    /// <summary>
+    /// 把配置夹到合法范围、校验枚举值。**文件路径与界面路径都必须过这一道** ——
+    /// 否则手改 `mouse.json` 写进非法值会**静默生效**。
+    /// 实测踩到过：文件里写 `squareKeyAction:"乱写"`，程序当成"切键鼠模式"
+    /// （因为判定写的是"不等于 group 就算 mode"）。
+    /// </summary>
+    private static void Sanitize(Config c)
+    {
+        c.TickHz = Math.Clamp(c.TickHz, 20, 200);
+        c.MinPxPerSec = Math.Clamp(c.MinPxPerSec, 10, 400);
+        c.MaxPxPerSec = Math.Clamp(c.MaxPxPerSec, 100, 6000);
+        if (c.MinPxPerSec > c.MaxPxPerSec) c.MinPxPerSec = c.MaxPxPerSec;
+        c.RampMs = Math.Clamp(c.RampMs, 0, 4000);
+        c.RampExponent = Math.Clamp(c.RampExponent, 1, 4);
+        c.WheelMinPerSec = Math.Clamp(c.WheelMinPerSec, 1, 30);
+        c.WheelMaxPerSec = Math.Clamp(c.WheelMaxPerSec, 2, 60);
+        if (c.WheelMinPerSec > c.WheelMaxPerSec) c.WheelMinPerSec = c.WheelMaxPerSec;
+        c.DirectionHoldTimeoutSec = Math.Clamp(c.DirectionHoldTimeoutSec, 2, 60);
+        c.ButtonHoldTimeoutSec = Math.Clamp(c.ButtonHoldTimeoutSec, 2, 60);
+        // 非 group/mode 一律回落 group（安全默认：不动已部署机器的行为）
+        c.SquareKeyAction = string.Equals((c.SquareKeyAction ?? "").Trim(), "mode",
+            StringComparison.OrdinalIgnoreCase) ? "mode" : "group";
+    }
+
     public string ApplyConfig(JsonElement el)
     {
         var sb = new StringBuilder();
         lock (_gate)
         {
-            double D(string k, double cur, double lo, double hi) =>
-                el.TryGetProperty(k, out var v) && v.TryGetDouble(out var d) ? Math.Clamp(d, lo, hi) : cur;
+            double D(string k, double cur) =>
+                el.TryGetProperty(k, out var v) && v.TryGetDouble(out var d) ? d : cur;
             bool B(string k, bool cur) =>
                 el.TryGetProperty(k, out var v) && (v.ValueKind == JsonValueKind.True || v.ValueKind == JsonValueKind.False)
                     ? v.GetBoolean() : cur;
 
-            _cfg.TickHz = (int)D("tickHz", _cfg.TickHz, 20, 200);
-            _cfg.MinPxPerSec = D("minPxPerSec", _cfg.MinPxPerSec, 10, 400);
-            _cfg.MaxPxPerSec = D("maxPxPerSec", _cfg.MaxPxPerSec, 100, 6000);
-            _cfg.RampMs = D("rampMs", _cfg.RampMs, 0, 4000);
-            _cfg.RampExponent = D("rampExponent", _cfg.RampExponent, 1, 4);
+            _cfg.TickHz = (int)D("tickHz", _cfg.TickHz);
+            _cfg.MinPxPerSec = D("minPxPerSec", _cfg.MinPxPerSec);
+            _cfg.MaxPxPerSec = D("maxPxPerSec", _cfg.MaxPxPerSec);
+            _cfg.RampMs = D("rampMs", _cfg.RampMs);
+            _cfg.RampExponent = D("rampExponent", _cfg.RampExponent);
             _cfg.NormalizeDiagonal = B("normalizeDiagonal", _cfg.NormalizeDiagonal);
-            _cfg.DirectionHoldTimeoutSec = D("directionHoldTimeoutSec", _cfg.DirectionHoldTimeoutSec, 2, 60);
-            _cfg.ButtonHoldTimeoutSec = D("buttonHoldTimeoutSec", _cfg.ButtonHoldTimeoutSec, 2, 60);
+            _cfg.DirectionHoldTimeoutSec = D("directionHoldTimeoutSec", _cfg.DirectionHoldTimeoutSec);
+            _cfg.ButtonHoldTimeoutSec = D("buttonHoldTimeoutSec", _cfg.ButtonHoldTimeoutSec);
             _cfg.RememberMode = B("rememberMode", _cfg.RememberMode);
             _cfg.Calibrate = B("calibrate", _cfg.Calibrate);
             _cfg.WheelOnVolumeKeys = B("wheelOnVolumeKeys", _cfg.WheelOnVolumeKeys);
-            _cfg.WheelMinPerSec = D("wheelMinPerSec", _cfg.WheelMinPerSec, 1, 30);
-            _cfg.WheelMaxPerSec = D("wheelMaxPerSec", _cfg.WheelMaxPerSec, 2, 60);
-            if (_cfg.WheelMinPerSec > _cfg.WheelMaxPerSec) _cfg.WheelMinPerSec = _cfg.WheelMaxPerSec;
-            if (_cfg.MinPxPerSec > _cfg.MaxPxPerSec) _cfg.MinPxPerSec = _cfg.MaxPxPerSec;
+            _cfg.WheelMinPerSec = D("wheelMinPerSec", _cfg.WheelMinPerSec);
+            _cfg.WheelMaxPerSec = D("wheelMaxPerSec", _cfg.WheelMaxPerSec);
+            if (el.TryGetProperty("squareKeyAction", out var sq) && sq.ValueKind == JsonValueKind.String)
+                _cfg.SquareKeyAction = sq.GetString() ?? "";
+            Sanitize(_cfg);     // 夹范围 + 校验枚举：与文件路径共用同一道闸
             sb.Append($"已应用：{_cfg.MinPxPerSec:F0}→{_cfg.MaxPxPerSec:F0} px/秒 · 斜坡 {_cfg.RampMs:F0} ms"
                       + (_cfg.NormalizeDiagonal ? " · 斜向归一化" : "")
                       + (_cfg.WheelOnVolumeKeys ? $" · 音量键当滚轮（{_cfg.WheelMinPerSec:F0}→{_cfg.WheelMaxPerSec:F0} 格/秒）" : "")
@@ -179,6 +225,8 @@ internal sealed class MouseEngine
     public double Gain => _gain;
     /// <summary>小/大增量比值不一致 → 系统加速开着，会与斜坡叠加</summary>
     public bool AccelSuspected => _accelSuspected;
+    /// <summary>方块键是不是用来切键鼠模式（否则就是切配置组）</summary>
+    public bool SquareKeySwitchesMode => !string.Equals(_cfg.SquareKeyAction, "group", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>开/关鼠标模式。开启时启动引擎线程（并在需要时做一次自校准）。</summary>
     public string SetEnabled(bool on)
@@ -630,6 +678,7 @@ internal sealed class MouseEngine
             wheelOnVolumeKeys = _cfg.WheelOnVolumeKeys,
             wheelMinPerSec = _cfg.WheelMinPerSec,
             wheelMaxPerSec = _cfg.WheelMaxPerSec,
+            squareKeyAction = _cfg.SquareKeyAction,
             frames = Frames,
             pixelsMoved = Math.Round(PixelsMoved),
             dirTimeouts = _dirTimeouts,
@@ -691,6 +740,10 @@ internal sealed class MouseEngine
 
         sb.AppendLine("IPRC1000 鼠标引擎自检");
         sb.AppendLine(new string('=', 58));
+        sb.AppendLine($"读取到的配置（mouse.json）：方块键作用={e.Cfg.SquareKeyAction}"
+                      + $"（=={e.Cfg.SquareKeyAction} 时方块键{(e.SquareKeySwitchesMode ? "切键鼠模式" : "切配置组")}）"
+                      + $" · 音量键当滚轮={(e.Cfg.WheelOnVolumeKeys ? "开" : "关")}");
+        sb.AppendLine();
         var ok = true;
         void Check(bool pass, string what, string detail)
         {

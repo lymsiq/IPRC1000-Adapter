@@ -350,3 +350,15 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
 .pad-dot.on{opacity:1}
 .pad-speed{position:absolute;right:10px;bottom:8px;font-size:12px;color:var(--txt2);
   font-variant-numeric:tabular-nums}
+
+/* 互斥单选：两段式胶囊（方块键的作用 —— 切配置组 / 切键鼠模式，只能选一个） */
+.optrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:2px 0 6px}
+.optrow>span{color:var(--txt2);font-size:12.5px;min-width:96px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;
+  background:rgba(255,255,255,.7)}
+.seg label{display:flex;align-items:center;padding:7px 14px;font-size:12.5px;
+  color:var(--txt2);cursor:pointer;border-right:1px solid var(--line)}
+.seg label:last-child{border-right:0}
+.seg input{display:none}
+.seg label.on{background:var(--blue-l);color:var(--txt);font-weight:600}
+.hintline{color:var(--txt3);font-size:12px;line-height:1.55;margin:0 0 10px}

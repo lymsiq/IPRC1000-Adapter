@@ -178,16 +178,28 @@ internal sealed class Backend : IDisposable
 
     public void NoteButton(string bid, bool pressed)
     {
-        // ★ 遥控器最底部的「方块键」= **切换键盘 / 鼠标模式**。
-        //   按下即生效（不等抬起）—— 因为遥控器丢 UP 是既知会发生的，
-        //   若等 UP 才切，丢一次 UP 就等于这个键失灵。
-        //   配置组**不再由它切换**，改为界面上的选项（用户 2026-10-16 明确要求）。
+        // ★ 遥控器最底部的「方块键」——**两个互斥选项，在界面「鼠标模式」页里选**：
+        //     · "group"（默认）→ 切换到下一配置组（原行为，不动它以免影响已部署的机器）
+        //     · "mode"         → 切换键盘 / 鼠标模式
+        //   为什么互斥：一次按下只能表达一个意图；同时切组又切模式会让人完全失去方向感。
+        //   无论哪种，都是**按下即生效**（不等抬起）—— 遥控器丢 UP 是既知会发生的，
+        //   等 UP 才动作等于"丢一次 UP 这个键就失灵"。
         if (bid == "square" && pressed)
         {
-            var msg = _mouse.Toggle();
-            _groupToast = msg;
-            _groupToastAt = DateTime.UtcNow;
-            try { MouseModeChanged?.Invoke(msg, _mouse.Enabled); } catch { }
+            if (_mouse.SquareKeySwitchesMode)
+            {
+                var msg = _mouse.Toggle();
+                _groupToast = msg;
+                _groupToastAt = DateTime.UtcNow;
+                try { MouseModeChanged?.Invoke(msg, _mouse.Enabled); } catch { }
+            }
+            else
+            {
+                var g = Keymaps.NextGroup();
+                _groupToast = $"已切换到配置组「{g}」";
+                _groupToastAt = DateTime.UtcNow;
+                MouseEngine.Log($"方块键 → 切配置组「{g}」（当前设置为「切配置组」）");
+            }
         }
 
         LastButton = bid;

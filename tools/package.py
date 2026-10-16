@@ -194,6 +194,11 @@ SRC_REQUIRED = [
     ("鼠标页渲染函数存在", "iprc1000_gui_dotnet/ui/app.js", "function renderMouse"),
     ("预览分支也渲染鼠标页", "iprc1000_gui_dotnet/ui/app.js", "renderEnv(demo); renderMouse(demo)"),
     ("空 note 不显示", "iprc1000_gui_dotnet/ui/style.css", ".note:empty"),
+    # ★ 方块键的作用：两个互斥选项（切配置组 / 切键鼠模式）
+    ("方块键作用可配置", "iprc1000_gui_dotnet/MouseEngine.cs", "SquareKeyAction"),
+    ("方块键两选项互斥单选", "iprc1000_gui_dotnet/ui/index.html", "squareKeySeg"),
+    ("方块键分派在 Backend", "iprc1000_gui_dotnet/Backend.cs", "SquareKeySwitchesMode"),
+    ("方块键仍可切配置组", "iprc1000_gui_dotnet/Backend.cs", "Keymaps.NextGroup()"),
     # 诊断盲区：这三个"静默降级"以前完全查不出来
     ("注入开关变化会留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "InjectEnabled"),
     ("虚拟 HID 失败会留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "虚拟 HID 下发失败"),

@@ -350,6 +350,15 @@
           <span class="dot" id="d-mouse"></span>
         </div>
         <div class="kv" id="mouseKv"></div>
+        <!-- 方块键的作用：两个互斥选项（一次按下只能表达一个意图） -->
+        <div class="optrow">
+          <span>方块键的作用</span>
+          <div class="seg" id="squareKeySeg">
+            <label><input type="radio" name="squareAction" value="mode">切换键鼠模式</label>
+            <label><input type="radio" name="squareAction" value="group">切换配置组</label>
+          </div>
+        </div>
+        <div class="hintline" id="mouseSquareHint"></div>
         <div class="note" id="mouseNote"></div>
         <div class="panel-actions">
           <button class="btn" id="btnMouseToggle">切换到鼠标模式</button>

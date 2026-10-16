@@ -671,11 +671,13 @@ function paintSlider(el) {
   if (b) b.textContent = Number(el.value).toFixed(+(el.dataset.dec || 0)) + (el.dataset.unit || '');
 }
 
-/* 把页面上所有滑条/开关收成一个对象发给宿主（只有鼠标页的，用 #page-mouse 限定作用域） */
+/* 把页面上所有滑条/开关/单选收成一个对象发给宿主（只有鼠标页的，用 #page-mouse 限定作用域） */
 function collectMouseCfg() {
   const o = {};
   for (const el of $$('#page-mouse input[type=range]')) o[el.dataset.k] = Number(el.value);
   for (const el of $$('#page-mouse input[type=checkbox]')) o[el.dataset.k] = el.checked;
+  const sq = $('#squareKeySeg input:checked');
+  if (sq) o.squareKeyAction = sq.value;      // 互斥单选：方块键切组 or 切键鼠模式
   return o;
 }
 
@@ -704,9 +706,20 @@ function renderMouse(s) {
     kvItem('方向键', on ? '移动 · 按住越久越快' : '走当前配置组的映射') +
     kvItem('确认 / info', on ? '鼠标左键 / 右键（按住即拖拽）' : '走当前配置组的映射') +
     kvItem('其余 18 个键', '两个模式下都走当前配置组（语音照样能用）') +
-    kvItem('斜向', on ? '支持同时按住 上+左，且已归一化' : '—') +
-    kvItem('配置组切换', '在「按键映射」页的组标签上选');
+    kvItem('斜向', on ? '支持同时按住 上+左，且已归一化' : '—');
   $('#btnMouseToggle').textContent = on ? '切回键盘模式' : '切换到鼠标模式';
+
+  /* 方块键的两个互斥选项（切配置组 / 切键鼠模式） */
+  const sqMode = (m.squareKeyAction || 'group') === 'mode';
+  for (const el of $$('#squareKeySeg input')) {
+    const sel = (el.value === 'mode') === sqMode;
+    el.checked = sel;
+    const lab = el.closest('label');
+    if (lab) lab.classList.toggle('on', sel);
+  }
+  $('#mouseSquareHint').textContent = sqMode
+    ? '按方块键切键鼠模式；配置组改到「按键映射」页的组标签上选。'
+    : '按方块键循环切换配置组；要切键鼠模式就用上面的按钮（或把这里改成「切换键鼠模式」）。';
 
   /* 回写控件状态：正在被用户拖动的那一个跳过，免得把他的手指"拽回去" */
   for (const el of $$('#page-mouse input[type=range]')) {
@@ -784,6 +797,16 @@ function bindUI() {
     el.addEventListener('change', () => {
       const sw = el.closest('.switch');
       if (sw) sw.classList.toggle('on', el.checked);
+      pushMouseCfg(true);
+    });
+  }
+  /* 方块键的两个互斥选项：选了就立刻下发（另一种自动失效） */
+  for (const el of $$('#squareKeySeg input')) {
+    el.addEventListener('change', () => {
+      for (const r of $$('#squareKeySeg input')) {
+        const lab = r.closest('label');
+        if (lab) lab.classList.toggle('on', r.checked);
+      }
       pushMouseCfg(true);
     });
   }
@@ -1070,6 +1093,7 @@ function boot() {
                normalizeDiagonal: true, directionHoldTimeoutSec: 8, buttonHoldTimeoutSec: 10,
                rememberMode: false, calibrate: true,
                wheelOnVolumeKeys: false, wheelMinPerSec: 3, wheelMaxPerSec: 16,
+               squareKeyAction: 'group',
                frames: 0, pixelsMoved: 0, dirTimeouts: 0, btnTimeouts: 0, orphanReaps: 0,
                lastReap: null, note: null },
       autoStart: true, autoRun: true, startMinimized: true, autoSwitchDriver: true,
