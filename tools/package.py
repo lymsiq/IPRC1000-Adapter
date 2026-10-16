@@ -197,7 +197,6 @@ SRC_REQUIRED = [
     ("鼠标引擎有自适应增速", "iprc1000_gui_dotnet/MouseEngine.cs", "RampExponent"),
     ("鼠标引擎有方向按住超时", "iprc1000_gui_dotnet/MouseEngine.cs", "DirectionHoldTimeoutSec"),
     ("鼠标键孤儿回收存在", "iprc1000_gui_dotnet/MouseEngine.cs", "ReapOrphanButtons"),
-    ("方块键切模式", "iprc1000_gui_dotnet/Backend.cs", "_mouse.Toggle()"),
     ("鼠标路由挂在 ApplyButton", "iprc1000_gui_dotnet/KeyFilter.cs", "MouseModeRouter"),
     ("鼠标模式有引擎自检", "iprc1000_gui_dotnet/MouseEngine.cs", "static string SelfTest"),
     ("引擎自检有 CLI 入口", "iprc1000_gui_dotnet/Program.cs", "--mouse-engine-test"),
@@ -210,7 +209,7 @@ SRC_REQUIRED = [
     # ★ 方块键的作用：两个互斥选项（切配置组 / 切键鼠模式）
     # ★★ 鼠标模式变成一个配置组（v1.2.4）：模式与配置组合并成**一个状态来源**，
     #    "方块键的作用"那个二选一设置随之取消，方块键回归普通可绑定键。
-    ("鼠标模式是一个配置组", "iprc1000_gui_dotnet/Keymaps.cs", "kind=\"mouse\""),
+    ("鼠标模式是一个配置组", "iprc1000_gui_dotnet/Keymaps.cs", "Kind = \"mouse\""),
     ("模式的唯一判据是活动组", "iprc1000_gui_dotnet/Keymaps.cs", "public static bool MouseGroupActive"),
     ("切组会同步鼠标模式", "iprc1000_gui_dotnet/Backend.cs", "SyncMouseWithGroup"),
     ("方块键是普通可绑定键", "iprc1000_gui_dotnet/Keymaps.cs", "KeyAct.SwitchGroup"),
@@ -304,14 +303,13 @@ SRC_REQUIRED = [
     ("路由改用有界缓冲（不再用 1 秒 BufferedWaveProvider）", "iprc1000_gui_dotnet/CableRouter.cs", "new JitterBuffer()"),
     ("界面能看到抖动缓冲", "iprc1000_gui_dotnet/ui/app.js", "抖动缓冲"),
     # ★★ 鼠标动作映射（2026-10-16 用户要求）：把任意按键配成 左键/右键/滚轮上/滚轮下
-    ("映射支持鼠标动作", "iprc1000_gui_dotnet/MouseAct.cs", "public const int Left = -1"),
-    ("鼠标动作走 SendInput（不进虚拟键盘）", "iprc1000_gui_dotnet/KeyFilter.cs", "MouseAct.IsSingleMouseAction"),
+    ("映射支持动作值", "iprc1000_gui_dotnet/KeyAct.cs", "public const int Left = -1"),
+    ("动作值走 SendInput（不进虚拟键盘）", "iprc1000_gui_dotnet/KeyFilter.cs", "KeyAct.IsSingleAction"),
     ("鼠标动作有日志留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "（鼠标动作）"),
-    ("解析认识鼠标动作名", "iprc1000_gui_dotnet/Keys.cs", "MouseAct.FromName"),
-    ("鼠标动作有纯逻辑自检", "iprc1000_gui_dotnet/MouseAct.cs", "public static string SelfTest"),
+    ("解析认识动作名", "iprc1000_gui_dotnet/Keys.cs", "KeyAct.FromName"),
+    ("动作值有纯逻辑自检", "iprc1000_gui_dotnet/KeyAct.cs", "public static string SelfTest"),
     ("鼠标动作自检有 CLI 入口", "iprc1000_gui_dotnet/Program.cs", "--mouseact-test"),
     ("方块键那行显示实际行为", "iprc1000_gui_dotnet/ui/app.js", "function bindSym"),
-    ("方块键选项在按键映射页", "iprc1000_gui_dotnet/ui/index.html", "seg-sq"),
     ("弹窗有鼠标动作行", "iprc1000_gui_dotnet/ui/index.html", "kbMouse"),
     # v1.0.7：卡键看门狗 v2。v1 盯「遥控器静默」，而 ETW 模式下遥控器按住时
     # 根本不上报（实测按住 30 秒上报 0 次）→ 丢一次 UP 就永久卡键。
