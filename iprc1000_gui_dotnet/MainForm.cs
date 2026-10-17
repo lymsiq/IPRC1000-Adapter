@@ -586,8 +586,6 @@ internal sealed class MainForm : Form
             // 鼠标模式（2026-10-16）：方块键切模式；参数与状态见 Backend.Mouse
             "setMouseMode" => _backend.SetMouseMode(Arg(0)),
             "setMouseConfig" => _backend.SetMouseConfig(Arg(0)),
-            "setAudioGain" => _backend.SetAudioGain(Arg(0)),
-            "micLevel" => _backend.TakeMicLevel(),
             "mouseSample" => _backend.TakeMouseSample(),
             "mouseCalibrate" => _backend.CalibrateMouse(),
             "setAutoStart" => _backend.SetAutoStart(Arg(0)),

@@ -133,6 +133,11 @@ ENCODING = [
 # 这类检查针对**注入链路** —— 曾经出过的大 bug 都是"注入读了另一份数据源"。
 # 放在源码上（而不是 zip 里）是因为 publish 只有 exe，没有 .cs。
 SRC_FORBIDDEN = [
+    # ★ v1.2.12：用户实测"贴嘴边小声说话输出正常"，增益本身没必要；
+    #   而且 +1 dB 时界面那句"现在没有声音…"的提示会造成误解。整个功能已删。
+    ("麦克风增益已移除（路由）", "iprc1000_gui_dotnet/CableRouter.cs", "MicGain"),
+    ("麦克风增益已移除（命令）", "iprc1000_gui_dotnet/Backend.cs", "SetAudioGain"),
+    ("麦克风增益已移除（界面）", "iprc1000_gui_dotnet/ui/index.html", "micGain"),
     # ★★ v1.2.8：数据 CID 是 L2CAP 动态分配的（0x40/0x41 都可能），不许再写死
     ("不许写死数据 CID", "tools/etw_consumer/src/main.rs", "CID_HID"),
     # ★★ 最重要的一条：注入必须走 Keymaps.Get()，绝不能再用 Keys.Load()。
@@ -241,14 +246,6 @@ SRC_REQUIRED = [
     ("回放也按时间轴判会话", "tools/etw_consumer/src/main.rs", "回放也要**按时间轴判会话**"),
     ("L2CAP 信令单独计数", "tools/etw_consumer/src/main.rs", "sig_frag"),
     ("自检覆盖跨会话假跳号", "tools/bridge_loss_selftest.py", "scenario_two_sessions"),
-    # ★★ 麦克风增益 + 电平表（2026-10-17）：放在写进 CABLE 之前 ⇒ 滑块立刻生效
-    ("麦克风增益有独立实现", "iprc1000_gui_dotnet/MicGain.cs", "internal sealed class MicGain"),
-    ("增益在写进 CABLE 之前生效", "iprc1000_gui_dotnet/CableRouter.cs", "_mic.Apply(asm, 0, n)"),
-    ("增益有纯逻辑自检", "iprc1000_gui_dotnet/MicGain.cs", "public static string SelfTest"),
-    ("增益自检有 CLI 入口", "iprc1000_gui_dotnet/Program.cs", "--micgain-test"),
-    ("界面有增益滑块", "iprc1000_gui_dotnet/ui/index.html", "id=\"micGain\""),
-    ("电平表 10Hz 轮询（不是跟 2 秒的 state）", "iprc1000_gui_dotnet/ui/app.js", "setInterval(micTick, 100)"),
-    ("电平条渐变锚定轨道（不压进填充区）", "iprc1000_gui_dotnet/ui/style.css", "clip-path:inset(0 100% 0 0)"),
     # ★ 移动必须从光标当前位置起算（2026-10-16 用户指正后重做）
     ("被动标定用真实使用学增益", "iprc1000_gui_dotnet/MouseEngine.cs", "CalibrateFromUse"),
     ("开模式不再触发主动校准", "iprc1000_gui_dotnet/MouseEngine.cs", "这里**不做**主动校准"),

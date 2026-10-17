@@ -371,14 +371,3 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
 .seg input{display:none}
 .seg label.on{background:var(--blue-l);color:var(--txt);font-weight:600}
 .hintline{color:var(--txt3);font-size:12px;line-height:1.55;margin:0 0 10px}
-/* 麦克风增益：电平条（绿→黄→红），削波时整条闪红 */
-.micgain{margin:12px 0 6px}
-.meter{position:relative;height:10px;border-radius:6px;background:var(--line);
-  overflow:hidden;margin:8px 0 6px}
-.meter i{display:block;height:100%;width:100%;
-  /* ★ 渐变**锚定在整条轨道上**，再用 clip-path 从左往右揭盖。
-     若改成"宽度 + 渐变"，渐变会被压进填充区 —— 低音量时条尾也显示红色，读数就误导了。 */
-  background:linear-gradient(90deg,#22c55e 0%,#eab308 70%,#ef4444 92%);
-  clip-path:inset(0 100% 0 0);transition:clip-path .08s linear}
-.meter.clip i{background:#ef4444}
-.meter.clip{box-shadow:0 0 0 2px rgba(239,68,68,.35)}

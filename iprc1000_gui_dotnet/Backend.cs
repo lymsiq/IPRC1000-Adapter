@@ -298,24 +298,6 @@ internal sealed class Backend : IDisposable
     /// <summary>进鼠标组之前待在哪个组 —— "关掉鼠标模式"要能回到原处</summary>
     private int _lastNonMouseGroup = 0;
 
-    /// <summary>
-    /// 麦克风增益（界面滑块调）。参数是 dB 字符串，越界由 <see cref="MicGain"/> 夹住。
-    /// 为什么是"设置"而不是"加减"：滑块拖到哪就是哪，避免累计误差。
-    /// </summary>
-    public string SetAudioGain(string? db)
-    {
-        if (!int.TryParse((db ?? "").Trim(), out var v))
-            return "增益要是一个整数（dB）。";
-        var changed = _router.SetMicGain(v);
-        var now = _router.MicDb;
-        var label = now == 0 ? "0 dB（原声）" : $"{now:+0;-0;0} dB（×{Math.Pow(10, now / 20.0):0.00}）";
-        return Env.Json(new { ok = true, changed, db = now,
-            message = changed ? $"麦克风增益已设为 {label} —— 立即生效"
-                              : $"麦克风增益已是 {label}。" });
-    }
-
-    /// <summary>电平表轮询（界面 10 Hz）</summary>
-    public string TakeMicLevel() => Env.Json(_router.MicLevel());
 
     /// <summary>应用鼠标参数（界面滑条调）。参数是一个 JSON 对象字符串。</summary>
     public string SetMouseConfig(string? json)
