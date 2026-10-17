@@ -130,11 +130,9 @@ internal sealed class KeyFilter : IDisposable
     /// 返回 null 表示拿不到信号（桥没跑）——此时退化为绝对超时。
     /// </summary>
     public Func<long?>? AudioSilenceMs { get; set; }
-    // 句柄 → (是不是遥控器, 简短设备标签)。原来是 bool，现在带上标签，
-    // 用来回答"Raw Input 里到底有哪些设备"——遥控器报文到底没来，还是名字不匹配被过滤了。
-    private readonly Dictionary<ulong, (bool Ours, string Label)> _deviceCache = new();
-    /// <summary>按设备标签统计的报文数（诊断用，不参与逻辑）</summary>
-    private readonly Dictionary<string, int> _rawByDevice = new();
+    // 句柄 → 是不是遥控器。**只存一个 bool，不存别的设备的任何信息**
+    // （2026-10-18 用户明确要求：别人的键盘鼠标不要留痕）。
+    private readonly Dictionary<ulong, bool> _deviceCache = new();
     private IntPtr _hook = IntPtr.Zero;
     private HookProc? _proc;                 // 必须保活
     private Thread? _thread;
@@ -640,14 +638,14 @@ internal sealed class KeyFilter : IDisposable
             if (raw.header.dwType != RIM_TYPEKEYBOARD) return;
 
             // 设备过滤：device_handle → 接口路径（结果缓存）
-            if (!_deviceCache.TryGetValue((ulong)raw.header.hDevice, out var dev))
+            if (!_deviceCache.TryGetValue((ulong)raw.header.hDevice, out var ours))
             {
-                var nm = DeviceName(raw.header.hDevice);
-                dev = (nm != null && IsIprc1000(nm), ShortLabel(nm));
-                _deviceCache[(ulong)raw.header.hDevice] = dev;
+                ours = DeviceName(raw.header.hDevice) is { } n && IsIprc1000(n);
+                _deviceCache[(ulong)raw.header.hDevice] = ours;
             }
-            _rawByDevice[dev.Label] = _rawByDevice.TryGetValue(dev.Label, out var c) ? c + 1 : 1;
-            if (!dev.Ours) return;
+            // ★ 不是遥控器 ⇒ **立刻返回**。这里在所有按键读取之前，
+            //   所以物理键盘/鼠标的按键内容**既不会被读取、也不会被记录**（只记个数）。
+            if (!ours) return;
             RawOurs++;
             DeviceSeen = true;
             _lastRawInputAt = DateTime.UtcNow;
@@ -705,24 +703,6 @@ internal sealed class KeyFilter : IDisposable
         finally { Marshal.FreeHGlobal(buf); }
     }
 
-    /// <summary>把设备接口路径缩成 `VID_0A5C&PID_8502` 这种可读标签（认不出就取末尾一段）</summary>
-    private static string ShortLabel(string? path)
-    {
-        if (string.IsNullOrEmpty(path)) return "未知设备";
-        var m = System.Text.RegularExpressions.Regex.Match(path, @"VID_([0-9A-Fa-f]{4})&PID_([0-9A-Fa-f]{4})");
-        if (m.Success) return $"VID_{m.Groups[1].Value.ToUpper()}&PID_{m.Groups[2].Value.ToUpper()}";
-        var tail = path.Length <= 24 ? path : path[^24..];
-        return tail;   // 认不出 VID/PID 就显示路径末段，够用来区分设备
-    }
-
-    /// <summary>各设备的报文数汇总（诊断用；面板据此判断"遥控器报文到底来没来"）</summary>
-    public string RawSourcesText()
-    {
-        if (_rawByDevice.Count == 0) return "";
-        return string.Join(" · ", _rawByDevice
-            .OrderByDescending(kv => kv.Value).Take(4)
-            .Select(kv => $"{kv.Key} {kv.Value} 条"));
-    }
 
     private static bool IsIprc1000(string path)
     {

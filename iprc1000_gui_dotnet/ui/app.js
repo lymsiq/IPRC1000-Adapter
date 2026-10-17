@@ -637,7 +637,6 @@ function renderEnv(s) {
              ? `遥控器 ${s.rawOurs} 条 / 全部 ${s.rawMessages || 0} 条（直读可用）`
              : `0 条（全部 ${s.rawMessages || 0} 条来自其它设备 ⇒ 直读不可用）`,
            (s.rawOurs || 0) > 0 ? 'ok' : '') +
-    (s.rawSources ? kvItem('Raw Input 来源', s.rawSources) : '') +
     // 日志只在打开诊断开关时才有意义；默认关就不显示这一格（否则用户会以为"还有日志"）
     (logOn && ks.logPath ? kvItem('按键日志', '已写入 ' + ks.logPath) : '');
   $('#keySrcNote').className = 'note' + (isEtw ? '' : ' warn');
@@ -1143,9 +1142,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.23',
+      version: '1.2.24',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.23（构建于 2026-10-18 09:05）',
+      versionLine: 'v1.2.24（构建于 2026-10-18 09:40）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
