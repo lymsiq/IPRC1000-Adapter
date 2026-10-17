@@ -142,6 +142,13 @@ struct Stats {
     seed_reports: u64,
     /// 启动静默期里被吃掉的报文数（>0 说明确实有"启动即按键"的情况）
     startup_swallowed: u64,
+    /// 桥启动后收到的**第一个按键事件**：距启动多少毫秒 / 是哪个 usage / 是否被静默期吃掉。
+    /// 用途很具体：下一次"启动就弹右键"发生时，直接看这三个数就知道
+    /// "有没有按键、什么键、是启动瞬间还是几秒后"，不用再猜。
+    /// u64::MAX = 还没有收到过任何带键的报文
+    first_key_ms: u64,
+    first_key_usage: u8,
+    first_key_swallowed: bool,
     /// 实测按键报告走的是哪个 CID（第一次见到时记录，诊断用）
     key_cid: Option<u16>,
     /// 实测音频走的是哪个 CID
@@ -614,6 +621,10 @@ struct Bridge {
     quiet_until: Option<std::time::Instant>,
     /// 是否是离线回放（回放要跳过"启动静默期"，否则自检里的按键会被全部吃掉）
     is_replay: bool,
+    /// 桥的启动时刻（用于记录"第一个按键距启动多久"）
+    started: std::time::Instant,
+    /// 是否已经记录过"启动后第一个带键的报文"
+    first_key_done: bool,
     /// 上一条按键报文到达的时刻（用来判"新一段"：空档 ≥600 ms 就重新取基线）
     last_report: Option<std::time::Instant>,
     /// 最近一个事件的 ETW 时间戳（100ns 自 1601，即 FILETIME）—— 用来实测投递延迟
@@ -663,6 +674,8 @@ impl Bridge {
             seeded_held: [false; 256],
             quiet_until: None,
             is_replay: false,
+            started: std::time::Instant::now(),
+            first_key_done: false,
             last_report: None,
             pending: None,
         }
@@ -833,15 +846,29 @@ impl Bridge {
             return;
         }
 
-        // ⓪-1 启动静默期：状态照常跟踪，但**不发事件**
-        if let Some(until) = self.quiet_until {
-            if t < until {
-                self.held = now;
-                self.stats.lock().unwrap().startup_swallowed += 1;
-                return;
+        // ⓪-1 启动静默期判定（先算出来，因为下面要按它记录诊断字段）
+        let in_quiet = self.quiet_until.map(|u| t < u).unwrap_or(false);
+
+        // ⓪-2 记录"启动后第一个带键的报文"——**无论是否被静默期吃掉都记**。
+        //   下次"启动就弹右键"时，看 bridge-stats.json 里
+        //   first_key_ms / first_key_usage / first_key_swallowed 就能定性：
+        //   有没有按键、是哪个键、在启动后多久、有没有被挡住。
+        if !self.first_key_done {
+            if let Some(u) = now.iter().position(|&b| b) {
+                self.first_key_done = true;
+                let mut st = self.stats.lock().unwrap();
+                st.first_key_ms = self.started.elapsed().as_millis() as u64;
+                st.first_key_usage = u as u8;
+                st.first_key_swallowed = in_quiet;
             }
-            self.quiet_until = None;   // 静默期结束，正常放行
         }
+
+        if in_quiet {
+            self.held = now;
+            self.stats.lock().unwrap().startup_swallowed += 1;
+            return;
+        }
+        self.quiet_until = None;   // 静默期已过，正常放行
 
         // ① 先放掉不再按住的（升序，保证事件顺序确定）
         for u in 0..256usize {
@@ -1303,6 +1330,9 @@ fn main() {
                         "\"truncCont\":{},\"oddFrag\":{},\"hdrOdd\":{},",
                         "\"orphanCont\":{},\"shortPdu\":{},\"sigFrag\":{},",
                         "\"hidReports\":{},\"keyEvents\":{},\"otherEvents\":{},",
+                        // 启动诊断：第一个带键的报文（-1 = 至今没收到过任何带键报文）
+                        "\"firstKeyMs\":{},\"firstKeyUsage\":\"0x{:02X}\",\"firstKeySwallowed\":{},",
+                        "\"startupSwallowed\":{},",
                         "\"silentMs\":{},\"inSession\":{}}}"
                     ),
                     std::process::id(),
@@ -1330,6 +1360,10 @@ fn main() {
                     s.short_pdu,
                     s.sig_frag,
                     s.hid_reports,
+                    if s.first_key_ms == 0 { -1i64 } else { s.first_key_ms as i64 },
+                    s.first_key_usage,
+                    if s.first_key_swallowed { "true" } else { "false" },
+                    s.startup_swallowed,
                     s.key_events,
                     s.other,
                     silent,
