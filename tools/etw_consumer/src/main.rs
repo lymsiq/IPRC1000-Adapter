@@ -64,7 +64,22 @@ const L2CAP_HDR: usize = 4;
 /// 一帧音频的 ACL 总长 = L2CAP 头(4) + 负载(653)
 const AUDIO_TOTAL: usize = L2CAP_HDR + FRAME_LEN;
 /// 遥控器把音频与按键都发在 L2CAP CID 0x41（HID 控制通道）上
-const CID_HID: u16 = 0x0041;
+/// HID 数据通道的 CID **不写死**（见 `is_data_cid` 的注释）。
+///
+/// 2026-10-17 实测踩到：L2CAP 的动态 CID 是**每次连接按升序分配**的。
+/// Windows 的 HIDP 会开两条通道（Control / Interrupt）；**谁先开谁拿 0x0040**。
+/// 曾经写死 `0x0041`，某次重连后变得"按键全失效、音频一帧没有"，
+/// 桥日志里全是 `未识别分片 dlen=14`，而 `首条未识别` 的 CID 是 **0x0040**。
+const CID_DYNAMIC_LO: u16 = 0x0040;
+const CID_DYNAMIC_HI: u16 = 0x007F;
+
+/// 是不是"动态分配的 HID 数据通道"CID。
+///
+/// 为什么用范围而不是等值：同一只遥控器不同次连接会落在 0x40/0x41 任一个上。
+/// 真正区分"这是哪一路数据"的**不是 CID，而是 L2CAP 长度 + 报告头**（见下面的分派）。
+fn is_data_cid(cid: u16) -> bool {
+    (CID_DYNAMIC_LO..=CID_DYNAMIC_HI).contains(&cid)
+}
 /// L2CAP **信令**通道：建链/协商用的小包（`08 00 01 00 02 02 04 00` 这类），与音频/按键无关
 const CID_SIG: u16 = 0x0001;
 /// 按键报告（HID 输入报告）的 L2CAP 负载长度
@@ -122,6 +137,10 @@ struct Stats {
     other: u64,
     key_events: u64,
     hid_reports: u64,
+    /// 实测按键报告走的是哪个 CID（第一次见到时记录，诊断用）
+    key_cid: Option<u16>,
+    /// 实测音频走的是哪个 CID
+    audio_cid: Option<u16>,
     /// 事件「产生 → 我们收到」的延迟统计（毫秒），用持续流动的链路层事件测
     lat_n: u64,
     lat_sum: u64,
@@ -649,9 +668,15 @@ impl Bridge {
                 } else { 0 };
 
                 // ① 按键：单分片 HID 报告（L2CAP 负载 10 字节，报告头 a1 01）
-                if cid == CID_HID && l2cap_len == HID_PAYLOAD_LEN {
+                //    ★ 判据是**长度 + 报告头**，CID 只要求落在动态范围（0x40~0x7F）——
+                //      因为 Control/Interrupt 谁先连谁拿 0x40，写死会整路失效。
+                if is_data_cid(cid) && l2cap_len == HID_PAYLOAD_LEN {
                     if !truncated && acl.len() >= 6 && acl[4] == 0xa1 && acl[5] == 0x01 {
-                        self.stats.lock().unwrap().hid_reports += 1;
+                        {
+                            let mut st = self.stats.lock().unwrap();
+                            st.hid_reports += 1;
+                            st.key_cid.get_or_insert(cid);
+                        }
                         let end = acl.len().min(14);
                         let usages: Vec<u8> = acl[8..end].to_vec();
                         self.handle_hid_report(&usages);
@@ -659,8 +684,9 @@ impl Bridge {
                     return;
                 }
 
-                // ② 音频起始分片
-                if cid == CID_HID && l2cap_len == FRAME_LEN {
+                // ② 音频起始分片（同样只看长度，不认死 CID）
+                if is_data_cid(cid) && l2cap_len == FRAME_LEN {
+                    self.stats.lock().unwrap().audio_cid.get_or_insert(cid);
                     if truncated {
                         // 首片只带回了 L2CAP 头 → 这一帧不可能补齐
                         self.pending = None;
@@ -1259,6 +1285,15 @@ fn main() {
                 let dblk = blocked.wrapping_sub(prev_blocked);
                 let dorphan = cur.6.3.wrapping_sub(prev_loss.6.3);
                 let dshort = cur.6.4.wrapping_sub(prev_loss.6.4);
+                // 实测的 HID 数据 CID（动态分配，0x40 或 0x41 —— 见 is_data_cid 的注释）
+                let (aud, kcid) = {
+                    let s2 = st.lock().unwrap();
+                    (s2.audio_cid, s2.key_cid)
+                };
+                let cidtxt = |c: Option<u16>| match c {
+                    Some(v) => format!("0x{v:04X}"),
+                    None => "未出现".to_string(),
+                };
                 if d != (0, 0, 0, 0, 0, 0) || dblk > 0 || dorphan > 0 || dshort > 0 {
                     let (odd, sample, conts, orphan, short_pdu) = &cur.6;
                     let mut kinds: Vec<String> = odd.iter()
@@ -1273,7 +1308,8 @@ fn main() {
                     diag::log(&format!(
                         "★ 音频丢失明细: 组帧失败(续片没到) +{} · seq跳号 +{}（跳过 {} 帧）\
                          · 续片被截断 +{} · 未识别分片 +{} [{}] · 帧头异常 +{} · \
-                         孤续片 +{} · 怪长帧 +{} · 续片长度分布 [{}]{} · UDP缓冲满丢 +{}",
+                         孤续片 +{} · 怪长帧 +{} · 续片长度分布 [{}]{} · UDP缓冲满丢 +{} · \
+                         实际 CID 音频={} 按键={}",
                         d.0, d.1, d.2, d.3, d.4,
                         if kinds.is_empty() { "无".to_string() } else { kinds.join(", ") },
                         d.5,
@@ -1281,7 +1317,8 @@ fn main() {
                         short_pdu.wrapping_sub(prev_loss.6.4),
                         if cl.is_empty() { "无".to_string() } else { cl.join(", ") },
                         if sample.is_empty() { String::new() } else { format!(" · 首条未识别 {sample}") },
-                        dblk
+                        dblk,
+                        cidtxt(aud), cidtxt(kcid)
                     ));
                 }
                 prev_loss = (cur.0, cur.1, cur.2, cur.3, cur.4, cur.5,

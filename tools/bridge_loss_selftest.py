@@ -56,7 +56,7 @@ def build_frame(seq, faulty_cont_len=None, truncate_cont=0):
     return payload
 
 
-def emit_frame(out, seq, split=None, truncate_cont=0, force_len=None):
+def emit_frame(out, seq, split=None, truncate_cont=0, force_len=None, cid=0x0041):
     """把一帧写成回放格式的若干条 ACL 分片。
 
     回放格式：repeat { u8 flag; u8 pad; u16 dlen(LE); u32 dt_ms(LE); u16 acl_len(LE); u8 acl[] }
@@ -66,7 +66,7 @@ def emit_frame(out, seq, split=None, truncate_cont=0, force_len=None):
     ★ 真机实测见过 `[290, 23]` —— 同一个 657 字节 PDU 被拆成三片。
     """
     payload = build_frame(seq)
-    l2cap_hdr = struct.pack("<HH", force_len if force_len is not None else PAYLOAD, 0x0041)
+    l2cap_hdr = struct.pack("<HH", force_len if force_len is not None else PAYLOAD, cid)
 
     whole = l2cap_hdr + payload            # 657 字节
     split = split or [ACL_CONT]
@@ -167,15 +167,34 @@ def emit_hid_report(out, usage=0x10):
     return _rec(2, 14, acl)
 
 
-def emit_hid_multi(out, usages):
+def emit_hid_multi(out, usages, cid=0x0041):
     """一条按键报告，**6 个 usage 槽可填多个**（最多 6 个）。
 
     遥控器上同时按两个键时就是这个形状（实测 `back+menu` → `a1 01 00 00 09 11 ...`）。
     """
     slots = list(usages) + [0] * (6 - len(usages))
-    acl = struct.pack("<HH", 10, 0x0041) + bytes([0xA1, 0x01, 0x00, 0x00]) + bytes(slots)
+    acl = struct.pack("<HH", 10, cid) + bytes([0xA1, 0x01, 0x00, 0x00]) + bytes(slots)
     assert len(acl) == 14
     return _rec(2, 14, acl)
+
+
+def scenario_alt_cid(n=3):
+    """★★ 2026-10-17 线上事故的回归用例：**音频与按键走 CID 0x40**。
+
+    事故经过：L2CAP 的动态 CID 是**每次连接按升序分配**的，Windows 的 HIDP
+    开 Control/Interrupt 两条通道，**谁先开谁拿 0x40**。桥曾经写死
+    `cid == 0x41` ⇒ 某次重连后数据落在 0x40，于是"按键整体无效、音频一帧没有"，
+    日志里全是 `未识别分片 dlen=14`。
+
+    判据必须是**L2CAP 长度 + 报告头**，而不是 CID 等值。
+    """
+    out = b""
+    for i in range(n):
+        out = emit_frame(out, i, cid=0x0040)         # 音频走 0x40
+    # ⚠ emit_hid_multi 只返回**新的一条**（与 emit_hid_report 同约定），必须 `+=`
+    out += emit_hid_multi(out, [0x10], cid=0x0040)   # 语音键也走 0x40
+    out += emit_hid_multi(out, [],     cid=0x0040)
+    return out
 
 
 def scenario_two_keys():
@@ -351,6 +370,10 @@ CASES = [
     ("⑨ 两键同按（back+menu）：**不许丢第二个键**，且事件顺序正确",
      scenario_two_keys(),
      dict(frames=0, key_seq=["09 DOWN", "11 DOWN", "09 UP", "11 UP"])),
+
+    ("⑩ 音频/按键走 CID 0x40（动态分配另一种落法）—— 不许整路失效",
+     scenario_alt_cid(3),
+     dict(frames=3, key_seq=["10 DOWN", "10 UP"])),
 
     ("④ 续片被截断（负载不足）：以前完全没有计数",
      scenario_cont_truncated(50, 10, 20, 200),
