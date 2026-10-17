@@ -18,6 +18,14 @@ internal sealed class CableRouter : IDisposable
     /// <summary>有界抖动缓冲（替代原来的 BufferedWaveProvider）</summary>
     private JitterBuffer? _jit;
 
+    // ── 包间隔统计（每段会话一份）──
+    // ★ 为什么需要它：某次实测 62 秒丢了 375 帧（12%），但"丢帧分类"全是 0
+    //   —— 说明不是分片层面的问题，而是**帧干脆没到**。
+    //   光看累计数分不清"均匀地丢了 12%"还是"某一串全丢了又补回来"，
+    //   所以直接量**相邻音频包的到达间隔**：均匀抖动 vs 成串到达，一眼可辨。
+    private readonly List<int> _gaps = new(4096);
+    private long _lastPktMs;
+
     private Thread? _thread;
     private volatile bool _running;
     private long _packets;
@@ -68,6 +76,24 @@ internal sealed class CableRouter : IDisposable
         _thread = new Thread(Loop) { IsBackground = true, Name = "cable-router" };
         _thread.Start();
         PrewarmInBackground();     // 把"打开声卡"的 100~300 ms 挪到启动阶段（不阻塞 UI）
+    }
+
+    /// <summary>
+    /// 本段会话的包间隔概况 —— 用来区分"均匀抖动"和"成串到达"。
+    /// 正常应该是：中位 ≈20 ms、几乎没有 >40 ms。
+    /// 若 >40 ms 的次数很多而总量又对得上 → 音频是**成串**来的（ETW/UDP 侧问题）；
+    /// 若中位明显 >20 ms → 帧**真的少了**（链路丢帧）。
+    /// </summary>
+    private string GapSummary()
+    {
+        if (_gaps.Count < 10) return "";
+        var sorted = _gaps.ToArray();
+        Array.Sort(sorted);
+        var med = sorted[sorted.Length / 2];
+        var over40 = sorted.Count(g => g > 40);
+        var over100 = sorted.Count(g => g > 100);
+        var p95 = sorted[(int)(sorted.Length * 0.95)];
+        return $" · 包间隔 中位 {med} ms / p95 {p95} ms / >40ms {over40} 次 / >100ms {over100} 次（{_gaps.Count} 个间隔）";
     }
 
     private MMDevice? FindCable()
@@ -218,12 +244,14 @@ internal sealed class CableRouter : IDisposable
                         //   真隔了一段才按的则清掉旧尾巴。两边都占。
                         _inSession = true;
                         EnsureSink();
+                        _gaps.Clear();
+                        _lastPktMs = 0;
                         Log($"[CLEAR] 新会话开始（累计 {Packets} 包）");
                     }
                     else if (n == 3 && asm[0] == (byte)'E')      // END
                     {
                         _inSession = false;
-                        Log($"[END] 会话结束（累计 {Packets} 包 / {Bytes} 字节）");
+                        Log($"[END] 会话结束（累计 {Packets} 包 / {Bytes} 字节）{GapSummary()}");
                     }
                     else if (n >= 2 && n % 2 == 0)
                     {
@@ -245,6 +273,14 @@ internal sealed class CableRouter : IDisposable
                                 Log($"[LAT] 语音键按下 → 首包音频到达 {ms:F0} ms（声卡已就绪={ok}）");
                             _voiceDownAt = DateTime.MinValue;
                         }
+                        // 包间隔（同一次会话内相邻音频包的到达间隔）
+                        var nowMs = Environment.TickCount64;
+                        if (_lastPktMs != 0 && _gaps.Count < 20000)
+                        {
+                            var g = (int)(nowMs - _lastPktMs);
+                            if (g >= 0 && g < 5000) _gaps.Add(g);
+                        }
+                        _lastPktMs = nowMs;
                         if (ok) _jit!.AddSamples(asm, 0, n);
                     }
                 }

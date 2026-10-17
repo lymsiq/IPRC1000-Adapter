@@ -524,10 +524,14 @@ function renderEnv(s) {
   //   说话时它应该一直是几百毫秒以内；如果一路涨到几千毫秒，说明**帧根本没来**
   //   （遥控器/BT/ETW 侧的问题），而不是声卡写不进去。
   const silent = (b.silentMs === undefined || b.silentMs === null) ? -1 : b.silentMs;
+  // ★ 只有"**正在说话**（会话中）却没帧"才是故障。闲着没按语音键时本来就没有音频，
+  //   以前这里一律标红"已断流" —— 界面一空闲就报警，用户会以为坏了（实际被误导过）。
+  const inSess = b.inSession === true;
   const silentTxt = silent < 0 ? '尚未收到'
     : silent < 1200 ? `${silent} ms 前 ✓`
-    : `${(silent / 1000).toFixed(1)} s 前 ← 已断流`;
-  const silentCls = silent < 0 ? '' : (silent < 1200 ? 'ok' : 'bad');
+    : inSess ? `${(silent / 1000).toFixed(1)} s 前 ← 说话中却断了！`
+    : `${(silent / 1000).toFixed(1)} s 前（没在说话）`;
+  const silentCls = silent < 0 ? '' : (silent < 1200 ? 'ok' : (inSess ? 'bad' : ''));
   $('#bridgeKv').innerHTML =
     kvItem('运行状态', b.zombie ? '僵死（进程在但已停止上报）' : (b.running ? '运行中' : '已停止'),
            b.zombie ? 'bad' : (b.running ? 'ok' : '')) +
@@ -1124,9 +1128,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.12',
+      version: '1.2.13',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.12（构建于 2026-10-17 19:35）',
+      versionLine: 'v1.2.13（构建于 2026-10-17 19:50）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

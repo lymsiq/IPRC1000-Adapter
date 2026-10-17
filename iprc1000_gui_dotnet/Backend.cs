@@ -915,6 +915,9 @@ internal sealed class Backend : IDisposable
         return new JsonObject
         {
             ["running"] = running,
+            // ★ 前端靠它区分"闲着没说话"和"正在说话却断流" —— 否则界面一空闲就标红，
+            //   看着像故障（2026-10-17 用户被这条误导过一次）。
+            ["inSession"] = L("inSession") != 0,
             ["zombie"] = zombie,
             ["frames"] = L("frames"),
             ["samples"] = L("samples16"),
