@@ -234,6 +234,11 @@ SRC_REQUIRED = [
     ("界面有增益滑块", "iprc1000_gui_dotnet/ui/index.html", "id=\"micGain\""),
     ("电平表 10Hz 轮询（不是跟 2 秒的 state）", "iprc1000_gui_dotnet/ui/app.js", "setInterval(micTick, 100)"),
     ("电平条渐变锚定轨道（不压进填充区）", "iprc1000_gui_dotnet/ui/style.css", "clip-path:inset(0 100% 0 0)"),
+    # ★★ v1.2.8 事故：HID 数据 CID 曾被写死 0x0041，某次重连落到 0x40 → 按键全失效
+    ("HID 数据 CID 用动态范围判定", "tools/etw_consumer/src/main.rs", "fn is_data_cid"),
+    ("不许再写死 CID_HID", "tools/etw_consumer/src/main.rs", "const CID_HID"),
+    ("不许再按等值比 CID", "tools/etw_consumer/src/main.rs", "cid == CID_HID"),
+    ("CID 进日志（日志自证）", "tools/etw_consumer/src/main.rs", "实际 CID 音频="),
     # ★ 移动必须从光标当前位置起算（2026-10-16 用户指正后重做）
     ("被动标定用真实使用学增益", "iprc1000_gui_dotnet/MouseEngine.cs", "CalibrateFromUse"),
     ("开模式不再触发主动校准", "iprc1000_gui_dotnet/MouseEngine.cs", "这里**不做**主动校准"),
