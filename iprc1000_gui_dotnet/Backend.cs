@@ -548,7 +548,38 @@ internal sealed class Backend : IDisposable
         if ((DateTime.UtcNow - _lastAutoStart).TotalSeconds < 10) return;
         _lastAutoStart = DateTime.UtcNow;
         if (BridgeRunning) StopBridge();      // 先清掉僵死的那个
+
+        // ★★ 关键（2026-10-18）：清掉**不属于本实例的遗留桥**。
+        //
+        //   桥自身有"单实例守卫"：如果已经有一把在跑，**新拉起来的那把会立刻退出**。
+        //   于是上一个实例被强杀/崩溃后留下的旧桥会一直霸占着 —— 用户装上新版本，
+        //   实际跑的却是**旧桥的代码**，表现为"改了没生效"（这次排查就撞上了：
+        //   stats 里的 pid 一直是旧的那个）。
+        //
+        //   这里按 **PID 精确**清（只认进程名 etw_consumer，绝不按映像名批量杀 ——
+        //   那会连本程序自己的桥一起杀掉）。清理后本实例拉起的才真正生效。
+        ReapStaleBridge();
+
         StartBridge();
+    }
+
+    /// <summary>杀掉"不是本实例拉起"的遗留语音桥（按 stats 里的 pid 精确定位）。</summary>
+    private void ReapStaleBridge()
+    {
+        try
+        {
+            var st = ReadBridgeStats();
+            var pid = st?["pid"]?.GetValue<int>() ?? -1;
+            if (pid <= 0 || pid == SafePid()) return;          // 没有 / 就是我们自己的
+            var p = System.Diagnostics.Process.GetProcessById(pid);
+            if (p == null || p.HasExited) return;
+            // 只认 etw_consumer —— 万一 pid 被系统复用，也不会误杀别的程序
+            if (!string.Equals(p.ProcessName, "etw_consumer", StringComparison.OrdinalIgnoreCase)) return;
+            p.Kill(true);
+            p.WaitForExit(2000);
+            DeviceLog($"清理遗留语音桥 pid={pid}（上一实例留下的，会挡住新桥）");
+        }
+        catch { /* 拿不到就跳过，不影响正常启动 */ }
     }
 
     /// <summary>语音键按下时预热声卡（由 KeyFilter.VoiceKeyDown 回调）</summary>
