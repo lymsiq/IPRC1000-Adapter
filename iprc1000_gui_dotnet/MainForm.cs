@@ -112,6 +112,8 @@ internal sealed class MainForm : Form
         trayMenu.Items.Add("退出", null, (_, _) => { _reallyExit = true; Application.Exit(); });
         _tray.ContextMenuStrip = trayMenu;
         _tray.DoubleClick += (_, _) => RestoreFromTray();
+        // 单击左键也打开 —— 托盘应用的肌肉记忆就是"点一下"
+        _tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) RestoreFromTray(); };
 
         // 单实例：第二个实例会 Set 事件要求我们把窗口显示出来
         StartShowWindowListener();
@@ -213,6 +215,7 @@ internal sealed class MainForm : Form
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         {
             try { KeyFilter.ReleaseAllInjected(); } catch { }
+            try { KeyLog.Flush(); } catch { }
             try { _showEvent?.Dispose(); } catch { }
         };
     }
@@ -763,8 +766,11 @@ internal sealed class MainForm : Form
 
     private void RestoreFromTray()
     {
+        // ★ 顺序：**先**把 WindowState 改回 Normal，**再** Show。
+        //   反过来的话 `Show()` 触发的 OnVisibleChanged 里拿到的还是 Minimized，
+        //   会被下面那条"最小化时不建界面"的守卫挡掉，界面就永远建不出来。
+        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
         Show();
-        WindowState = FormWindowState.Normal;
         Activate();
     }
 
@@ -783,7 +789,10 @@ internal sealed class MainForm : Form
         //   两个入口（最小化 / 点 X 收托盘）都走 Hide()，这里一处就够。
         SetUiVisible(Visible);
 
-        if (Visible)
+        // ⚠ 这里必须排除 `Minimized`：启动到托盘时框架会**先让窗口可见、再 Hide()**
+        //   （2026-10-17 实测：靠这条时序绕过了构造函数里的延迟，WebView2 照样在 293 ms 被建起来）。
+        //   只有"真的在屏幕上（Normal/Maximized）"才补建。
+        if (Visible && WindowState != FormWindowState.Minimized)
         {
             // 露出来了：取消隐藏计时；若界面进程已被释放（或还没初始化成功），就地补建
             _hiddenSince = DateTime.MinValue;

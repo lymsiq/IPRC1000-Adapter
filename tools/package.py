@@ -177,6 +177,16 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.15：默认启动进托盘（原来 StartMinimized 是 bool 无初始值 = false）
+    ("默认启动进托盘", "iprc1000_gui_dotnet/Settings.cs", "public bool StartMinimized { get; set; } = true;"),
+    ("老配置一次性迁移", "iprc1000_gui_dotnet/Settings.cs", "if (_data.SchemaVersion < 1)"),
+    ("托盘单击也能打开", "iprc1000_gui_dotnet/MainForm.cs", "_tray.MouseClick"),
+    ("启动瞬时可见不建界面", "iprc1000_gui_dotnet/MainForm.cs", "WindowState != FormWindowState.Minimized"),
+    # ★ v1.2.15：按键日志异步（同步写盘每行 0.253 ms，一次按键 5~8 行，在注入之前）
+    ("按键日志异步写入", "iprc1000_gui_dotnet/KeyLog.cs", "BlockingCollection"),
+    ("热路径只入队", "iprc1000_gui_dotnet/EtwKeySource.cs", "KeyLog.Write(line)"),
+    ("日志轮转（防越写越慢）", "iprc1000_gui_dotnet/KeyLog.cs", "RotateBytes"),
+    ("日志自检入口", "iprc1000_gui_dotnet/Program.cs", "--keylog-test"),
     # ★ v1.2.14：静默失效探针（今天那次"按键全失效过了 8 分钟才发现"的兜底）
     ("按键链路探针（纯函数）", "iprc1000_gui_dotnet/KeyPathWatch.cs", "public static bool Step"),
     ("探针接进桥状态", "iprc1000_gui_dotnet/Backend.cs", "KeyPathWatch.Step("),

@@ -22,6 +22,16 @@ internal static class Settings
                 _data = JsonSerializer.Deserialize<SettingsData>(File.ReadAllText(File_)) ?? new();
         }
         catch { /* 忽略损坏的设置，用默认值 */ }
+
+        // ★ 迁移（只跑一次）：v1.2.14 及更早的 settings.json 里 `startMinimized` 已被写成 false
+        //   （因为默认值就是 false，Save 过一次就落盘了）。用户要求"默认进托盘"，
+        //   所以这里强制改回 true 并升版本号 —— 只在 SchemaVersion 还是旧值时执行。
+        if (_data.SchemaVersion < 1)
+        {
+            _data.StartMinimized = true;
+            _data.SchemaVersion = 1;
+            Save();
+        }
     }
 
     public static bool AutoRun
@@ -80,10 +90,18 @@ internal static class Settings
     private sealed class SettingsData
     {
         public bool AutoRun { get; set; }
-        public bool StartMinimized { get; set; }
+        /// <summary>
+        /// 启动时只进托盘、不打开窗口（默认 **true**）。
+        ///
+        /// ⚠ 这里原来是 `{ get; set; }`（没有初始值 ⇒ **false**），而 MainForm 的注释一直写着
+        /// "默认开" —— 注释与实现不一致，实际表现是**开机自启会直接弹出窗口**。
+        /// </summary>
+        public bool StartMinimized { get; set; } = true;
         public bool AutoStartBridge { get; set; } = true;
         public bool AutoSwitchDriver { get; set; } = true;
         public bool AutoKeepDefaultMic { get; set; } = true;
         public string KeySource { get; set; } = "auto";
+        /// <summary>配置版本号，用于一次性迁移（0 = v1.2.14 及更早）</summary>
+        public int SchemaVersion { get; set; }
     }
 }

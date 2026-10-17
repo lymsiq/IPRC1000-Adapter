@@ -67,15 +67,14 @@ internal sealed class EtwKeySource : IDisposable
     }
 
     /// <summary>把任意一行写进同一个按键日志（HID 直读那条路也复用）</summary>
-    public static void AppendLog(string line)
-    {
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
-            File.AppendAllText(LogPath, $"{DateTime.Now:HH:mm:ss.fff}  {line}\n");
-        }
-        catch { }
-    }
+    /// <summary>
+    /// 写一行按键日志。
+    ///
+    /// ★ 只是**入队**（`KeyLog.Write`），真正的 open/write/close 在后台线程做。
+    ///   原来这里直接 `File.AppendAllText`：本机实测每行 0.253 ms，一次按键 5~8 行
+    ///   ⇒ **注入之前先等 1.3 ms**，而且文件越大、开着实时杀毒就越慢越抖。
+    /// </summary>
+    public static void AppendLog(string line) => KeyLog.Write(line);
     public bool Online => _running && _udp != null;
     public long Events { get; private set; }
     public long Reports { get; private set; }

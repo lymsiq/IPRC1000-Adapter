@@ -1,6 +1,8 @@
 using System;
 using System.Text;
 
+namespace Iprc1000Adapter;
+
 /// <summary>
 /// 「按键链路静默失效」探针。
 ///

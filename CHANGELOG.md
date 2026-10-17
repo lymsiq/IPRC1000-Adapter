@@ -5,6 +5,52 @@
 
 ---
 
+## [1.2.15] - 2026-10-17
+
+### 修：**默认启动没进托盘**（注释写着"默认开"，代码却是 `false`）
+
+`Settings.SettingsData.StartMinimized` 原来是 `{ get; set; }` —— **bool 无初始值 = false**。
+而 `MainForm` 的注释一直写着"启动时最小化到托盘（默认开）"。
+⇒ 实际表现：**开机自启会直接把窗口弹出来**，与你的要求相反。
+
+改法：
+- 默认值 `= true`；
+- **一次性迁移**：老 `settings.json` 里 `startMinimized` 已经被写成 `false` 了，
+  所以加了 `SchemaVersion`，只在旧版本时强制改回 `true`（只跑一次，不会覆盖你以后的设置）；
+- 托盘**单击左键**也能打开（原来只有双击和右键菜单）。
+
+### 修：启动瞬间"先 Show 再 Hide"绕过了懒加载
+
+v1.2.14 的延迟创建被 `OnVisibleChanged` 绕过了 —— 启动时框架先让窗口可见、再 `Hide()`，
+那一瞬就触发了创建。真机日志抓到的矛盾：
+
+```
+[T+287 ms] 启动到托盘：界面暂不创建（…）
+[T+293 ms] 开始初始化 WebView2（创建 Chromium 环境）   ← 还是建了
+```
+
+改法：`OnVisibleChanged` 里加 `WindowState != Minimized` 守卫；`RestoreFromTray`
+改成**先**把 `WindowState` 复位、**再** `Show()`（顺序反了会导致界面永远建不出来）。
+
+**实测（托盘启动 6 秒后）**：主窗口句柄 **0**、本程序 `msedgewebview2` 子进程 **0 个**、
+工作集 **63.3 MB**、**窗口构造到就绪 264 ms**（之前 674 ms）。
+
+### 修：**按键日志不再走同步写盘**
+
+原来 `EtwKeySource.AppendLog` 直接 `File.AppendAllText` —— 每行 open/write/close，
+而且在**注入之前**、在 ETW 投递线程上。**本机实测每行 0.253 ms**，一次按键产生 5~8 行
+⇒ **约 1.3 ms 的纯等待**（文件越大、开着实时杀毒还会更慢更抖）。
+
+现在只入队（`KeyLog`，后台线程合并写），并顺手加了**轮转**（超 512 KB 转 `.1`），
+否则日志只增不减、越写越慢。
+
+自检 `--keylog-test` 量化了两者差距：**入队 2 万行 27 ms；若同步写盘约 5000 ms（差 185 倍）**。
+
+### 验证
+
+C# 0 警告 0 错误 · `--jitter-test` 8/8 · `--keypath-test` 5/5 · `--keylog-test` **3/3** ·
+`bridge_loss_selftest` 10/10 · `ui_probe` 全绿 · `package.py` 全过
+
 ## [1.2.14] - 2026-10-17
 
 ### 新增：**「按键链路静默失效」探针**（今天那次事故的兜底）
