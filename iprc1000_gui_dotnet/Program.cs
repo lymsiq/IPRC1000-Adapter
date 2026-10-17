@@ -89,6 +89,17 @@ internal static class Program
         // 抖动缓冲自检：--jitter-test [输出文件]
         //   不需要声卡、不需要遥控器：纯内存驱动，验证"有界"的三个边界
         //   （起播阈值 / 积压上限且丢最旧 / 静默超时判新会话）。
+        // 按键链路静默失效探针的自检：--keypath-test [输出文件]
+        if (args.Length > 0 && args[0] == "--keypath-test")
+        {
+            var pk = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "keypath_test.txt");
+            var txt = "IPRC1000 按键链路探针自检（纯逻辑）\n" + new string('=', 58) + "\n"
+                      + KeyPathWatch.SelfTest();
+            try { File.WriteAllText(pk, txt, new System.Text.UTF8Encoding(true)); } catch { }
+            Console.WriteLine(txt);
+            return;
+        }
+
         if (args.Length > 0 && args[0] == "--jitter-test")
         {
             var pj = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "jitter_test.txt");

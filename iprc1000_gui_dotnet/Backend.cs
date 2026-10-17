@@ -13,6 +13,9 @@ internal sealed class Backend : IDisposable
     private DateTime _bridgeStart;
     private readonly object _lock = new();
 
+    /// <summary>「只涨报告不涨事件」探针（见 KeyPathWatch 的说明）</summary>
+    private readonly KeyPathWatch.State _keyPath = new();
+
     private DateTime _probeAt = DateTime.MinValue;
     private object? _cableCache;
     private bool _cableReady, _micOk, _uhidReady;
@@ -912,12 +915,22 @@ internal sealed class Backend : IDisposable
         long L(string k) { try { return st?[k]?.GetValue<long>() ?? 0; } catch { return 0; } }
         double D(string k) { try { return st?[k]?.GetValue<double>() ?? 0; } catch { return 0; } }
         var silentMs = st == null ? -1 : L("silentMs");
+
+        // ★ 静默失效探针：只在"报告在涨、事件不涨"时才算异常（空闲不报，见 KeyPathWatch）
+        var hidCount = L("hidReports");
+        var keyCount = L("keyEvents");
+        KeyPathWatch.Step(_keyPath, hidCount, keyCount, Environment.TickCount64);
         return new JsonObject
         {
             ["running"] = running,
             // ★ 前端靠它区分"闲着没说话"和"正在说话却断流" —— 否则界面一空闲就标红，
             //   看着像故障（2026-10-17 用户被这条误导过一次）。
             ["inSession"] = L("inSession") != 0,
+            ["keyPathStuck"] = _keyPath.Stuck,
+            ["keyPathHint"] = _keyPath.Stuck
+                ? $"已收到 {hidCount} 个按键报告，但 {KeyPathWatch.DefaultThresholdMs / 1000} 秒内一次按键事件都没产生"
+                  + " —— 解析链路异常（看 bridge.log 的「未识别分片」与 CID）"
+                : "",
             ["zombie"] = zombie,
             ["frames"] = L("frames"),
             ["samples"] = L("samples16"),

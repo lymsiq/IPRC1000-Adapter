@@ -177,6 +177,13 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.14：静默失效探针（今天那次"按键全失效过了 8 分钟才发现"的兜底）
+    ("按键链路探针（纯函数）", "iprc1000_gui_dotnet/KeyPathWatch.cs", "public static bool Step"),
+    ("探针接进桥状态", "iprc1000_gui_dotnet/Backend.cs", "KeyPathWatch.Step("),
+    ("探针自检入口", "iprc1000_gui_dotnet/Program.cs", "--keypath-test"),
+    ("界面显示探针提示", "iprc1000_gui_dotnet/ui/index.html", "keyPathNote"),
+    # ★ v1.2.14：WebView2 延迟到"真正需要界面"时再创建（启动到托盘时省 341 ms + 356 MB）
+    ("WebView2 按需创建（托盘启动不建）", "iprc1000_gui_dotnet/MainForm.cs", "if (!Settings.StartMinimized || _selftest)"),
     # ★ v1.2.9 延迟优化：起播/声卡缓冲都降过，且自适应必须存在（否则降不下去只能手工调）
     ("抖动缓冲起播 24 ms", "iprc1000_gui_dotnet/JitterBuffer.cs", "public int PreRollMs = 24;"),
     ("自适应天花板给上限留余量", "iprc1000_gui_dotnet/JitterBuffer.cs", "CapHeadroomMs"),

@@ -566,6 +566,9 @@ function renderEnv(s) {
                + ` · 丢最旧 ${rt.jitter.droppedBytes || 0} 字节`
              : '') +
     kvItem('管理员权限', a ? '已具备' : '缺失', a ? 'ok' : 'bad');
+  // 「按键链路静默失效」探针：只在桥"收到报告却解析不出按键"时才有内容。
+  // 判据在 KeyPathWatch 里（空闲不报 —— 这条今天已经踩过两次坑）。
+  $('#keyPathNote').textContent = b.keyPathHint || '';
   $('#bridgeNote').className = 'note' + (a ? '' : ' warn');
   $('#bridgeNote').innerHTML = a
     ? (b.zombie
@@ -1128,9 +1131,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.13',
+      version: '1.2.14',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.13（构建于 2026-10-17 19:50）',
+      versionLine: 'v1.2.14（构建于 2026-10-17 20:05）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

@@ -142,8 +142,12 @@ internal sealed class MainForm : Form
             catch { }
         };
 
-        AttachWebView();
-        StartupMark("窗口构造完成（托盘/钩子对象/WebView2 控件已建）");
+        // ★ 不再在构造函数里建 WebView2 控件。
+        //   开机自启走的是 `StartMinimized`（默认开）—— 那种情况下用户根本看不到界面，
+        //   却要先付 **341 ms（启动开销的 51%）+ 356 MB（常驻内存的 78%）**。
+        //   现在改成"真正露出来时才建"：可见启动走下面 Load 那条路，
+        //   托盘启动走 `OnVisibleChanged` 那条路（那条本来就有，用于释放后重建）。
+        StartupMark("窗口构造完成（托盘/钩子对象已建；WebView2 延迟到需要时）");
 
         // 隐藏计时：收进托盘 N 秒后把界面进程放掉
         _releaseTimer.Tick += (_, _) => ReleaseTick();
@@ -167,6 +171,11 @@ internal sealed class MainForm : Form
             catch { }
             // ⚠ InitWebView 是 async void 语义：**必须自己 try/catch**，
             //   否则它内部任何异常都会掀翻进程（0xE0434352），且不留任何痕迹。
+            //
+            // ★ 只有窗口**真的可见**时才建界面。启动到托盘（StartMinimized，开机自启走这条）
+            //   时不建 —— 省 341 ms + 356 MB。露出来时由 OnVisibleChanged 补建。
+            //   `_selftest` 例外：自检要读界面，必须建。
+            if (!Settings.StartMinimized || _selftest)
             BeginInvoke(new Action(async () =>
             {
                 try { await EnsureWebViewAsync(); }
@@ -193,6 +202,7 @@ internal sealed class MainForm : Form
                     }
                 }
             }));
+            else StartupMark("启动到托盘：界面暂不创建（首次打开窗口时由 OnVisibleChanged 再建，省 341 ms + 356 MB）");
         };
 
         // ★ 窗口显示之后再在后台做重活：探针 → 自动切驱动（约 1~2 秒）→ 拉起语音桥。
