@@ -178,6 +178,9 @@ SRC_REQUIRED = [
     ("自适应 pre-roll 结算", "iprc1000_gui_dotnet/JitterBuffer.cs", "private void SettleSession()"),
     ("生效起播进 Status", "iprc1000_gui_dotnet/JitterBuffer.cs", "effPreRollMs = _effPreRollMs"),
     ("桥只丢 1 帧 warmup（首字早 20 ms）", "tools/etw_consumer/src/main.rs", "if self.warmup < 1 {"),
+    # ★ v1.2.10：把"打开声卡 125 ms"从第一次说话挪到启动；且同一次按键两次回调不许重置计时
+    ("启动预热声卡", "iprc1000_gui_dotnet/CableRouter.cs", "PrewarmInBackground"),
+    ("WarmUp 幂等（400 ms 内不重置计时）", "iprc1000_gui_dotnet/CableRouter.cs", "TotalMilliseconds < 400"),
     # ★★ v1.2.8 事故：HID 数据 CID 曾被写死 0x0041，某次重连落到 0x40 → 按键全失效、音频没声
     ("HID 数据 CID 用动态范围判定", "tools/etw_consumer/src/main.rs", "fn is_data_cid"),
     ("实测 CID 写进日志（日志自证）", "tools/etw_consumer/src/main.rs", "实际 CID 音频="),

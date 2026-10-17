@@ -70,6 +70,7 @@ internal sealed class CableRouter : IDisposable
         _running = true;
         _thread = new Thread(Loop) { IsBackground = true, Name = "cable-router" };
         _thread.Start();
+        PrewarmInBackground();     // 把"打开声卡"的 100~300 ms 挪到启动阶段（不阻塞 UI）
     }
 
     private MMDevice? FindCable()
@@ -96,14 +97,49 @@ internal sealed class CableRouter : IDisposable
     /// </summary>
     public void WarmUp()
     {
-        _voiceDownAt = DateTime.UtcNow;
+        // ★ 幂等：同一次按下可能从**两条来源**各来一次（低级钩子 + ETW/RawInput），
+        //   以前第二次会把 `_voiceDownAt` 重置 ⇒ 日志里"首包延迟"少算了整段开声卡时间
+        //   （实测：真实 133 ms，日志只写 8 ms）。400 ms 内重复调用直接忽略。
+        lock (_sinkLock)
+        {
+            if (_voiceDownAt != DateTime.MinValue &&
+                (DateTime.UtcNow - _voiceDownAt).TotalMilliseconds < 400)
+                return;
+            _voiceDownAt = DateTime.UtcNow;
+        }
         if (!_running) return;
         var t0 = DateTime.UtcNow;
         if (EnsureSink())
         {
             var ms = (DateTime.UtcNow - t0).TotalMilliseconds;
-            if (ms > 30) Log($"[LAT] 语音键预热：打开声卡用了 {ms:F0} ms");
+            // 这条留着：它单独说明"开声卡花了多久"，是首字延迟的一大块
+            if (ms > 30) Log($"[LAT] 语音键预热：打开声卡用了 {ms:F0} ms（含在下面的首包时间里）");
         }
+    }
+
+    /// <summary>
+    /// **启动时就预热声卡** —— 把 100~300 ms 的"打开声卡"从**第一次说话**挪到启动阶段。
+    ///
+    /// 实测（2026-10-17）：每次程序启动后第一次按语音键，日志会先打
+    /// `[LAT] 语音键预热：打开声卡用了 125 ms` —— 这 125 ms 直接加在首字上。
+    /// 声卡本来就设计成常驻（打开后不再关），所以提前开没有任何副作用。
+    /// </summary>
+    public void PrewarmInBackground()
+    {
+        if (!_running) return;
+        new Thread(() =>
+        {
+            var t0 = DateTime.UtcNow;
+            try
+            {
+                if (EnsureSink())
+                {
+                    var ms = (DateTime.UtcNow - t0).TotalMilliseconds;
+                    Log($"[LAT] 启动预热：声卡已提前打开（{ms:F0} ms，第一次说话不用再付）");
+                }
+            }
+            catch (Exception e) { Log($"[LAT] 启动预热失败（不影响使用）：{e.Message}"); }
+        }) { IsBackground = true, Name = "cable-prewarm" }.Start();
     }
 
     private bool EnsureSink()
