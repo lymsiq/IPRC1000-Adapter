@@ -177,6 +177,10 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.18：按键行右侧快捷键与"名字"同基线（曾低 8px，看着像错位）
+    ("右值与名字同基线", "iprc1000_gui_dotnet/ui/style.css", "align-self:flex-start"),
+    # ★ v1.2.18：pwr 热点校正（8 倍放大原图确认圆心 (141,38)，原写 (140,47)）
+    ("pwr 热点已校正", "iprc1000_gui_dotnet/Keys.cs", '["power"]        = (141,  38, 44, 46)'),
     # ★ v1.2.17：日志关掉后，前端不许再留任何"日志"字样（用户截图指出）
     ("日志卡片按开关显示", "iprc1000_gui_dotnet/ui/app.js", "logOn && ks.logPath"),
     ("清空日志按钮默认隐藏", "iprc1000_gui_dotnet/ui/index.html", 'id="btnClearLog" hidden'),

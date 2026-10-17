@@ -241,7 +241,11 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
   box-shadow:0 1px 3px rgba(20,28,40,.16)}
 .keyrow.sel .keythumb{box-shadow:0 0 0 2px rgba(0,150,255,.85)}
 .keybind-sym{min-width:78px;text-align:right;font-family:ui-monospace,Consolas,monospace;
-  font-size:13.5px;color:var(--txt1,#1e2633)}
+  font-size:13.5px;color:var(--txt1,#1e2633);
+  /* ★ 与左边"名字"那一行对齐，而不是相对整个两行块居中。
+     原来（默认 align-items:center）值比名字低 8px，看着像"错位"
+     —— 实测：值 cy=235 / 名字 cy=227。改成 flex-start 后两者同基线。 */
+  align-self:flex-start}
 .keyrow.none .keybind-sym{color:var(--txt3,#98a4b6)}
 
 

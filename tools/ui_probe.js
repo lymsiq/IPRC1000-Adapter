@@ -76,6 +76,13 @@ const PROBE = () => {
     hasLogUi: /按键日志|清空按键日志/.test(document.body.innerText || ''),
     // ★ 幽灵帧 0x0C 曾经把"最近按键"污染成「voice（usage 0x0C）」这种错配
     ghostMismatch: /（usage 0x0C/.test(document.body.innerText || ''),
+    // ★ 右侧快捷键必须和"名字"那一行对齐。曾经相对两行块居中 ⇒ 比名字低 8px，看着像"错位"
+    valAlignDelta: [...document.querySelectorAll('#keyList .keyrow')].slice(0, 6).reduce((mx, row) => {
+      const n = row.querySelector('.keyname'), v = row.querySelector('.keybind-sym');
+      if (!n || !v) return mx;
+      const nb = n.getBoundingClientRect(), vb = v.getBoundingClientRect();
+      return Math.max(mx, Math.abs((vb.y + vb.height / 2) - (nb.y + nb.height / 2)));
+    }, 0),
   };
 };
 
@@ -201,6 +208,9 @@ const PROBE = () => {
 
     if (name === 'keys') {
       // 缩略图用 remote.png 当 sprite：数量应等于按键数，且 background-image 指得到图
+      // ★ 右侧快捷键与名字同一行（偏差 ≤1px）
+      if (t.valAlignDelta > 1) bad('按键行右值未与名字对齐：偏差 ' + t.valAlignDelta.toFixed(1) + ' px');
+      else ok('按键行右值与名字对齐（偏差 ' + t.valAlignDelta.toFixed(1) + ' px）');
       if (t.thumbCount === 0) bad('按键列表里没有 .keythumb 缩略图');
       else if (t.thumbsOk < t.thumbCount) bad('缩略图背景图未指向 remote.png：' + t.thumbsOk + '/' + t.thumbCount);
       else ok('按键缩略图全部就位（' + t.thumbsOk + '/' + t.thumbCount + ' 个 sprite）');

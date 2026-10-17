@@ -150,7 +150,9 @@ internal static class Keys
     public static readonly Dictionary<string, (int Cx, int Cy, int W, int H)> Rects = new()
     {
         //            id            中心x  中心y   宽  高
-        ["power"]        = (140,  47, 44, 46),
+        // ★ 2026-10-17 校正（用户截图指出 pwr 高亮压到按键上沿）：
+        //   8 倍放大原图确认——按键圆心约 (141, 38)，而原来写的是 (140, 47)，**低了 9 px**。
+        ["power"]        = (141,  38, 44, 46),
         ["back"]         = ( 39, 147, 44, 44),
         ["up"]           = ( 91, 147, 48, 44),
         ["menu"]         = (139, 147, 44, 44),

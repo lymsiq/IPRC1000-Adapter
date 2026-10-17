@@ -1136,9 +1136,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.17',
+      version: '1.2.18',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.17（构建于 2026-10-17 20:50）',
+      versionLine: 'v1.2.18（构建于 2026-10-17 21:10）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
@@ -1191,7 +1191,7 @@ function boot() {
     };
     // [id, 遥控器标注, 中文名, HID, 注入的组合键, 缩略图中心x, 中心y, 宽, 高]
     const rows = [
-      ['power','pwr','电源','0x17','Win+L',140,47,44,46],
+      ['power','pwr','电源','0x17','Win+L',141,38,44,46],   // 校正：圆心实测 (141,38)
       ['back','back','返回','0x09','Backspace',39,147,44,44],
       ['menu','menu','菜单','0x11','菜单键',139,147,44,44],
       ['exit','exit','退出 / Home','0x07','Esc',39,252,44,44],
