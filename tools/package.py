@@ -181,6 +181,9 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.28：启动静默期 + 基线键不发 UP（修"启动弹右键"与"松开比按下多"）
+    ("启动静默期 800ms", "tools/etw_consumer/src/main.rs", "from_millis(800)"),
+    ("基线键不发 UP", "tools/etw_consumer/src/main.rs", "self.seeded_held[u] = false"),
     # ★ v1.2.26：调试工具只在开发版；发包版（DevTools=false）里根本不编译
     ("调试入口有编译开关", "iprc1000_gui_dotnet/Program.cs", "#if IPRC_DEV"),
     ("打包时关闭调试入口", "tools/package.py", "-p:DevTools=false"),

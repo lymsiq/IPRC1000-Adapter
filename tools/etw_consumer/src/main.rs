@@ -140,6 +140,8 @@ struct Stats {
     hid_reports: u64,
     /// 被当作"基线"的报文数（每段 1 条；若它带着键，说明挡掉了一次假按下）
     seed_reports: u64,
+    /// 启动静默期里被吃掉的报文数（>0 说明确实有"启动即按键"的情况）
+    startup_swallowed: u64,
     /// 实测按键报告走的是哪个 CID（第一次见到时记录，诊断用）
     key_cid: Option<u16>,
     /// 实测音频走的是哪个 CID
@@ -606,6 +608,12 @@ struct Bridge {
     held: [bool; 256],
     /// 本段会话是否已经用第一条报文"记过基线"（见下方 handle_hid_report 的说明）
     seeded: bool,
+    /// 基线里"已经按着"的键（只用于记账，**它的 UP 不发**，否则会出现"无对应的松开"）
+    seeded_held: [bool; 256],
+    /// 桥启动后这么多毫秒内**不发按键事件**（见下方 ⓪-1）
+    quiet_until: Option<std::time::Instant>,
+    /// 是否是离线回放（回放要跳过"启动静默期"，否则自检里的按键会被全部吃掉）
+    is_replay: bool,
     /// 上一条按键报文到达的时刻（用来判"新一段"：空档 ≥600 ms 就重新取基线）
     last_report: Option<std::time::Instant>,
     /// 最近一个事件的 ETW 时间戳（100ns 自 1601，即 FILETIME）—— 用来实测投递延迟
@@ -652,6 +660,9 @@ impl Bridge {
             samples16: 0,
             warmup: 0,
             seeded: false,
+            seeded_held: [false; 256],
+            quiet_until: None,
+            is_replay: false,
             last_report: None,
             pending: None,
         }
@@ -809,14 +820,38 @@ impl Bridge {
         if !self.seeded {
             self.seeded = true;
             self.held = now;
+            self.seeded_held = now;      // 这些键的 UP 不发（避免"无对应的松开"）
             self.stats.lock().unwrap().seed_reports += 1;
+            // 启动静默期：从"第一次收到报文"起算 800 ms。
+            // 为什么要它：设备在蓝牙链路建立时会把**当前状态连发几次**，
+            // 基线只能挡住第一条；如果后面又出现一次"按下"，仍会被当成真实按键
+            // （真机表现：启动瞬间弹出右键菜单 = 菜单键被按下一次）。
+            // 800 ms 足够覆盖链路建立的那几次重发，人不可能这么快按下。
+            if !self.is_replay && self.quiet_until.is_none() {
+                self.quiet_until = Some(t + std::time::Duration::from_millis(800));
+            }
             return;
+        }
+
+        // ⓪-1 启动静默期：状态照常跟踪，但**不发事件**
+        if let Some(until) = self.quiet_until {
+            if t < until {
+                self.held = now;
+                self.stats.lock().unwrap().startup_swallowed += 1;
+                return;
+            }
+            self.quiet_until = None;   // 静默期结束，正常放行
         }
 
         // ① 先放掉不再按住的（升序，保证事件顺序确定）
         for u in 0..256usize {
             if self.held[u] && !now[u] {
                 self.held[u] = false;
+                if self.seeded_held[u] {
+                    // 这个键是"基线里就已经按着"的，我们从未发过它的 DOWN ⇒ UP 也不发
+                    self.seeded_held[u] = false;
+                    continue;
+                }
                 self.emit_key(Some(u as u8), false);
             }
         }
@@ -834,6 +869,12 @@ impl Bridge {
         for u in 0..256usize {
             if self.held[u] {
                 self.held[u] = false;
+                // 基线里"早已按着"的键，我们从没发过它的 DOWN ⇒ 这里也不发 UP，
+                // 否则面板会出现"松开比按下多"（用户实测 17 下 / 28 松）。
+                if self.seeded_held[u] {
+                    self.seeded_held[u] = false;
+                    continue;
+                }
                 self.emit_key(Some(u as u8), false);
             }
         }
@@ -1591,6 +1632,8 @@ fn main() {
 ///   `dlen` 是 ACL 头里声明的长度（首片被截断时会是 344 而实际只有几字节），
 ///   `acl_len` 是实际存下来的字节数；`dt_ms` 相对上一条的毫秒间隔，用于精确节奏。
 fn replay_mode(path: &str, bridge: Arc<Mutex<Bridge>>, realtime: bool, stats: Arc<Mutex<Stats>>) {
+    // 回放不是真机：跳过"启动静默期"，否则全速回放时按键会被整段吃掉
+    if let Ok(mut b) = bridge.lock() { b.is_replay = true; }
     let data = match std::fs::read(path) {
         Ok(d) => d,
         Err(e) => {
