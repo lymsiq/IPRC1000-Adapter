@@ -135,7 +135,6 @@ internal sealed class KeyFilter : IDisposable
     private readonly Dictionary<ulong, bool> _deviceCache = new();
     private IntPtr _hook = IntPtr.Zero;
     private HookProc? _proc;                 // 必须保活
-    private Thread? _thread;
     private uint _threadId;
     private volatile bool _running;
     private IntPtr _hwnd;
@@ -333,25 +332,12 @@ internal sealed class KeyFilter : IDisposable
         LastError = null;
         _lastRawInputAt = DateTime.UtcNow;
 
-        if (KeySourceIsEtw)
-        {
-            LastCleared = "按键来源＝ETW（不装钩子、不吞键）";
-            return;   // ETW 模式：什么都不装
-        }
-
-        // Raw Input：只注册键盘（usage page 1 / usage 6），INPUTSINK 让后台窗口也能收到
-        var rid = new[]
-        {
-            new RAWINPUTDEVICE { usUsagePage = 0x01, usUsage = 0x06, dwFlags = RIDEV_INPUTSINK, hwndTarget = hwnd },
-        };
-        if (!RegisterRawInputDevices(rid, 1, (uint)Marshal.SizeOf<RAWINPUTDEVICE>()))
-            LastError = $"RegisterRawInputDevices 失败，err={Marshal.GetLastWin32Error()}";
-
-        _proc = HookCallback;
-        _thread = new Thread(HookThread) { IsBackground = true, Name = "iprc1000-swallow" };
-        _thread.Start();
-
-        _watchdog = new System.Threading.Timer(_ => Watchdog(), null, 300, 300);
+        // ★ 2026-10-18：**只有 ETW 这一种来源**。这里无条件返回 ——
+        //   不再装低级钩子、也不再注册 Raw Input（Raw Input 在非键盘设备下收不到遥控器报文，
+        //   实测 `遥控器 0 条`；而钩子会吞物理键盘的键，属于"键盘模式"遗留）。
+        LastCleared = "按键来源＝ETW（全程不装钩子、不注册 Raw Input）";
+        // 到这里就结束了 —— 旧的"注册 Raw Input + 装低级钩子 + 起看门狗"整段已删除
+        // （2026-10-18：按键来源只剩 ETW，那些代码在 ETW 下从未执行过）。
     }
 
     /// <summary>长时间没有遥控器上报 → 清空按住集合并释放可能卡住的注入键</summary>
@@ -525,7 +511,6 @@ internal sealed class KeyFilter : IDisposable
         _watchdog = null;
         ClearHeld("程序停止");              // 关键：退出前一定要把注入的键放掉，避免修饰键卡死
         if (_threadId != 0) PostThreadMessageW(_threadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
-        try { _thread?.Join(1000); } catch { }
     }
 
     private void HookThread()

@@ -30,7 +30,7 @@
     <!-- ── 版本信息 ──
          改版本只需要改下面这一个 <Version>：程序内显示、exe 文件属性、
          发布包文件名（package.py 会读它）都从这里取，避免多处各写一份而漂移。 -->
-    <Version>1.2.25</Version>
+    <Version>1.2.26</Version>
     <FileVersion>1.2.0.0</FileVersion>
     <AssemblyVersion>1.2.0.0</AssemblyVersion>
     <Product>IPRC1000 遥控器适配器</Product>
@@ -42,6 +42,16 @@
        用来一眼判断手上的 exe 是不是刚编译的那个（本项目反复吃过这个亏）。 -->
   <PropertyGroup>
     <BuildStamp>$([System.DateTime]::Now.ToString("yyyy-MM-dd HH:mm"))</BuildStamp>
+  </PropertyGroup>
+
+  <!-- 开发/调试工具开关。
+       true（默认，dotnet build 与开发用 publish）→ 定义 IPRC_DEV：
+         编译进自检与诊断入口（selftest、jitter、keypath、keylog、mouseact、inject 等）。
+       false（package.py 打包时传 -p:DevTools=false）→ 这些入口根本不编译进 exe。
+       用户要求：调试工具只在开发时存在，发包时去除。 -->
+  <PropertyGroup>
+    <DevTools Condition="'$(DevTools)' == ''">true</DevTools>
+    <DefineConstants Condition="'$(DevTools)' == 'true'">$(DefineConstants);IPRC_DEV</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

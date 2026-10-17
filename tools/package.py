@@ -181,6 +181,11 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.26：调试工具只在开发版；发包版（DevTools=false）里根本不编译
+    ("调试入口有编译开关", "iprc1000_gui_dotnet/Program.cs", "#if IPRC_DEV"),
+    ("打包时关闭调试入口", "tools/package.py", "-p:DevTools=false"),
+    ("按键来源只有 ETW（不再回退钩子）", "iprc1000_gui_dotnet/Backend.cs", "唯一来源"),
+    ("ETW 下不装钩子/不注册 Raw Input", "iprc1000_gui_dotnet/KeyFilter.cs", "全程不装钩子、不注册 Raw Input"),
     # ★ v1.2.25：日志总开关（界面可开可关）+ 桥侧也受控
     ("桥支持 --quiet", "tools/etw_consumer/src/main.rs", '"--quiet" => out.quiet = true'),
     ("启桥按开关决定 --quiet", "iprc1000_gui_dotnet/Backend.cs", '+ (LogSwitch.Enabled ? "" : " --quiet")'),
@@ -542,7 +547,10 @@ def publish_fresh(out=None, self_contained=False, compressed=False):
         shutil.rmtree(out, ignore_errors=True)
     cmd = ["dotnet", "publish", "-c", "Release", "-r", "win-x64",
            "--self-contained", "true" if self_contained else "false",
-           "-p:PublishSingleFile=true"]
+           "-p:PublishSingleFile=true",
+           # ★ 发包版**不带任何调试入口**（--selftest / --*-test 分支根本不编译）。
+           #   开发时直接 dotnet build/publish（不加这个参数）仍旧带，自检照跑。
+           "-p:DevTools=false"]
     if compressed:
         cmd.append("-p:EnableCompressionInSingleFile=true")
     cmd += ["-o", out, "--nologo", "-v", "quiet"]

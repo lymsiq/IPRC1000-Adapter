@@ -144,26 +144,23 @@ internal sealed class Backend : IDisposable
     private void AutoSelectKeySource()
     {
         if (_filter == null) return;
+        // ★ 2026-10-18 用户要求：**只保留 ETW 一种按键来源**，不再有"键盘模式/钩子回退"。
+        //   设备仍是键盘时，ETW 照样能读到按键（BthPort 层），但系统也会把它当键盘 →
+        //   按遥控器会**同时打进前台应用**（m/i 漏出）。这种情况不再偷偷切钩子，
+        //   而是**明确提示用户去换驱动**（界面按钮「安装虚拟键盘驱动」）。
         var stillKb = Env.RemoteStillKeyboard();
 
-        if (!stillKb)
+        if (_keySource != "etw")
         {
-            // 设备不是键盘 → 只能走 ETW（inbox 驱动下不存在可直读的 HID 接口）
-            if (_keySource != "etw")
-            {
-                _keySource = "etw";
-                _filter.SetSourceMode(true);
-                _keySourceGuard = "设备已不是键盘 → 按键来源切到 ETW";
-                DeviceLog("按键来源 → ETW（设备已不是键盘，延迟最低）");
-            }
+            _keySource = "etw";
+            _filter.SetSourceMode(true);
+            DeviceLog("按键来源 → ETW（唯一来源）");
         }
-        else if (stillKb && _keySource != "hook" && _filter.KeySourceIsEtw)
-        {
-            _keySource = "hook";
-            _filter.SetSourceMode(false);
-            _keySourceGuard = "设备仍是键盘（驱动未换）且模式是 ETW → 已自动启用钩子拦截，否则 m 会漏进应用";
-            DeviceLog("按键来源 → 钩子拦截（设备仍是键盘，防止 m/i 漏进前台应用）");
-        }
+
+        _keySourceGuard = stillKb
+            ? "设备仍是键盘：ETW 能读到按键，但系统也会把它当键盘，按键会漏成字符 —— "
+              + "请点「安装虚拟键盘驱动」把驱动换成 HID-compliant device"
+            : "设备已不是键盘 ✓ 按键走 BthPort ETW（不装钩子、不吞键、无卡键风险）";
     }
 
     public string SetKeySource(string? mode)

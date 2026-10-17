@@ -256,7 +256,7 @@ function renderKeys(s) {
   const configured = items.filter(i => i.binding).length;
 
   const ks = s.keysource || {};
-  const srcName = { etw: 'BthPort ETW（设备已非键盘）', hook: '内核钩子（键盘模式）' }[ks.mode] || ks.mode || '—';
+  const srcName = 'BthPort ETW';   // 只有这一种来源（键盘模式/钩子已移除）
   const sum = $('#keySum');
   if (sum) sum.innerHTML =
     `<span class="pill">按键来源：${srcName}</span>` +
@@ -593,22 +593,12 @@ function renderEnv(s) {
   setDot('#d-perm2', sw.running ? 'on' : 'err');
   $('#btnInject').textContent = s.inject ? '关闭快捷键注入' : '开启快捷键注入';
   const voiceBind = (s.keys.items.find((k) => k.id === 'voice') || {}).binding || '未设置';
-  const hookMode = (s.keysource || {}).mode === 'hook';
-  setDot('#d-perm2', hookMode ? (sw.running ? 'on' : 'err') : 'on');
-  $('#injectNote').className = 'note' + ((hookMode && !sw.running) ? ' warn' : '');
-  $('#injectNote').innerHTML = hookMode
-    // ── 键盘模式：讲拦截（计数才有意义）──
-    ? (sw.running
-        ? `按住遥控器<b>语音键</b> → 拦截其原始按键（否则会一直输出 m）并注入 <b>${voiceBind}</b>，` +
-          `松手即释放 —— 这正是豆包输入法「长按模式」需要的动作。` +
-          `<br>已拦 <b>${sw.swallowed}</b> 次 · 放行 ${sw.passed} 次 · 注入${s.inject ? '已开启' : '已关闭'}` +
-          (sw.lastButton ? ` · 最近按键：<b>${sw.lastButton}</b>` : '') +
-          `<br>幽灵键（会打出 i）漏出：<b>${sw.spuriousLeaked || 0}</b> 次` +
-          ((sw.spuriousLeaked || 0) > 0 ? '　⚠ 不为 0' : '　✓')
-        : '按键拦截未运行。若遥控器按键会打进当前窗口，说明拦截没有生效。')
-    // ── ETW 模式：系统不把它当键盘 → 拦截/漏键/卡键这些都不存在，不再显示 ──
-    : `遥控器已被系统当作<b>普通 HID 设备</b>（非键盘）→ <b>不会输出任何字符</b>，` +
-      `无需拦截，也没有「丢 UP 卡键」风险。按键改从 <b>BthPort ETW</b> 读取。`;
+  // 只有 ETW 一种来源了：不再有"键盘模式/拦截/漏键"这一套说明
+  setDot('#d-perm2', 'on');
+  $('#injectNote').className = 'note';
+  $('#injectNote').innerHTML =
+    `遥控器已被系统当作<b>普通 HID 设备</b>（非键盘）→ <b>不会输出任何字符</b>，` +
+    `无需拦截，也没有「丢 UP 卡键」风险。按键从 <b>BthPort ETW</b> 读取。`;
   $('#injectNote').innerHTML +=
     `<br>卡键自动解锁：设备移除<b>即时响应</b> · 静默看门狗 ${(s.stuckGuard || {}).watchdogMs || 800} ms · ` +
     `已解锁 <b>${((s.stuckGuard || {}).unlockCount) || 0}</b> 次` +
@@ -631,7 +621,7 @@ function renderEnv(s) {
   const logOn = s.logEnabled === true;
   const clrBtn = $('#btnClearLog');
   if (clrBtn) clrBtn.hidden = !logOn;
-  const srcName = { etw: 'BthPort ETW（设备已非键盘）', hook: '内核钩子（键盘模式）' }[ks.mode] || ks.mode;
+  const srcName = 'BthPort ETW';   // 只有这一种来源（键盘模式/钩子已移除）
   $('#keySrcKv').innerHTML =
     kvItem('按键来源', srcName, ks.mode === 'hook' ? '' : 'ok') +
     kvItem('ETW 采集器', ke.online ? `已监听 127.0.0.1:${ke.port}（${ke.events || 0} 次）` : '未启动',
@@ -641,32 +631,15 @@ function renderEnv(s) {
              : '等待采样',
            (ke.maxLatencyMs || 0) > 200 ? 'bad' : 'ok') +
     kvItem('最近按键', ke.lastButton ? `${ke.lastButton}（usage ${ke.lastUsage}${ke.pressed ? ' 按住' : ''}）` : '—') +
-    // Raw Input 报文数：非键盘设备下如果这里会涨，说明可以改直读、把 5 ms 降到 ~1 ms
-    // 两个数必须分开看：总数含物理键盘/自己注入的回流，只有"遥控器条数"才算数
-    kvItem('Raw Input 报文', (s.rawOurs || 0) > 0
-             ? `遥控器 ${s.rawOurs} 条 / 全部 ${s.rawMessages || 0} 条（直读可用）`
-             : `0 条（全部 ${s.rawMessages || 0} 条来自其它设备 ⇒ 直读不可用）`,
-           (s.rawOurs || 0) > 0 ? 'ok' : '') +
     // 日志只在打开诊断开关时才有意义；默认关就不显示这一格（否则用户会以为"还有日志"）
     (logOn && ks.logPath ? kvItem('按键日志', '已写入 ' + ks.logPath) : '');
-  $('#keySrcNote').className = 'note' + (isEtw ? '' : ' warn');
-  $('#keySrcNote').innerHTML = isEtw
-    ? (ks.stillKeyboard
-        ? '⚠⚠ <b>驱动还没换！</b>系统仍把遥控器当键盘，而 ETW 模式下钩子已停 → ' +
-          '<b>按遥控器会直接打出 m</b>。要么先把设备驱动换成「HID-compliant device」，' +
-          '要么点下面的「切回内核钩子」。' + (ks.guard ? `<br>兜底动作：${ks.guard}` : '') + '<br>'
-        : '设备已不是键盘 ✓ ') +
-      '按键从 <b>BthPort ETW</b> 读取，不装键盘钩子、不吞键 —— <b>没有卡键风险</b>。' +
-      '前提：遥控器的驱动已从「HID Keyboard Device」改成「<b>HID-compliant device</b>」，' +
-      '否则系统仍会把它当键盘（`m` 会照旧打进应用）。' +
-      (ke.error ? `<br>采集器错误：${ke.error}` : '')
-    : isEtw
-    ? '⚠ 当前走 <b>ETW</b> 读键 —— ETW 是成批投递的，<b>单个按键要等缓冲区刷新，会明显发顿</b>。' +
-      '点「HID 直读（最快）」可把延迟降到与真实键盘同级。' +
-      ''
-    : '当前用内核钩子拦截并吞掉遥控器的按键。' +
-      '<b>想彻底根治「一直输出 m / 丢 UP 卡键」</b>，建议走 ETW 终态：' +
-      '① 设备管理器把该设备驱动换成「HID-compliant device」→ ② 点上面的「切到 ETW 读键」。';
+  $('#keySrcNote').className = 'note' + (ks.stillKeyboard ? ' warn' : '');
+  $('#keySrcNote').innerHTML = ks.stillKeyboard
+    ? '⚠⚠ <b>驱动还没换！</b>系统仍把遥控器当键盘 → <b>按遥控器会同时打出 m</b>。' +
+      '请点下面的「<b>安装虚拟键盘驱动</b>」，把它的驱动从「HID Keyboard Device」换成' +
+      '「HID-compliant device」。' + (ks.guard ? `<br>${ks.guard}` : '')
+    : '设备已不是键盘 ✓ 按键从 <b>BthPort ETW</b> 读取，不装键盘钩子、不吞键 —— <b>没有卡键风险</b>。' +
+      (ke.error ? `<br>采集器错误：${ke.error}` : '');
 
   // ── 环境自检 ──
   const st = s.setup || {};
@@ -1168,9 +1141,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.25',
+      version: '1.2.26',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.25（构建于 2026-10-18 10:10）',
+      versionLine: 'v1.2.26（构建于 2026-10-18 10:40）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

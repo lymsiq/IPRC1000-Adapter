@@ -42,11 +42,18 @@ internal static class Program
         //   否则连发间隔会抖动 5~15 ms —— 这正是"不丝滑/不精确"的根因。
         TimeBeginPeriod(1);
 
+#if IPRC_DEV
         var selftest = args.Length > 0 && args[0] == "--selftest";
+#else
+        // 发布版没有自检入口（DevTools=false）；变量保留是因为 MainForm 的签名要用它
+        const bool selftest = false;
+#endif
         var outPath = args.Length > 1 ? args[1] : null;
 
 
         // 注入自检：不需要窗口，直接验证「按下/松开右 Alt」是否被系统接受
+        // ── 以下全是**开发/调试专用**入口：发布包用 DevTools=false 编译，这些分支不存在 ──
+#if IPRC_DEV
         if (args.Length > 0 && args[0] == "--inject-test")
         {
             // WinExe 没有控制台，结果写文件（没给路径就写到程序目录）
@@ -54,16 +61,20 @@ internal static class Program
             File.WriteAllText(p, KeyFilter.InjectSelfTest());
             return;
         }
+#endif
 
         // 多键同时按住回归自检：--inject-multikey-test [输出文件]
         //   直接判「会不会卡键」—— 复现「按住A→再按B→先松A→再松B」那串，
         //   旧实现里 A 的键再也不会被释放。见 KeyFilter.InjectMultiKeyTest 的注释。
+        // ── 以下全是**开发/调试专用**入口：发布包用 DevTools=false 编译，这些分支不存在 ──
+#if IPRC_DEV
         if (args.Length > 0 && args[0] == "--inject-multikey-test")
         {
             var pm = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "inject_multikey.txt");
             File.WriteAllText(pm, KeyFilter.InjectMultiKeyTest());
             return;
         }
+#endif
 
         // 鼠标注入实测探针：--mouse-probe [输出文件]
         //   回答实现前必须先知道的三个数：系统指针加速是否开、相对移动的实测映射（1:1?）、
@@ -79,17 +90,22 @@ internal static class Program
         // 鼠标动作映射自检：--mouseact-test [输出文件]
         //   纯逻辑、不注入任何东西：验证"鼠标左键/右键/滚轮上/滚轮下"这四个映射值
         //   存得进（Parse）、看得懂（Format）、且越界值不会漏成真实虚拟键码。
+        // ── 以下全是**开发/调试专用**入口：发布包用 DevTools=false 编译，这些分支不存在 ──
+#if IPRC_DEV
         if (args.Length > 0 && args[0] == "--mouseact-test")
         {
             var pm = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "mouseact_test.txt");
             File.WriteAllText(pm, KeyAct.SelfTest());
             return;
         }
+#endif
 
         // 抖动缓冲自检：--jitter-test [输出文件]
         //   不需要声卡、不需要遥控器：纯内存驱动，验证"有界"的三个边界
         //   （起播阈值 / 积压上限且丢最旧 / 静默超时判新会话）。
         // 按键日志异步写入器的自检：--keylog-test [输出文件]
+        // ── 以下全是**开发/调试专用**入口：发布包用 DevTools=false 编译，这些分支不存在 ──
+#if IPRC_DEV
         if (args.Length > 0 && args[0] == "--keylog-test")
         {
             var pk2 = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "keylog_test.txt");
@@ -99,8 +115,11 @@ internal static class Program
             Console.WriteLine(txt2);
             return;
         }
+#endif
 
         // 按键链路静默失效探针的自检：--keypath-test [输出文件]
+        // ── 以下全是**开发/调试专用**入口：发布包用 DevTools=false 编译，这些分支不存在 ──
+#if IPRC_DEV
         if (args.Length > 0 && args[0] == "--keypath-test")
         {
             var pk = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "keypath_test.txt");
@@ -110,23 +129,30 @@ internal static class Program
             Console.WriteLine(txt);
             return;
         }
+#endif
 
+        // ── 以下全是**开发/调试专用**入口：发布包用 DevTools=false 编译，这些分支不存在 ──
+#if IPRC_DEV
         if (args.Length > 0 && args[0] == "--jitter-test")
         {
             var pj = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "jitter_test.txt");
             File.WriteAllText(pj, JitterBuffer.SelfTest());
             return;
         }
+#endif
 
         // 鼠标引擎自检：--mouse-engine-test [输出文件]
         //   不需要遥控器，直接驱动引擎并量真实光标：增速是否生效、松开是否停住、
         //   确认键是否真的按下系统左键、斜向是否归一化。
+        // ── 以下全是**开发/调试专用**入口：发布包用 DevTools=false 编译，这些分支不存在 ──
+#if IPRC_DEV
         if (args.Length > 0 && args[0] == "--mouse-engine-test")
         {
             var pe = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "mouse_engine_test.txt");
             File.WriteAllText(pe, MouseEngine.SelfTest());
             return;
         }
+#endif
 
         // 注入验证：--inject-verify <VK十六进制> <输出文件>
         if (args.Length > 1 && args[0] == "--inject-verify")
