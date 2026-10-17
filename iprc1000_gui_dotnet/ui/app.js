@@ -632,10 +632,11 @@ function renderEnv(s) {
            (ke.maxLatencyMs || 0) > 200 ? 'bad' : 'ok') +
     kvItem('最近按键', ke.lastButton ? `${ke.lastButton}（usage ${ke.lastUsage}${ke.pressed ? ' 按住' : ''}）` : '—') +
     // Raw Input 报文数：非键盘设备下如果这里会涨，说明可以改直读、把 5 ms 降到 ~1 ms
-    kvItem('Raw Input 报文', (s.rawMessages || 0) > 0
-             ? `${s.rawMessages} 条（直读可用，可按需切换）`
-             : '0 条（非键盘设备下收不到 ⇒ 只能走 ETW）',
-           (s.rawMessages || 0) > 0 ? 'ok' : '') +
+    // 两个数必须分开看：总数含物理键盘/自己注入的回流，只有"遥控器条数"才算数
+    kvItem('Raw Input 报文', (s.rawOurs || 0) > 0
+             ? `遥控器 ${s.rawOurs} 条 / 全部 ${s.rawMessages || 0} 条（直读可用）`
+             : `0 条（全部 ${s.rawMessages || 0} 条来自其它设备 ⇒ 直读不可用）`,
+           (s.rawOurs || 0) > 0 ? 'ok' : '') +
     // 日志只在打开诊断开关时才有意义；默认关就不显示这一格（否则用户会以为"还有日志"）
     (logOn && ks.logPath ? kvItem('按键日志', '已写入 ' + ks.logPath) : '');
   $('#keySrcNote').className = 'note' + (isEtw ? '' : ' warn');
@@ -1141,9 +1142,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.20',
+      version: '1.2.21',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.20（构建于 2026-10-18 08:00）',
+      versionLine: 'v1.2.21（构建于 2026-10-18 08:20）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

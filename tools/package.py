@@ -177,6 +177,9 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.21：ETW 模式下 Raw Input 不许再处理一次（注册没撤掉，会双处理）
+    ("ETW 模式挡住 Raw Input 重复处理", "iprc1000_gui_dotnet/KeyFilter.cs", "if (KeySourceIsEtw) return;"),
+    ("过滤后计数（只算遥控器）", "iprc1000_gui_dotnet/KeyFilter.cs", "RawOurs++;"),
     # ★ v1.2.20：被动标定每帧查虚拟桌面 → 改带缓存（原每帧 4 次 GetSystemMetrics）
     ("每帧查询走缓存", "iprc1000_gui_dotnet/MouseEngine.cs", "VirtualScreenCached()"),
     # ★ v1.2.19：热路径不再拼日志字符串 + Raw Input 直读可行性探针

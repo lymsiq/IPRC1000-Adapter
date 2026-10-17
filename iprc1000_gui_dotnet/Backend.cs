@@ -624,6 +624,8 @@ internal sealed class Backend : IDisposable
             ["logEnabled"] = LogSwitch.Enabled,
             // 非键盘设备下 Raw Input 到底收不收得到报文 —— 用来判断能不能把按键延迟从 5 ms 降到 ~1 ms
             ["rawMessages"] = KeyFilter.RawMessages,
+            // 过滤后（只算遥控器）的条数 —— 这个 > 0 才说明 Raw Input 直读真的可用
+            ["rawOurs"] = KeyFilter.RawOurs,
             ["winuhid"] = JsonSerializer.SerializeToNode(WinUhidInjector.Status()),
             ["setup"] = SetupStatus(),
             ["stuckGuard"] = new JsonObject

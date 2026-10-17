@@ -41,6 +41,14 @@ internal sealed class KeyFilter : IDisposable
     /// </summary>
     public static long RawMessages { get; private set; }
 
+    /// <summary>
+    /// 上面那个计数里，**确实来自遥控器**的条数（过了 `IsIprc1000` 设备过滤之后的）。
+    ///
+    /// 为什么要分两个：`RawMessages` 是所有设备的（含物理键盘、含我们自己注入的回流），
+    /// 用它判断"直读可用"会得出错误结论。**只有这个 > 0 才说明真的能直读。**
+    /// </summary>
+    public static long RawOurs { get; private set; }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct RAWINPUTDEVICE { public ushort usUsagePage, usUsage; public uint dwFlags; public IntPtr hwndTarget; }
 
@@ -634,8 +642,21 @@ internal sealed class KeyFilter : IDisposable
                 _deviceCache[(ulong)raw.header.hDevice] = ours;
             }
             if (!ours) return;
+            RawOurs++;
             DeviceSeen = true;
             _lastRawInputAt = DateTime.UtcNow;
+
+            // ★★ 关键修复（2026-10-18）：ETW 模式下**绝不能再从 Raw Input 处理一次按键**。
+            //
+            //   背景：`Start()` 在 ETW 模式下确实提前 return 不注册 Raw Input，
+            //   但 `SetSourceMode()` 切到 ETW 时**没有把注册撤掉**（注册是进程级的，
+            //   `Stop()` 只停线程）。于是启动时（键盘模式）注册的那份一直活着，
+            //   本函数也一直在跑 —— 每次按键会被 **ETW 和 Raw Input 各处理一遍**。
+            //   （重复 DOWN 对"整份报告"模型多半无感，但对"切换配置组"这类**动作键**
+            //     就是切两次 = 看起来没反应。）
+            //
+            //   这里只计数、不处理：既修掉重复，又保住"能不能直读"的测量。
+            if (KeySourceIsEtw) return;
 
             var vk = raw.keyboard.VKey;
             if (vk is 0 or 0xFF) return;
