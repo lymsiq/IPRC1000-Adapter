@@ -177,6 +177,8 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.20：被动标定每帧查虚拟桌面 → 改带缓存（原每帧 4 次 GetSystemMetrics）
+    ("每帧查询走缓存", "iprc1000_gui_dotnet/MouseEngine.cs", "VirtualScreenCached()"),
     # ★ v1.2.19：热路径不再拼日志字符串 + Raw Input 直读可行性探针
     ("日志关掉后不拼字符串", "iprc1000_gui_dotnet/EtwKeySource.cs", "if (LogSwitch.Enabled)"),
     ("Raw Input 报文计数", "iprc1000_gui_dotnet/KeyFilter.cs", "RawMessages++;"),

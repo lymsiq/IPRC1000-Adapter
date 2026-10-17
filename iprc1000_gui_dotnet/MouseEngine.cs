@@ -696,7 +696,9 @@ internal sealed class MouseEngine
         {
             var want = Math.Abs(_wantX) + Math.Abs(_wantY);
             var got = Math.Abs(nx - last.X) + Math.Abs(ny - last.Y);
-            var (vx, vy, vw, vh) = MouseInjector.VirtualScreen();
+            // ★ 这一句**每帧**都跑（60 Hz）：改用带缓存的版本，
+            //   否则光判断"光标是否贴边"就每秒 4×60 = 240 次系统调用。
+            var (vx, vy, vw, vh) = MouseInjector.VirtualScreenCached();
             var clamped =
                 (nx <= vx && _wantX < 0) || (nx >= vx + vw - 1 && _wantX > 0) ||
                 (ny <= vy && _wantY < 0) || (ny >= vy + vh - 1 && _wantY > 0);

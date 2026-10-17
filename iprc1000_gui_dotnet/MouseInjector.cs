@@ -162,6 +162,25 @@ internal static class MouseInjector
         (GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
          GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
 
+    // ── 带缓存的版本：给**每帧都要用**的路径（被动标定）──
+    //   虚拟桌面范围只在"改分辨率 / 插拔显示器 / 改缩放"时才会变，
+    //   而被动标定每帧（60 Hz）都要用它判断"光标是否贴边"。
+    //   原来每帧直接调 4 次 GetSystemMetrics ⇒ 移动鼠标时每秒 240 次系统调用，
+    //   全是白问。缓存 2 秒：真变更了最多 2 秒后自愈，用户感知不到。
+    private static (int X, int Y, int W, int H) _vsCache;
+    private static long _vsAt = long.MinValue;
+
+    public static (int X, int Y, int W, int H) VirtualScreenCached()
+    {
+        var now = Environment.TickCount64;
+        if (_vsAt == long.MinValue || now - _vsAt > 2000)
+        {
+            _vsCache = VirtualScreen();
+            _vsAt = now;
+        }
+        return _vsCache;
+    }
+
     /// <summary>
     /// 把光标放到**虚拟桌面**中心。
     /// ⚠ 必须用虚拟桌面：`MOUSEEVENTF_ABSOLUTE` 的 0..65535 映射到整个虚拟桌面，
