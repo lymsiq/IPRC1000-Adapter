@@ -172,6 +172,12 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.9 延迟优化：起播/声卡缓冲都降过，且自适应必须存在（否则降不下去只能手工调）
+    ("抖动缓冲起播 20 ms", "iprc1000_gui_dotnet/JitterBuffer.cs", "public int PreRollMs = 20;"),
+    ("声卡缓冲 20 ms", "iprc1000_gui_dotnet/JitterBuffer.cs", "public int LatencyMs = 20;"),
+    ("自适应 pre-roll 结算", "iprc1000_gui_dotnet/JitterBuffer.cs", "private void SettleSession()"),
+    ("生效起播进 Status", "iprc1000_gui_dotnet/JitterBuffer.cs", "effPreRollMs = _effPreRollMs"),
+    ("桥只丢 1 帧 warmup（首字早 20 ms）", "tools/etw_consumer/src/main.rs", "if self.warmup < 1 {"),
     # ★★ v1.2.8 事故：HID 数据 CID 曾被写死 0x0041，某次重连落到 0x40 → 按键全失效、音频没声
     ("HID 数据 CID 用动态范围判定", "tools/etw_consumer/src/main.rs", "fn is_data_cid"),
     ("实测 CID 写进日志（日志自证）", "tools/etw_consumer/src/main.rs", "实际 CID 音频="),
@@ -316,7 +322,8 @@ SRC_REQUIRED = [
     ("起播攒 40 ms", "iprc1000_gui_dotnet/JitterBuffer.cs", "PreRollMs = 40"),
     ("积压上限 64 ms", "iprc1000_gui_dotnet/JitterBuffer.cs", "CapMs = 64"),
     ("静默 400 ms 判新会话", "iprc1000_gui_dotnet/JitterBuffer.cs", "StaleMs = 400"),
-    ("声卡 IO 缓冲降到 30 ms", "iprc1000_gui_dotnet/JitterBuffer.cs", "LatencyMs = 30"),
+    # 2026-10-17 v1.2.9：30 → 20（再省 10 ms）；这条断言的价值是"别被人改回去"
+    ("声卡 IO 缓冲降到 20 ms", "iprc1000_gui_dotnet/JitterBuffer.cs", "LatencyMs = 20"),
     ("上限必须 ≥ 起播阈值（否则永久静音）", "iprc1000_gui_dotnet/JitterBuffer.cs", "if (CapMs < PreRollMs) CapMs = PreRollMs"),
     ("抖动缓冲有自检", "iprc1000_gui_dotnet/JitterBuffer.cs", "public static string SelfTest"),
     ("抖动自检有 CLI 入口", "iprc1000_gui_dotnet/Program.cs", "--jitter-test"),

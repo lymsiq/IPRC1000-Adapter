@@ -606,7 +606,11 @@ struct Bridge {
     prev: i16, // 48k 内插用的上一个样本
     have_prev: bool,
     samples16: u64,
-    warmup: u32, // 丢掉最前面几帧（高通瞬态 + 首个不完整段）
+    /// 丢掉最前面几帧（高通瞬态 + 首个不完整段）。
+    ///
+    /// ★ 2026-10-17 从 2 帧降到 1 帧：每帧 20 ms，少丢一帧 = **首字早 20 ms**。
+    ///   70 Hz 二阶高通的瞬态在 20 ms 内基本衰减完；多丢的那一帧纯粹是在拖慢首字。
+    warmup: u32,
     pending: Option<Vec<u8>>, // ETW 回调里暂存的首片 ACL 数据
 }
 
@@ -899,7 +903,7 @@ impl Bridge {
         }
 
         // 丢掉最前面几帧：高通初始瞬态
-        if self.warmup < 2 {
+        if self.warmup < 1 {
             self.warmup += 1;
             self.last_frame_at = Some(Instant::now());
             return;

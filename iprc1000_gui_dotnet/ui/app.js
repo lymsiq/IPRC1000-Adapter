@@ -557,7 +557,10 @@ function renderEnv(s) {
            !rt.jitter ? '' :
              ((rt.jitter.peakBacklogMs || 0) > (rt.jitter.capMs || 64) * 0.95 ? 'warn' : 'ok'),
            rt.jitter
-             ? `起播 ${rt.jitter.preRollMs} / 上限 ${rt.jitter.capMs} ms`
+             ? `起播 ${rt.jitter.effPreRollMs || rt.jitter.preRollMs} / 上限 ${rt.jitter.capMs} ms`
+               // 自适应调过就标出来：起播大于配置值 = 最近出过断音、自动加了缓冲
+               + ((rt.jitter.effPreRollMs || 0) > (rt.jitter.preRollMs || 0)
+                   ? `（自适应 +${rt.jitter.effPreRollMs - rt.jitter.preRollMs}）` : '')
                + ` · 补静音 ${rt.jitter.underruns || 0} 次`
                + ` · 丢最旧 ${rt.jitter.droppedBytes || 0} 字节`
              : '') +
@@ -1222,9 +1225,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.8',
+      version: '1.2.9',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.8（构建于 2026-10-17 18:40）',
+      versionLine: 'v1.2.9（构建于 2026-10-17 19:05）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

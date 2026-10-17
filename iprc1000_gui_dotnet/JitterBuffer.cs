@@ -36,14 +36,21 @@ internal sealed class JitterBuffer : IWaveProvider
     // ── 参数 ──
     public sealed class JitterOptions
     {
-        /// <summary>起播前先攒多少毫秒（防一上来就断音）</summary>
-        public int PreRollMs = 40;
+        /// <summary>
+        /// 起播前先攒多少毫秒（防一上来就断音）。
+        ///
+        /// ★ 2026-10-17 从 40 降到 20：这 40 ms 是**每个会话开头必付的静音**
+        ///   （`Read` 里攒不够就 Fill 0），直接加在"用户听到第一个字"的时间上。
+        ///   配合 `JitterBuffer` 的**自适应**：只要出现欠载就自动 +8 ms（上限 64），
+        ///   连续 3 段会话无欠载再 −4 ms（下限回到本值）。
+        /// </summary>
+        public int PreRollMs = 20;
         /// <summary>积压上限（毫秒）；超过就丢最旧的</summary>
         public int CapMs = 64;
         /// <summary>距上次写入超过它 → 视为新会话，清空重来</summary>
         public int StaleMs = 400;
-        /// <summary>声卡 IO 缓冲（毫秒），交给 WasapiOut 的 desiredLatency</summary>
-        public int LatencyMs = 30;
+        /// <summary>声卡 IO 缓冲（毫秒），交给 WasapiOut 的 desiredLatency（30→20，省 10 ms）</summary>
+        public int LatencyMs = 20;
 
         /// <summary>
         /// 唯一的校验闸 —— 环境变量与代码默认值都过这里。
@@ -91,6 +98,16 @@ internal sealed class JitterBuffer : IWaveProvider
     private readonly object _lock = new();
 
     private bool _priming;               // true = 还在攒起播量（此时输出静音）
+    /// <summary>当前**生效**的起播量（毫秒）。从 <c>Options.PreRollMs</c> 起步，随欠载自适应涨落。</summary>
+    private int _effPreRollMs;
+    /// <summary>本段会话里出现过欠载（补过静音）</summary>
+    private bool _sessionUnderran;
+    /// <summary>连续几段会话没出欠载（用来决定能否回退）</summary>
+    private int _cleanSessions;
+    private const int GrowStepMs = 8;          // 欠载一次涨多少
+    private const int ShrinkStepMs = 4;        // 回退每次降多少
+    private const int ShrinkAfterClean = 3;    // 连续几段干净才回退
+    private const int MaxAutoPreRollMs = 64;   // 自适应上限（再高就明显听得出延迟）
     private long _lastAddMs;             // 上次写入的墙钟毫秒（判新会话用）
 
     // ── 统计（给界面与日志用）──
@@ -122,11 +139,16 @@ internal sealed class JitterBuffer : IWaveProvider
         while (cap < need) cap <<= 1;
         _ring = new byte[cap];
         _mask = cap - 1;
-        _priming = _opt.PreRollMs > 0;
+        _effPreRollMs = _opt.PreRollMs;      // 自适应起点 = 配置值
+        _priming = _effPreRollMs > 0;
         if (_priming) Primings = 1;
     }
 
-    private int PreRollBytes => _opt.PreRollMs * _bytesPerMs;
+    private int PreRollBytes => _effPreRollMs * _bytesPerMs;
+    /// <summary>当前生效的起播量（诊断用：涨了就说明链路在抖）</summary>
+    public int EffectivePreRollMs { get { lock (_lock) return _effPreRollMs; } }
+    /// <summary>自适应调整过多少次</summary>
+    public long AutoPreRollChanges { get; private set; }
     private int CapBytes => _opt.CapMs * _bytesPerMs;
 
     /// <summary>当前可读字节</summary>
@@ -153,12 +175,16 @@ internal sealed class JitterBuffer : IWaveProvider
         var now = nowMs;
         lock (_lock)
         {
-            // ① 距上次写入超过 StaleMs ⇒ 视为新会话：把上一段的残留丢掉
-            if (_lastAddMs != 0 && now - _lastAddMs > _opt.StaleMs && _avail > 0)
+            // ① 距上次写入超过 StaleMs ⇒ 上一段会话结束 ⇒ **先结算自适应**，再丢掉残留
+            if (_lastAddMs != 0 && now - _lastAddMs > _opt.StaleMs)
             {
-                _avail = 0; _head = 0; _tail = 0;
-                StaleResets++;
-                _priming = _opt.PreRollMs > 0;
+                SettleSession();
+                if (_avail > 0)
+                {
+                    _avail = 0; _head = 0; _tail = 0;
+                    StaleResets++;
+                }
+                _priming = _effPreRollMs > 0;
                 if (_priming) Primings++;
             }
 
@@ -219,8 +245,9 @@ internal sealed class JitterBuffer : IWaveProvider
             {
                 Fill(buffer, offset + n, count - n, 0);
                 Underruns++;
+                _sessionUnderran = true;    // 本段会话欠载过 → 下段起播量要涨
                 // 读空了 → 下一段数据重新攒起播量（避免把两段之间接成一条）
-                if (_avail == 0 && _opt.PreRollMs > 0)
+                if (_avail == 0 && _effPreRollMs > 0)
                 {
                     _priming = true;
                     Primings++;
@@ -228,6 +255,34 @@ internal sealed class JitterBuffer : IWaveProvider
             }
             return count;
         }
+    }
+
+    /// <summary>
+    /// 一段会话结束时的自适应结算（调用方已持锁）。
+    ///
+    /// 规则：**欠载过就涨，连续 3 段干净才降**。
+    /// 为什么不对称：欠载是**用户能听见的断音**，比多 8 ms 延迟更糟；
+    /// 所以涨得快（欠一次就涨）、降得慢（要连着 3 段都干净）。
+    /// </summary>
+    private void SettleSession()
+    {
+        if (_sessionUnderran)
+        {
+            _sessionUnderran = false;
+            _cleanSessions = 0;
+            var cap = Math.Min(_opt.CapMs, MaxAutoPreRollMs);
+            if (_effPreRollMs < cap)
+            {
+                _effPreRollMs = Math.Min(cap, _effPreRollMs + GrowStepMs);
+                AutoPreRollChanges++;
+            }
+            return;
+        }
+        if (_effPreRollMs <= _opt.PreRollMs) return;      // 已经在下限，没什么可降
+        if (++_cleanSessions < ShrinkAfterClean) return;
+        _cleanSessions = 0;
+        _effPreRollMs = Math.Max(_opt.PreRollMs, _effPreRollMs - ShrinkStepMs);
+        AutoPreRollChanges++;
     }
 
     private static void Fill(byte[] b, int offset, int count, byte v)
@@ -238,7 +293,12 @@ internal sealed class JitterBuffer : IWaveProvider
     /// <summary>清空（显式复位用；平时靠 <see cref="JitterOptions.StaleMs"/> 自动判新会话）</summary>
     public void Reset()
     {
-        lock (_lock) { _avail = 0; _head = 0; _tail = 0; _priming = _opt.PreRollMs > 0; }
+        lock (_lock)
+        {
+            SettleSession();
+            _avail = 0; _head = 0; _tail = 0;
+            _priming = _effPreRollMs > 0;
+        }
     }
 
     // ───────────────────────── 自检（--jitter-test）─────────────────────────
@@ -341,17 +401,50 @@ internal sealed class JitterBuffer : IWaveProvider
               $"起播 {bad.PreRollMs}（夹到 200）· 上限 {bad.CapMs}（夹到 200，**必须 ≥ 起播**）"
               + $" · 新会话 {bad.StaleMs}（夹到 50）· 声卡缓冲 {bad.LatencyMs}（夹到 200）");
 
+        // ⑥ 自适应 pre-roll：**欠载一次就涨，连续 3 段干净才回落**
+        {
+            var ja = new JitterBuffer(new JitterOptions { PreRollMs = 20, CapMs = 64, StaleMs = 400 });
+            var buf960 = new byte[960];
+            long clk = 10_000;
+            // 先让它起播，然后把数据吃干净 → 第 3 次 Read 必然欠载
+            ja.AddSamples(new byte[1920], 0, 1920, clk);     // 20 ms（= 起播线）
+            ja.Read(buf960, 0, 960);
+            ja.Read(buf960, 0, 960);                          // 正好 20 ms
+            ja.Read(buf960, 0, 960);                          // ← 欠载
+            var under = ja.Underruns;
+            clk += 600;                                        // 会话间隔 → 结算
+            ja.AddSamples(new byte[1920], 0, 1920, clk);
+            var grew = ja.EffectivePreRollMs;
+
+            // 再来 5 段"干净"会话（写 30 ms、正好读 30 ms）
+            for (var k = 0; k < 5; k++)
+            {
+                clk += 600;
+                ja.AddSamples(new byte[2880], 0, 2880, clk);
+                for (var i = 0; i < 3; i++) ja.Read(buf960, 0, 960);
+            }
+            var shrank = ja.EffectivePreRollMs;
+            Check(under >= 1 && grew > 20 && shrank < grew && shrank >= 20,
+                  "自适应 pre-roll：欠载→涨（+8），连续 3 段干净→回落（−4，不低于 20）",
+                  $"欠载 {under} 次 · 20 → {grew} → {shrank} ms · 调整 {ja.AutoPreRollChanges} 次");
+        }
+
         sb.AppendLine();
-        sb.AppendLine($"当前生效参数（环境变量可调）：起播 {jb0.Options.PreRollMs} ms · "
-                      + $"上限 {jb0.Options.CapMs} ms · 判新会话 {jb0.Options.StaleMs} ms · "
-                      + $"声卡缓冲 {jb0.Options.LatencyMs} ms");
+        // ★ 注意：这里必须打印**真实默认值**（FromEnv），不能打印上面测试夹具的 jb0 ——
+        //   夹具里是 `PreRollMs = 40`，会让人误以为默认值没改（我自己就先被骗了一次）。
+        var dflt = JitterOptions.FromEnv();
+        sb.AppendLine($"真实默认参数（环境变量可调）：起播 {dflt.PreRollMs} ms（自适应下限）· "
+                      + $"上限 {dflt.CapMs} ms · 判新会话 {dflt.StaleMs} ms · "
+                      + $"声卡缓冲 {dflt.LatencyMs} ms");
         sb.AppendLine(ok ? "⇒ 全部通过 ✓" : "⇒ ★ 有断言失败");
         return sb.ToString();
     }
 
     public object Status() => new
     {
-        preRollMs = _opt.PreRollMs,
+        preRollMs = _opt.PreRollMs,          // 配置值（下限）
+        effPreRollMs = _effPreRollMs,        // 当前生效值（涨了就说明链路在抖）
+        autoPreRollChanges = AutoPreRollChanges,
         capMs = _opt.CapMs,
         staleMs = _opt.StaleMs,
         latencyMs = _opt.LatencyMs,
