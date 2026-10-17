@@ -173,7 +173,8 @@ SRC_FORBIDDEN = [
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
     # ★ v1.2.9 延迟优化：起播/声卡缓冲都降过，且自适应必须存在（否则降不下去只能手工调）
-    ("抖动缓冲起播 20 ms", "iprc1000_gui_dotnet/JitterBuffer.cs", "public int PreRollMs = 20;"),
+    ("抖动缓冲起播 24 ms", "iprc1000_gui_dotnet/JitterBuffer.cs", "public int PreRollMs = 24;"),
+    ("自适应天花板给上限留余量", "iprc1000_gui_dotnet/JitterBuffer.cs", "CapHeadroomMs"),
     ("声卡缓冲 20 ms", "iprc1000_gui_dotnet/JitterBuffer.cs", "public int LatencyMs = 20;"),
     ("自适应 pre-roll 结算", "iprc1000_gui_dotnet/JitterBuffer.cs", "private void SettleSession()"),
     ("生效起播进 Status", "iprc1000_gui_dotnet/JitterBuffer.cs", "effPreRollMs = _effPreRollMs"),

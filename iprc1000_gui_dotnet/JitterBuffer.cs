@@ -44,9 +44,15 @@ internal sealed class JitterBuffer : IWaveProvider
         ///   配合 `JitterBuffer` 的**自适应**：只要出现欠载就自动 +8 ms（上限 64），
         ///   连续 3 段会话无欠载再 −4 ms（下限回到本值）。
         /// </summary>
-        public int PreRollMs = 20;
-        /// <summary>积压上限（毫秒）；超过就丢最旧的</summary>
-        public int CapMs = 64;
+        public int PreRollMs = 24;
+        /// <summary>
+        /// 积压上限（毫秒）；超过就丢最旧的。
+        ///
+        /// ★ 2026-10-17 从 64 提到 96：真机 62 秒里丢了 1030 ms —— 说明音频是**成串到达**的，
+        ///   64 ms 的头寸装不下一串。放宽上限只会让"最坏情况延迟"变大，而丢最旧是**听得见的**；
+        ///   两害相权，宁可不丢。
+        /// </summary>
+        public int CapMs = 96;
         /// <summary>距上次写入超过它 → 视为新会话，清空重来</summary>
         public int StaleMs = 400;
         /// <summary>声卡 IO 缓冲（毫秒），交给 WasapiOut 的 desiredLatency（30→20，省 10 ms）</summary>
@@ -107,7 +113,16 @@ internal sealed class JitterBuffer : IWaveProvider
     private const int GrowStepMs = 8;          // 欠载一次涨多少
     private const int ShrinkStepMs = 4;        // 回退每次降多少
     private const int ShrinkAfterClean = 3;    // 连续几段干净才回退
-    private const int MaxAutoPreRollMs = 64;   // 自适应上限（再高就明显听得出延迟）
+    private const int MaxAutoPreRollMs = 64;   // 自适应天花板的**绝对**上限
+    /// <summary>
+    /// 自适应起播必须比"积压上限"低这么多毫秒。
+    ///
+    /// ★ 2026-10-17 真机踩到：`MaxAutoPreRollMs` 与 `CapMs` 都是 64 ⇒ 起播涨到 64 后
+    ///   **缓冲没有任何余量**，每来一帧都立刻超过上限、触发"丢最旧"。
+    ///   实测 62 秒里因此丢掉 **1030 ms** 音频（界面显示"丢最旧 98880 字节"）。
+    ///   留 16 ms 余量（约一帧）就够，代价可忽略。
+    /// </summary>
+    private const int CapHeadroomMs = 16;
     private long _lastAddMs;             // 上次写入的墙钟毫秒（判新会话用）
 
     // ── 统计（给界面与日志用）──
@@ -270,7 +285,9 @@ internal sealed class JitterBuffer : IWaveProvider
         {
             _sessionUnderran = false;
             _cleanSessions = 0;
-            var cap = Math.Min(_opt.CapMs, MaxAutoPreRollMs);
+            // 天花板：既要 ≤ 绝对上限，又要给"积压上限"留出余量（否则每帧都顶出去丢最旧）
+            var cap = Math.Min(_opt.CapMs - CapHeadroomMs, MaxAutoPreRollMs);
+            if (cap < _opt.PreRollMs) cap = _opt.PreRollMs;
             if (_effPreRollMs < cap)
             {
                 _effPreRollMs = Math.Min(cap, _effPreRollMs + GrowStepMs);
