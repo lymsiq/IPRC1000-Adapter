@@ -167,6 +167,36 @@ def emit_hid_report(out, usage=0x10):
     return _rec(2, 14, acl)
 
 
+def emit_hid_multi(out, usages):
+    """一条按键报告，**6 个 usage 槽可填多个**（最多 6 个）。
+
+    遥控器上同时按两个键时就是这个形状（实测 `back+menu` → `a1 01 00 00 09 11 ...`）。
+    """
+    slots = list(usages) + [0] * (6 - len(usages))
+    acl = struct.pack("<HH", 10, 0x0041) + bytes([0xA1, 0x01, 0x00, 0x00]) + bytes(slots)
+    assert len(acl) == 14
+    return _rec(2, 14, acl)
+
+
+def scenario_two_keys():
+    """★★ 2026-10-17 真机实测发现的 bug 的回归用例。
+
+    遥控器同时按 `back + menu` 时，HID 报告里**两个 usage 并存**：
+        [09] → [09,11] → [11] → []
+    老实现只取"第一个非零 usage"（`find(|u| u != 0)`）+ 单槽 `last_usage`，于是：
+        [09]     → 09 DOWN
+        [09,11]  → 第一个还是 09，**什么都不发（11 被整条丢掉）**
+        [11]     → 09 UP + 11 DOWN（迟到）
+        []       → 11 UP
+    事件条数一样是 4 条，**顺序却错了** —— 所以这条用例必须断言**顺序**，
+    只看计数会假通过。
+    """
+    out = b""
+    for u in ([0x09], [0x09, 0x11], [0x11], []):
+        out += emit_hid_multi(out, u)
+    return out
+
+
 def scenario_audio_with_keys(audio=20, keys=10):
     """音频与按键**交替**到达：音频一帧不丢、按键一条不落。"""
     out = b""
@@ -247,7 +277,19 @@ def run(name, blob, expect, realtime=False):
     got = parse(text)
 
     bad = []
+    if "key_seq" in expect:
+        # 从 stdout 里按出现顺序抽出 [usage DIR]
+        import re as _re
+        seq = [f"{m.group(1)} {m.group(2)}"
+               for m in _re.finditer(r"usage=0x([0-9A-F]{2})\s+(DOWN|UP)", text)]
+        want_seq = list(expect["key_seq"])
+        # 允许前后有别的键（真机回放里可能有），只要求 want_seq 是**连续子序列**
+        ok = any(seq[i:i + len(want_seq)] == want_seq for i in range(len(seq) - len(want_seq) + 1))
+        if not ok:
+            bad.append(f"key_seq: 期望 {want_seq}，实际 {seq}")
     for k, want in expect.items():
+        if k in ("key_seq",):
+            continue
         if k == "odd_kinds_has":
             if want not in got.get("odd_kinds", ""):
                 bad.append(f"{k}: 期望包含 {want!r}，实际 {got.get('odd_kinds','')!r}")
@@ -305,6 +347,10 @@ CASES = [
     ("⑧ 跨会话的序号跳变**不算丢帧**（假仪表比没仪表更糟）",
      scenario_two_sessions(25, 1000),
      dict(frames=50, seq_jumps=0, seq_lost=0, lost_cont=0), True),
+
+    ("⑨ 两键同按（back+menu）：**不许丢第二个键**，且事件顺序正确",
+     scenario_two_keys(),
+     dict(frames=0, key_seq=["09 DOWN", "11 DOWN", "09 UP", "11 UP"])),
 
     ("④ 续片被截断（负载不足）：以前完全没有计数",
      scenario_cont_truncated(50, 10, 20, 200),

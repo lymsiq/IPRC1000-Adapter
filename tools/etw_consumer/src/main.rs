@@ -567,7 +567,16 @@ struct Bridge {
     hpf: Option<[Hpf; 2]>,
     udp: Option<UdpSink>,
     key_sink: Option<UdpSink>,
-    last_usage: Option<u8>,
+    /// ★ **当前按住的 usage 集合**（整份报告快照）。
+    ///
+    /// 以前这里是 `last_usage: Option<u8>`（只记一个键），而 HID 键盘报告的 6 个槽
+    /// **可以同时有多个 usage** —— 实测遥控器上 `back + menu` 同时按就是这个样子：
+    ///   `a1 01 00 00 09 11 00 00 00 00`
+    /// 只取第一个非零 usage 会**把第二个键整条丢掉**（2026-10-17 实测发现）。
+    ///
+    /// 现在与注入器的模型对齐：把 6 个槽解析成"当前集合"，**与上一份做差集**，
+    /// 只对"新按下 / 刚松开"发事件。这样多键同按、先后松开都不会丢。
+    held: [bool; 256],
     /// 最近一个事件的 ETW 时间戳（100ns 自 1601，即 FILETIME）—— 用来实测投递延迟
     last_ts: u64,
     stats: Arc<Mutex<Stats>>,
@@ -597,7 +606,7 @@ impl Bridge {
             },
             udp,
             key_sink,
-            last_usage: None,
+            held: [false; 256],
             last_ts: 0,
             stats,
             wav,
@@ -718,21 +727,46 @@ impl Bridge {
         self.stats.lock().unwrap().frames += 1;
     }
 
-    /// HID 键盘报告 → 按下 / 松开事件（同一 usage 重复上报会被去重）
+    /// HID 键盘报告 → 按下 / 松开事件
+    ///
+    /// **整份报告快照模型**：6 个槽里所有非零 usage 构成"当前按住集合"，
+    /// 与上一份逐项比较，只对变化发事件。
+    ///
+    /// 为什么必须这样（2026-10-17 实测）：
+    ///   · 遥控器同时按 `back + menu` → 报告里**两个 usage 并存**（`09 11`）；
+    ///   · 松开其中一个 → 报告变成 `11`，此时才算 menu "新按下"（如果之前只用单槽模型）；
+    ///   · 幽灵帧 0x0C 还会**与正在按住的键并存**（`11 0c`）。
+    /// 单槽（`Option<u8>`）模型在上述三种情况下都会丢键或错时报文。
     fn handle_hid_report(&mut self, usages: &[u8]) {
-        match usages.iter().copied().find(|&u| u != 0) {
-            Some(u) => {
-                if self.last_usage != Some(u) {
-                    let old = self.last_usage;
-                    self.emit_key(old, false); // 先放掉上一个
-                    self.last_usage = Some(u);
-                    self.emit_key(Some(u), true);
-                }
+        let mut now = [false; 256];
+        for &u in usages {
+            if u != 0 {
+                now[u as usize] = true;
             }
-            None => {
-                if let Some(u) = self.last_usage.take() {
-                    self.emit_key(Some(u), false);
-                }
+        }
+
+        // ① 先放掉不再按住的（升序，保证事件顺序确定）
+        for u in 0..256usize {
+            if self.held[u] && !now[u] {
+                self.held[u] = false;
+                self.emit_key(Some(u as u8), false);
+            }
+        }
+        // ② 再按下新出现的
+        for u in 0..256usize {
+            if now[u] && !self.held[u] {
+                self.held[u] = true;
+                self.emit_key(Some(u as u8), true);
+            }
+        }
+    }
+
+    /// 会话结束 / 程序退出：把还按着的键全部放掉（否则上位机会以为键一直按着）
+    fn release_all_held(&mut self) {
+        for u in 0..256usize {
+            if self.held[u] {
+                self.held[u] = false;
+                self.emit_key(Some(u as u8), false);
             }
         }
     }
@@ -904,6 +938,9 @@ impl Bridge {
                 if let Some(u) = self.udp.as_ref() {
                     u.cmd(b"END");
                 }
+                // 会话断开时可能还有键按着（链路掉/遥控器走远）—— 必须放掉，
+                // 否则上位机以为键一直按着（卡键）。
+                self.release_all_held();
                 self.in_session = false;
                 diag::log_async(&format!(
                     "会话结束（END）—— 已静默 {} ms",
@@ -914,6 +951,7 @@ impl Bridge {
     }
 
     fn finish(&mut self) {
+        self.release_all_held();     // 退出前把按着的键放掉（防卡键）
         if self.in_session {
             if let Some(u) = self.udp.as_ref() {
                 u.cmd(b"END");
