@@ -624,8 +624,16 @@ function renderEnv(s) {
   const srcName = 'BthPort ETW';   // 只有这一种来源（键盘模式/钩子已移除）
   $('#keySrcKv').innerHTML =
     kvItem('按键来源', srcName, ks.mode === 'hook' ? '' : 'ok') +
-    kvItem('ETW 采集器', ke.online ? `已监听 127.0.0.1:${ke.port}（${ke.events || 0} 次）` : '未启动',
+    kvItem('ETW 采集器', ke.online
+             ? `已监听 127.0.0.1:${ke.port} · 按下 ${ke.keyDowns || 0} / 松开 ${ke.keyUps || 0} 次`
+             : '未启动',
            ke.online ? 'ok' : 'bad') +
+    // ⚠ 一次正常按键 = 1 按下 + 1 松开 = **2 个事件**。把三者分开列，
+    //   免得"48 次"被读成"按了 48 下"（用户 2026-10-18 问过一次）。
+    kvItem('事件 vs 按键', (ke.keyDowns || 0) === (ke.keyUps || 0)
+             ? `共 ${ke.events || 0} 个事件 = ${ke.keyDowns || 0} 次按键 × 2（按下+松开）`
+             : `共 ${ke.events || 0} 个事件 · 按下 ${ke.keyDowns || 0} ≠ 松开 ${ke.keyUps || 0}（有丢 UP）`,
+           (ke.keyDowns || 0) === (ke.keyUps || 0) ? '' : 'warn') +
     kvItem('ETW 投递延迟', ke.latencySamples > 0
              ? `平均 ${ke.avgLatencyMs} ms · 最大 ${ke.maxLatencyMs} ms（${ke.latencySamples} 次采样）`
              : '等待采样',
@@ -1141,9 +1149,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.26',
+      version: '1.2.27',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.26（构建于 2026-10-18 10:40）',
+      versionLine: 'v1.2.27（构建于 2026-10-18 11:10）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

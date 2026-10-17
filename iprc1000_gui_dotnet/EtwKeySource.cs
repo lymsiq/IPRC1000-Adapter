@@ -76,6 +76,11 @@ internal sealed class EtwKeySource : IDisposable
     /// </summary>
     public static void AppendLog(string line) => KeyLog.Write(line);
     public bool Online => _running && _udp != null;
+
+    /// <summary>累计按下次数（正常一次按键 = 1）</summary>
+    public long KeyDowns { get; private set; }
+    /// <summary>累计松开次数（正常一次按键 = 1）</summary>
+    public long KeyUps { get; private set; }
     public long Events { get; private set; }
     public long Reports { get; private set; }
     public long UnknownUsage { get; private set; }
@@ -165,6 +170,10 @@ internal sealed class EtwKeySource : IDisposable
 
         Events++;
         Reports++;
+        // ★ 分开统计按下/松开：面板原来只说"48 次"，用户会读成"按了 48 下"。
+        //   一次正常按键 = 1 DOWN + 1 UP = 2 个事件。若出现 4 个，说明**上报重复**
+        //   （同一次物理按键产生了 2 组 DOWN/UP），那就得往桥/设备侧查，不能怪用户。
+        if (down) KeyDowns++; else KeyUps++;
         LastAt = DateTime.UtcNow;
 
         if (!UsageToButton.TryGetValue(usage, out var bid))
@@ -196,6 +205,8 @@ internal sealed class EtwKeySource : IDisposable
         latencySamples = LatencySamples,
         online = Online,
         events = Events,
+        keyDowns = KeyDowns,
+        keyUps = KeyUps,
         unknownUsage = UnknownUsage,
         lastUsage = $"0x{LastUsage:X2}",
         lastButton = LastButton,
