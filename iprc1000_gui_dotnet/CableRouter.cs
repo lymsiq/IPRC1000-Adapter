@@ -17,6 +17,10 @@ internal sealed class CableRouter : IDisposable
     private WasapiOut? _out;
     /// <summary>有界抖动缓冲（替代原来的 BufferedWaveProvider）</summary>
     private JitterBuffer? _jit;
+
+    /// <summary>麦克风增益 + 电平表（作用在写进 CABLE 之前）。界面滑块改它，**立刻生效**。</summary>
+    private readonly MicGain _mic = new(MicGain.DefaultDb,
+        System.IO.Path.Combine(Env.ConfigDir, "audio.json"));
     private Thread? _thread;
     private volatile bool _running;
     private long _packets;
@@ -208,7 +212,13 @@ internal sealed class CableRouter : IDisposable
                                 Log($"[LAT] 语音键按下 → 首包音频到达 {ms:F0} ms（声卡已就绪={ok}）");
                             _voiceDownAt = DateTime.MinValue;
                         }
-                        if (ok) _jit!.AddSamples(asm, 0, n);
+                        if (ok)
+                        {
+                            // ★ 缩放 + 电平在同一遍遍历里做（见 MicGain 的注释：
+                            //   增益放在写进 CABLE 之前，滑块才能立刻生效，不用重启语音桥）
+                            _mic.Apply(asm, 0, n);
+                            _jit!.AddSamples(asm, 0, n);
+                        }
                     }
                 }
             }
@@ -230,6 +240,26 @@ internal sealed class CableRouter : IDisposable
         CloseSink();
     }
 
+    /// <summary>当前麦克风增益（dB）</summary>
+    public int MicDb => _mic.Db;
+
+    /// <summary>设置麦克风增益（dB，越界夹住）。返回是否真的变了。</summary>
+    public bool SetMicGain(int db)
+    {
+        var changed = _mic.Set(db);
+        if (changed) Log($"麦克风增益 → {_mic.Db:+0;-0;0} dB（×{_mic.Factor:0.00}）");
+        return changed;
+    }
+
+    /// <summary>界面电平表用（高频轮询）：读一次电平并**清掉"新增削波"计数**。</summary>
+    public object MicLevel() => new
+    {
+        level = _mic.LevelPermille,
+        peakDbfs = Math.Round(_mic.PeakDbfs, 1),
+        clipRecent = _mic.TakeClipRecent(),
+        clipped = _mic.Clipped,
+    };
+
     public object Status() => new
     {
         online = Online,
@@ -239,6 +269,7 @@ internal sealed class CableRouter : IDisposable
         session = Session,
         device = Device,
         jitter = _jit?.Status(),
+        mic = _mic.Status(),
     };
 
     public void Dispose()

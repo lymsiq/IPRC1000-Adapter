@@ -88,6 +88,9 @@ function goto(page) {
   /* ★ 鼠标页的「实时校准区」只在页面可见时轮询。
      本程序是常驻托盘应用 —— 不该在没人看的时候每 50ms 跨进程取一次数据。 */
   if (page === 'mouse') startMousePad(); else stopMousePad();
+  /* 电平表同理：只在环境设置页可见时轮询（100 ms 一次 —— 跟着 2 秒的 state 刷新走，
+     表就是一格一跳，用户根本看不出音量大小）。*/
+  if (page === 'env') startMicMeter(); else stopMicMeter();
 }
 
 /* ───────── 渲染：功能总览 ───────── */
@@ -559,6 +562,8 @@ function renderEnv(s) {
                + ` · 丢最旧 ${rt.jitter.droppedBytes || 0} 字节`
              : '') +
     kvItem('管理员权限', a ? '已具备' : '缺失', a ? 'ok' : 'bad');
+  renderMicGain(s);
+  bindMicGain();
   $('#bridgeNote').className = 'note' + (a ? '' : ' warn');
   $('#bridgeNote').innerHTML = a
     ? (b.zombie
@@ -714,8 +719,10 @@ window.setUiVisible = function (v) {
     refresh();
     timer = setInterval(refresh, 2000);
     if (!$('#page-mouse') || !$('#page-mouse').classList.contains('hidden')) startMousePad();
+    if (!$('#page-env') || !$('#page-env').classList.contains('hidden')) startMicMeter();
   } else {
     stopMousePad();     // 窗口藏起来了就别再轮询校准区
+    stopMicMeter();     // 电平表同理
   }
 };
 
@@ -774,6 +781,100 @@ function pushMouseCfg(now) {
 function KeymapsMouseName(groups) {
   const g = (groups || []).find(x => x.kind === 'mouse');
   return g ? g.name : '鼠标模式';
+}
+
+/* ───────── 麦克风增益 + 电平表 ─────────
+   ★ 电平表为什么单独 10 Hz 轮询：跟着 2 秒的 state 刷新走，表就是"一格一跳"，
+     用户看不出音量大小，调增益还是靠猜。
+   ★ 为什么必须显示削波：增益拉过头会把波形削平（撞到 ±32767），声音发毛、
+     识别率**反而下降** —— 用户却以为"更响=更好"，不给提示就会一路往上拉。 */
+let micTimer = null, micClipTimer = null, micSetTimer = null;
+
+function micLabel(db) {
+  const d = Number(db) || 0;
+  const f = Math.pow(10, d / 20);
+  if (d === 0) return '0 dB（原声）';
+  return (d > 0 ? '+' + d : String(d)) + ' dB · ×' + f.toFixed(2);
+}
+
+/* 从 state 回填滑块（拖动中跳过，免得把用户的手指"拽回去"）*/
+function renderMicGain(s) {
+  const m = ((s || {}).router || {}).mic;
+  const el = $('#micGain');
+  if (!el || !m) return;
+  if (el.dataset.dirty !== '1') el.value = String(m.db ?? 0);
+  const v = $('#micGainVal');
+  if (v) v.textContent = micLabel(m.db ?? 0);
+  // 先从 state 画一次电平（预览模式 / 刚进页面时不至于是一条空条），之后交给 micTick
+  const bar = $('#micMeter i');
+  if (bar && micTimer === null) {
+    const pct = Math.max(0, Math.min(1000, m.level || 0)) / 10;
+    bar.style.clipPath = 'inset(0 ' + (100 - pct).toFixed(1) + '% 0 0)';
+  }
+}
+
+function bindMicGain() {
+  const el = $('#micGain');
+  if (!el || el.dataset.bound) return;
+  el.dataset.bound = '1';
+  // 拖动中只更新读数（否则拖一次会发几十个命令）
+  el.addEventListener('input', () => {
+    el.dataset.dirty = '1';
+    const v = $('#micGainVal');
+    if (v) v.textContent = micLabel(el.value);
+  });
+  // 松手 250 ms 后下发 —— **立即生效**，不用重启语音桥
+  el.addEventListener('change', () => {
+    clearTimeout(micSetTimer);
+    micSetTimer = setTimeout(async () => {
+      el.dataset.dirty = '0';
+      if (!B) return;
+      try {
+        const r = JSON.parse(await B.setAudioGain(el.value));
+        if (r && r.message) toast(r.message, 2600);
+      } catch (e) { toast('设置增益失败：' + (e && e.message ? e.message : e), 4000); }
+      await refresh();
+    }, 250);
+  });
+}
+
+async function micTick() {
+  if (!B) return;
+  let d;
+  try { d = JSON.parse(await B.micLevel()); } catch (e) { return; }
+  const bar = $('#micMeter i'), met = $('#micMeter'), hint = $('#micHint');
+  const lv = Math.max(0, Math.min(1000, d.level || 0));
+  if (bar) bar.style.clipPath = 'inset(0 ' + (100 - lv / 10).toFixed(1) + '% 0 0)';
+  // 削波闪红 0.7 秒（读的是"自上次轮询以来新增"，所以能抓到瞬时那一下）
+  if (d.clipRecent > 0 && met) {
+    met.classList.add('clip');
+    clearTimeout(micClipTimer);
+    micClipTimer = setTimeout(() => met.classList.remove('clip'), 700);
+  }
+  if (!hint) return;
+  if (d.clipRecent > 0) {
+    hint.textContent = '已削波 ' + d.clipRecent + ' 个采样 —— 增益调太高了，往下调 3~6 dB。'
+      + '削平的声音会发毛，识别率反而下降。';
+  } else if (lv < 15) {
+    hint.textContent = '现在没有声音。按住语音键说话时这里应该跳动；一直不动说明语音链路没通。';
+  } else {
+    const pk = Number(d.peakDbfs ?? -60);
+    const tip = pk > -3 ? '已经贴顶了，建议往下调一点' : (pk < -18 ? '偏小，可以往上调' : '电平合适');
+    hint.textContent = '峰值 ' + pk.toFixed(1) + ' dBFS · ' + tip + '（理想 -12 ~ -3 dBFS）';
+  }
+}
+
+function startMicMeter() {
+  if (micTimer || !B) return;
+  const page = $('#page-env');
+  if (!page || page.classList.contains('hidden')) return;
+  bindMicGain();
+  micTick();
+  micTimer = setInterval(micTick, 100);
+}
+
+function stopMicMeter() {
+  if (micTimer) { clearInterval(micTimer); micTimer = null; }
 }
 
 function renderMouse(s) {
@@ -1121,9 +1222,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.5',
+      version: '1.2.6',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.5（构建于 2026-10-16 19:45）',
+      versionLine: 'v1.2.6（构建于 2026-10-17 09:40）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
@@ -1142,6 +1243,8 @@ function boot() {
                 hint: '正在监听 BthPort ETW（180 ms 前收到音频）' },
       inject: true,
       router: { online: true, packets: 1152, bytes: 4423680, error: null, session: true,
+                mic: { db: 6, minDb: -20, maxDb: 30, factor: 2.0, level: 420,
+                       peakDbfs: -9.5, clipped: 0 },
                 jitter: { preRollMs: 40, capMs: 64, staleMs: 400, latencyMs: 30,
                           backlogMs: 44.0, peakBacklogMs: 63, playing: true,
                           underruns: 3, droppedBytes: 1920, staleResets: 1, primings: 5 },

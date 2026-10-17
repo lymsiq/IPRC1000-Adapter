@@ -226,6 +226,14 @@ SRC_REQUIRED = [
     ("回放也按时间轴判会话", "tools/etw_consumer/src/main.rs", "回放也要**按时间轴判会话**"),
     ("L2CAP 信令单独计数", "tools/etw_consumer/src/main.rs", "sig_frag"),
     ("自检覆盖跨会话假跳号", "tools/bridge_loss_selftest.py", "scenario_two_sessions"),
+    # ★★ 麦克风增益 + 电平表（2026-10-17）：放在写进 CABLE 之前 ⇒ 滑块立刻生效
+    ("麦克风增益有独立实现", "iprc1000_gui_dotnet/MicGain.cs", "internal sealed class MicGain"),
+    ("增益在写进 CABLE 之前生效", "iprc1000_gui_dotnet/CableRouter.cs", "_mic.Apply(asm, 0, n)"),
+    ("增益有纯逻辑自检", "iprc1000_gui_dotnet/MicGain.cs", "public static string SelfTest"),
+    ("增益自检有 CLI 入口", "iprc1000_gui_dotnet/Program.cs", "--micgain-test"),
+    ("界面有增益滑块", "iprc1000_gui_dotnet/ui/index.html", "id=\"micGain\""),
+    ("电平表 10Hz 轮询（不是跟 2 秒的 state）", "iprc1000_gui_dotnet/ui/app.js", "setInterval(micTick, 100)"),
+    ("电平条渐变锚定轨道（不压进填充区）", "iprc1000_gui_dotnet/ui/style.css", "clip-path:inset(0 100% 0 0)"),
     # ★ 移动必须从光标当前位置起算（2026-10-16 用户指正后重做）
     ("被动标定用真实使用学增益", "iprc1000_gui_dotnet/MouseEngine.cs", "CalibrateFromUse"),
     ("开模式不再触发主动校准", "iprc1000_gui_dotnet/MouseEngine.cs", "这里**不做**主动校准"),

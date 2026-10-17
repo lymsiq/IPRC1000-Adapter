@@ -75,6 +75,15 @@ internal static class Program
             return;
         }
 
+        // 麦克风增益自检：--micgain-test [输出文件]
+        //   纯逻辑、不碰声卡：验证 0 dB 恒等 / 溢出夹住不环绕 / 削波计数 / 电平量程 / 参数夹取
+        if (args.Length > 0 && args[0] == "--micgain-test")
+        {
+            var pmg = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "micgain_test.txt");
+            File.WriteAllText(pmg, MicGain.SelfTest());
+            return;
+        }
+
         // 鼠标动作映射自检：--mouseact-test [输出文件]
         //   纯逻辑、不注入任何东西：验证"鼠标左键/右键/滚轮上/滚轮下"这四个映射值
         //   存得进（Parse）、看得懂（Format）、且越界值不会漏成真实虚拟键码。

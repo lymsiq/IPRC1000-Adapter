@@ -291,6 +291,18 @@
         </div>
 
         <div class="kv" id="bridgeKv"></div>
+        <!-- 麦克风增益：滑块 + 实时电平表。
+             ★ 电平表不是装饰 —— 只给滑块的话用户只能靠耳朵反复试，而且会一路往上拉，
+               直到波形削平（±32767）声音发毛、识别率反而下降，却毫无察觉。 -->
+        <div class="micgain">
+          <label class="slider-row">
+            <span>麦克风增益</span>
+            <input type="range" id="micGain" min="-20" max="30" step="1" value="0">
+            <b class="val" id="micGainVal">0 dB</b>
+          </label>
+          <div class="meter" id="micMeter" title="实时电平（−60 ~ 0 dBFS）"><i></i></div>
+          <div class="hintline" id="micHint"></div>
+        </div>
         <div class="note" id="bridgeNote"></div>
 
         <div class="panel-actions">
