@@ -68,8 +68,9 @@ const AUDIO_TOTAL: usize = L2CAP_HDR + FRAME_LEN;
 ///
 /// 2026-10-17 实测踩到：L2CAP 的动态 CID 是**每次连接按升序分配**的。
 /// Windows 的 HIDP 会开两条通道（Control / Interrupt）；**谁先开谁拿 0x0040**。
-/// 曾经写死 `0x0041`，某次重连后变得"按键全失效、音频一帧没有"，
+/// 曾经把数据 CID 定死成 `0x41`，某次重连后变得"按键全失效、音频一帧没有"，
 /// 桥日志里全是 `未识别分片 dlen=14`，而 `首条未识别` 的 CID 是 **0x0040**。
+/// （`package.py` 有两条反向断言盯着，别把那两种写法改回来。）
 const CID_DYNAMIC_LO: u16 = 0x0040;
 const CID_DYNAMIC_HI: u16 = 0x007F;
 

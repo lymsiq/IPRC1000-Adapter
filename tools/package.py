@@ -133,6 +133,8 @@ ENCODING = [
 # 这类检查针对**注入链路** —— 曾经出过的大 bug 都是"注入读了另一份数据源"。
 # 放在源码上（而不是 zip 里）是因为 publish 只有 exe，没有 .cs。
 SRC_FORBIDDEN = [
+    # ★★ v1.2.8：数据 CID 是 L2CAP 动态分配的（0x40/0x41 都可能），不许再写死
+    ("不许写死数据 CID", "tools/etw_consumer/src/main.rs", "CID_HID"),
     # ★★ 最重要的一条：注入必须走 Keymaps.Get()，绝不能再用 Keys.Load()。
     #    Keys.Load() 读的是旧扁平格式，遇到多配置组的 keymap.json 会反序列化失败并
     #    **静默回落到出厂默认** → 界面显示一套、实际注入另一套，用户怎么改都没反应。
@@ -170,6 +172,9 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★★ v1.2.8 事故：HID 数据 CID 曾被写死 0x0041，某次重连落到 0x40 → 按键全失效、音频没声
+    ("HID 数据 CID 用动态范围判定", "tools/etw_consumer/src/main.rs", "fn is_data_cid"),
+    ("实测 CID 写进日志（日志自证）", "tools/etw_consumer/src/main.rs", "实际 CID 音频="),
     # ★★ 注入链路的三道保险（2026-10-15 线上排查后加，缺任一道都可能再卡键）
     ("注入按整份报告下发", "iprc1000_gui_dotnet/KeyFilter.cs", "_injectedSet"),
     ("孤儿键回收器存在", "iprc1000_gui_dotnet/KeyFilter.cs", "ReapOrphanKeys"),
@@ -234,11 +239,6 @@ SRC_REQUIRED = [
     ("界面有增益滑块", "iprc1000_gui_dotnet/ui/index.html", "id=\"micGain\""),
     ("电平表 10Hz 轮询（不是跟 2 秒的 state）", "iprc1000_gui_dotnet/ui/app.js", "setInterval(micTick, 100)"),
     ("电平条渐变锚定轨道（不压进填充区）", "iprc1000_gui_dotnet/ui/style.css", "clip-path:inset(0 100% 0 0)"),
-    # ★★ v1.2.8 事故：HID 数据 CID 曾被写死 0x0041，某次重连落到 0x40 → 按键全失效
-    ("HID 数据 CID 用动态范围判定", "tools/etw_consumer/src/main.rs", "fn is_data_cid"),
-    ("不许再写死 CID_HID", "tools/etw_consumer/src/main.rs", "const CID_HID"),
-    ("不许再按等值比 CID", "tools/etw_consumer/src/main.rs", "cid == CID_HID"),
-    ("CID 进日志（日志自证）", "tools/etw_consumer/src/main.rs", "实际 CID 音频="),
     # ★ 移动必须从光标当前位置起算（2026-10-16 用户指正后重做）
     ("被动标定用真实使用学增益", "iprc1000_gui_dotnet/MouseEngine.cs", "CalibrateFromUse"),
     ("开模式不再触发主动校准", "iprc1000_gui_dotnet/MouseEngine.cs", "这里**不做**主动校准"),
