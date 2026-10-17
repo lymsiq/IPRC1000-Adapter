@@ -133,6 +133,10 @@ ENCODING = [
 # 这类检查针对**注入链路** —— 曾经出过的大 bug 都是"注入读了另一份数据源"。
 # 放在源码上（而不是 zip 里）是因为 publish 只有 exe，没有 .cs。
 SRC_FORBIDDEN = [
+    # ★ v1.2.24 隐私护栏：**不许记录其它设备的标识**（用户明确要求）。
+    #   曾经为了诊断"Raw Input 里有没有遥控器"，我把设备 VID/PID 存进一个字典并显示出来；
+    #   那会把用户的物理键盘型号暴露在界面上。功能已完成使命，永久移除。
+    ("不记录其它设备标识（隐私）", "iprc1000_gui_dotnet/KeyFilter.cs", "_rawByDevice"),
     # ★ v1.2.12：用户实测"贴嘴边小声说话输出正常"，增益本身没必要；
     #   而且 +1 dB 时界面那句"现在没有声音…"的提示会造成误解。整个功能已删。
     ("麦克风增益已移除（路由）", "iprc1000_gui_dotnet/CableRouter.cs", "MicGain"),
@@ -177,11 +181,13 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.25：日志总开关（界面可开可关）+ 桥侧也受控
+    ("桥支持 --quiet", "tools/etw_consumer/src/main.rs", '"--quiet" => out.quiet = true'),
+    ("启桥按开关决定 --quiet", "iprc1000_gui_dotnet/Backend.cs", '+ (LogSwitch.Enabled ? "" : " --quiet")'),
+    ("界面日志开关", "iprc1000_gui_dotnet/ui/index.html", 'id="logToggle"'),
+    ("开关命令", "iprc1000_gui_dotnet/Backend.cs", "public string SetLog(string? on)"),
     # ★ v1.2.23：每段会话第一条报文只当基线（修"启动瞬间凭空触发一次按键"）
     ("会话基线（防启动假按键）", "tools/etw_consumer/src/main.rs", "if !self.seeded {"),
-    # ★ v1.2.22：Raw Input 按设备归类（判断"遥控器报文没来"还是"名字不匹配被过滤"）
-    ("按设备归类报文", "iprc1000_gui_dotnet/KeyFilter.cs", "_rawByDevice"),
-    ("设备标签汇总", "iprc1000_gui_dotnet/KeyFilter.cs", "RawSourcesText"),
     # ★ v1.2.21：ETW 模式下 Raw Input 不许再处理一次（注册没撤掉，会双处理）
     ("ETW 模式挡住 Raw Input 重复处理", "iprc1000_gui_dotnet/KeyFilter.cs", "if (KeySourceIsEtw) return;"),
     ("过滤后计数（只算遥控器）", "iprc1000_gui_dotnet/KeyFilter.cs", "RawOurs++;"),

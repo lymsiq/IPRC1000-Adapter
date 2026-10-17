@@ -266,7 +266,12 @@ mod diag {
     /// ⚠ **不要在 ETW 回调里直接调它** —— 这里面是**文件写 + flush**，
     /// 一次慢盘就能把回调卡住几十~几百毫秒，而回调一卡 ETW 缓冲就溢出、**整段音频被丢**。
     /// 回调路径请用 [`log_async`]（只入内存队列，由统计线程落盘）。
+    /// 静默开关（`--quiet` 置位）。发布版默认静默：**不写日志文件**。
+    /// 排查时去掉 `--quiet` 即可恢复全部日志。
+    pub static QUIET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
     pub fn log(msg: &str) {
+        if QUIET.load(std::sync::atomic::Ordering::Relaxed) { return; }
         if let Ok(mut g) = log_file().lock() {
             if let Some(f) = g.as_mut() {
                 let _ = writeln!(f, "{}  {}", local_hms(), msg);
@@ -842,7 +847,9 @@ impl Bridge {
         if let Some(k) = self.key_sink.as_ref() {
             let _ = k.cmd(msg.as_bytes());
         }
-        println!("[KEY] usage=0x{u:02X}  {}", if down { "DOWN" } else { "UP" });
+        if !diag::QUIET.load(std::sync::atomic::Ordering::Relaxed) {
+            println!("[KEY] usage=0x{u:02X}  {}", if down { "DOWN" } else { "UP" });
+        }
     }
 
     /// 一个完整音频帧的 653 字节负载
@@ -1034,6 +1041,10 @@ struct Args {
     replay: Option<String>,
     udp: Option<String>,
     key_udp: Option<String>,
+    /// 静默：不写 bridge.log、也不打 [KEY] 行（发布版默认走这个）。
+    /// ★ 按键 stdout 让 C# 读到就丢是纯浪费 —— 一次管道写系统调用 ≈2~5 µs，
+    ///   而且它就压在"ETW 收到按键 → 发 UDP"这一步上。
+    quiet: bool,
     no_feed: bool,
     hp: f32,
     seconds: u64,
@@ -1048,6 +1059,7 @@ fn parse_args() -> Args {
         replay: None,
         udp: None,
         key_udp: None,
+        quiet: false,
         no_feed: false,
         hp: 0.0,
         seconds: 30,
@@ -1063,6 +1075,7 @@ fn parse_args() -> Args {
             "--wav" => out.wav = val,
             "--replay" => out.replay = val,
             "--udp" => out.udp = val,
+            "--quiet" => out.quiet = true,
             "--key-udp" => out.key_udp = val,
             "--no-feed" => { out.no_feed = true; consumed = 1; }
             "--no-key-udp" => {
@@ -1378,7 +1391,12 @@ fn main() {
         return;
     }
 
-    println!("[i] 实时 ETW 模式（需要管理员权限）");
+    if args.quiet {
+        diag::QUIET.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    if !args.quiet {
+        println!("[i] 实时 ETW 模式（需要管理员权限）");
+    }
     if args.hp > 0.0 {
         println!("[i] 高通 {:.0} Hz", args.hp);
     }

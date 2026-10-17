@@ -614,6 +614,16 @@ function renderEnv(s) {
     `已解锁 <b>${((s.stuckGuard || {}).unlockCount) || 0}</b> 次` +
     (((s.stuckGuard || {}).lastUnlock) ? `（${(s.stuckGuard || {}).lastUnlock}）` : '');
   // ── 按键来源 ──
+  // 日志开关的显示状态（绑定在 bindUI 里，因为这里才拿得到 s）
+  const logT = $('#logToggle');
+  if (logT) logT.checked = s.logEnabled === true;
+  const logSw = $('#logSwitch');
+  if (logSw) logSw.classList.toggle('on', s.logEnabled === true);
+  const logN = $('#logNote');
+  if (logN) logN.textContent = s.logEnabled
+    ? '日志已开启：会写 key-events.log / bridge.log / router.log 等，占用少量磁盘与 I/O。排查完建议关闭。'
+    : '';
+
   const ks = s.keysource || {};
   const ke = ks.etw || {};
   const isEtw = ks.mode === 'etw';
@@ -963,6 +973,22 @@ function bindUI() {
     const r = JSON.parse(await B.setInject(want));
     toast(r.message); await refresh();
   };
+  // 日志开关：**绑定**放这里（`bindUI` 没有 `s`，渲染部分在 renderKeys 里）。
+  // ⚠ 预览模式（浏览器直接打开）没有宿主桥，`B.setLog` 不存在 —— 那时不绑事件，只显示状态。
+  const logTB = $('#logToggle');
+  const hasBridge = !!(window.chrome && window.chrome.webview && window.chrome.webview.postMessage);
+  if (logTB && hasBridge) {
+    logTB.onchange = async () => {
+      const r = JSON.parse(await B.setLog(logTB.checked ? '1' : '0'));
+      logTB.checked = r.logEnabled === true;
+      const sw = $('#logSwitch');
+      if (sw) sw.classList.toggle('on', logTB.checked);
+      toast(logTB.checked ? '已打开诊断日志（会写 key-events.log / bridge.log，排查完请关掉）'
+                          : '已关闭诊断日志', 4000);
+      refresh();
+    };
+  }
+
   $('#btnTestInject').onclick = async () => {
     const r = JSON.parse(await B.testInject());
     toast(r.ok ? `注入正常：按下时系统读到「${r.name} 按下」，松开后已释放` : '注入异常，请看状态面板', 5000);
@@ -1142,9 +1168,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.24',
+      version: '1.2.25',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.24（构建于 2026-10-18 09:40）',
+      versionLine: 'v1.2.25（构建于 2026-10-18 10:10）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

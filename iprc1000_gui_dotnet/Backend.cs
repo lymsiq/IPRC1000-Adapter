@@ -806,7 +806,10 @@ internal sealed class Backend : IDisposable
                     RedirectStandardError = true,
                     StandardOutputEncoding = Encoding.UTF8,
                     StandardErrorEncoding = Encoding.UTF8,
-                    Arguments = $"--udp 127.0.0.1:{Env.PcmPort} --hp 70 --seconds 86400",
+                    // 日志关着就给桥加 --quiet：桥不写 bridge.log、也不打 [KEY] 行
+                    // （那行是每条按键一次管道写，C# 读到也是丢）
+                    Arguments = $"--udp 127.0.0.1:{Env.PcmPort} --hp 70 --seconds 86400"
+                                + (LogSwitch.Enabled ? "" : " --quiet"),
                 };
                 var proc = Process.Start(psi);
                 if (proc == null)
@@ -1188,6 +1191,16 @@ internal sealed class Backend : IDisposable
     }
 
     /// <summary>启动时最小化到托盘</summary>
+    /// <summary>界面上的「写入诊断日志」开关。改完要重启桥才生效（桥的 --quiet 是启动参数）。</summary>
+    public string SetLog(string? on)
+    {
+        var want = on == "1";
+        var before = LogSwitch.Enabled;
+        LogSwitch.Set(want);
+        if (want != before && BridgeRunning) { StopBridge(); StartBridge(); }
+        return Env.Json(new { ok = true, logEnabled = LogSwitch.Enabled });
+    }
+
     public string SetStartMinimized(string? on)
     {
         var want = on is "true" or "1" or "True";
