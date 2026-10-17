@@ -845,6 +845,9 @@ internal sealed class Backend : IDisposable
                 string? line;
                 while ((line = r.ReadLine()) != null)
                 {
+                    // ★ 即使不写日志也**必须继续读**：桥（Rust）把日志打到 stdout，
+                    //   没人读的话管道写满，桥会**阻塞在 write 上** —— 那才是真正拖慢速度。
+                    if (!LogSwitch.Enabled) continue;
                     try
                     {
                         // 桥（Rust）输出是 UTF-8。Windows 记事本/PowerShell 的 Get-Content

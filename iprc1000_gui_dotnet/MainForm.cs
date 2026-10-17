@@ -70,7 +70,7 @@ internal sealed class MainForm : Form
                     {
                         if (!_showEvent.WaitOne(1000)) continue;
                         if (IsDisposed) break;
-                        try { BeginInvoke(new Action(RestoreFromTray)); } catch { break; }
+                        try { BeginInvoke(new Action(() => RestoreFromTray())); } catch { break; }
                     }
                     catch { break; }
                 }
@@ -111,9 +111,12 @@ internal sealed class MainForm : Form
         trayMenu.Items.Add("-");
         trayMenu.Items.Add("退出", null, (_, _) => { _reallyExit = true; Application.Exit(); });
         _tray.ContextMenuStrip = trayMenu;
-        _tray.DoubleClick += (_, _) => RestoreFromTray();
-        // 单击左键也打开 —— 托盘应用的肌肉记忆就是"点一下"
-        _tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) RestoreFromTray(); };
+        // 双击 = 打开并**直接切到设置页**（用户要求）；单击 = 只打开
+        _tray.DoubleClick += (_, _) => RestoreFromTray(showSettings: true);
+        _tray.MouseClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left) RestoreFromTray();
+        };
 
         // 单实例：第二个实例会 Set 事件要求我们把窗口显示出来
         StartShowWindowListener();
@@ -316,9 +319,18 @@ internal sealed class MainForm : Form
         //   以前只有 selftest 才订阅这个事件，于是生产环境里
         //   "页面到底什么时候出来的"完全看不见 —— 这正是「启动有点慢」说不清的原因。
         web.CoreWebView2.NavigationCompleted += (_, e) =>
+        {
             StartupMark(e.IsSuccess
                 ? "页面渲染完成 ← 用户此时才真正看到内容"
                 : $"页面渲染失败：{e.WebErrorStatus}");
+            // 托盘双击要求"打开就是设置页"：界面首次建好时在这里补执行（页面此刻才存在 goto）
+            if (e.IsSuccess && _pendingPage != null)
+            {
+                var pg = _pendingPage;
+                _pendingPage = null;
+                try { _ = web.CoreWebView2.ExecuteScriptAsync($"goto('{pg}')"); } catch { }
+            }
+        };
 
         if (_selftest)
         {
@@ -474,6 +486,8 @@ internal sealed class MainForm : Form
     /// <summary>界面进程的生命周期日志（与 key-events.log 分开，方便单独看内存策略是否生效）</summary>
     private static void WebViewLog(string msg)
     {
+        // 发布版默认不写 webview.log（启动时间轴的用途是排障，不是运行需要）
+        if (!LogSwitch.Enabled) return;
         try
         {
             var p = Path.Combine(Env.ConfigDir, "webview.log");
@@ -764,8 +778,25 @@ internal sealed class MainForm : Form
         base.WndProc(ref m);
     }
 
-    private void RestoreFromTray()
+    /// <summary>界面还没建好时，先记下"打开后要跳到哪一页"，等渲染完成再执行</summary>
+    private string? _pendingPage;
+
+    /// <summary>
+    /// 让前端切页。界面已就绪就直接执行；还没建好就挂起，
+    /// 等 `NavigationCompleted`（页面渲染完成）再执行 —— 否则脚本会打在空页面上。
+    /// </summary>
+    private void ShowPage(string page)
     {
+        if (_webReady && _web?.CoreWebView2 != null)
+        {
+            try { _ = _web.CoreWebView2.ExecuteScriptAsync($"goto('{page}')"); } catch { }
+        }
+        else _pendingPage = page;
+    }
+
+    private void RestoreFromTray(bool showSettings = false)
+    {
+        if (showSettings) ShowPage("env");     // 设置页 = page-env
         // ★ 顺序：**先**把 WindowState 改回 Normal，**再** Show。
         //   反过来的话 `Show()` 触发的 OnVisibleChanged 里拿到的还是 Minimized，
         //   会被下面那条"最小化时不建界面"的守卫挡掉，界面就永远建不出来。

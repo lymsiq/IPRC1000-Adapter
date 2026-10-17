@@ -177,6 +177,13 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.16：发布版默认不写任何文本日志（用户要求"速度只为快和稳定"）
+    ("日志总开关存在（默认关）", "iprc1000_gui_dotnet/LogSwitch.cs", "public static bool Enabled"),
+    ("按键日志受开关控制", "iprc1000_gui_dotnet/KeyLog.cs", "!LogSwitch.Enabled"),
+    ("路由日志受开关控制", "iprc1000_gui_dotnet/CableRouter.cs", "if (!LogSwitch.Enabled) return;"),
+    ("鼠标日志受开关控制", "iprc1000_gui_dotnet/MouseEngine.cs", "if (!LogSwitch.Enabled) return;"),
+    ("界面日志受开关控制", "iprc1000_gui_dotnet/MainForm.cs", "发布版默认不写 webview.log"),
+    ("桥的 stdout 仍被读走（防阻塞）", "iprc1000_gui_dotnet/Backend.cs", "if (!LogSwitch.Enabled) continue;"),
     # ★ v1.2.15：默认启动进托盘（原来 StartMinimized 是 bool 无初始值 = false）
     ("默认启动进托盘", "iprc1000_gui_dotnet/Settings.cs", "public bool StartMinimized { get; set; } = true;"),
     ("老配置一次性迁移", "iprc1000_gui_dotnet/Settings.cs", "if (_data.SchemaVersion < 1)"),

@@ -55,6 +55,7 @@ internal sealed class CableRouter : IDisposable
     /// <summary>音频链路通用诊断日志（写 router.log）。同一份日志里既有声卡开关也有默认设备变化，便于对照。</summary>
     internal static void Log(string msg)
     {
+        if (!LogSwitch.Enabled) return;
         try
         {
             lock (_logLock)

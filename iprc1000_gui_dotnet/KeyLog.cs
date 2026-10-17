@@ -47,7 +47,7 @@ internal static class KeyLog
     /// <summary>写一行（**只入队，永不阻塞**；队列满就丢并计数）。</summary>
     public static void Write(string line)
     {
-        if (line == null) return;
+        if (line == null || !LogSwitch.Enabled) return;   // 发布版默认不写日志
         EnsureStarted();
         // 时间戳在这里统一加，保证与旧格式一致
         if (!_q.TryAdd($"{DateTime.Now:HH:mm:ss.fff}  {line}\n"))
@@ -107,6 +107,12 @@ internal static class KeyLog
             sb.AppendLine($"       {detail}");
         }
 
+        // ⚠ 自检必须**临时打开总开关**：发布版默认 `LogSwitch.Enabled == false`，
+        //   此时 `Write` 直接 return，什么都测不到（这条自检第一次就是因此假失败）。
+        //   自检只往临时目录写，不会污染真机日志。
+        var prevEnabled = LogSwitch.Enabled;
+        LogSwitch.Enabled = true;
+
         // ① 入队必须快（这是全部意义）：2 万行不许超过 200 ms
         var dir = Path.Combine(Path.GetTempPath(), "iprc-keylog-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(dir);
@@ -134,6 +140,7 @@ internal static class KeyLog
 
         try { Directory.Delete(dir, true); } catch { }
         _path = null;
+        LogSwitch.Enabled = prevEnabled;     // 复原（自检不许改变运行态）
         sb.AppendLine(ok ? "⇒ 全部通过 ✓" : "⇒ ★ 有断言失败");
         return sb.ToString();
     }

@@ -419,6 +419,7 @@ internal sealed class KeyFilter : IDisposable
     private static readonly object _guardLogLock = new();
     private static void GuardLog(string msg)
     {
+        if (!LogSwitch.Enabled) return;
         try
         {
             var p = Path.Combine(Env.ConfigDir, "stuck-guard.log");

@@ -768,6 +768,7 @@ internal sealed class MouseEngine
     private static readonly object _logLock = new();
     public static void Log(string msg)
     {
+        if (!LogSwitch.Enabled) return;
         try
         {
             var p = Path.Combine(Env.ConfigDir, "mouse.log");

@@ -70,6 +70,13 @@ internal static class Settings
         set { _data.AutoKeepDefaultMic = value; Save(); }
     }
 
+    /// <summary>是否写文本日志（默认关；见 LogSwitch）</summary>
+    public static bool LogEnabled
+    {
+        get => _data.LogEnabled;
+        set { _data.LogEnabled = value; Save(); }
+    }
+
     public static string KeySource
     {
         get => string.IsNullOrEmpty(_data.KeySource) ? "auto" : _data.KeySource;
@@ -101,6 +108,12 @@ internal static class Settings
         public bool AutoSwitchDriver { get; set; } = true;
         public bool AutoKeepDefaultMic { get; set; } = true;
         public string KeySource { get; set; } = "auto";
+        /// <summary>
+        /// 是否写文本日志。**默认 false**（发布版性能优先，见 LogSwitch 的说明）。
+        /// 排查问题时在环境设置页勾上，或设环境变量 `IPRC1000_LOG=on`。
+        /// </summary>
+        public bool LogEnabled { get; set; }
+
         /// <summary>配置版本号，用于一次性迁移（0 = v1.2.14 及更早）</summary>
         public int SchemaVersion { get; set; }
     }
