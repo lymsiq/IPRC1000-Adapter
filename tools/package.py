@@ -177,6 +177,9 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.22：Raw Input 按设备归类（判断"遥控器报文没来"还是"名字不匹配被过滤"）
+    ("按设备归类报文", "iprc1000_gui_dotnet/KeyFilter.cs", "_rawByDevice"),
+    ("设备标签汇总", "iprc1000_gui_dotnet/KeyFilter.cs", "RawSourcesText"),
     # ★ v1.2.21：ETW 模式下 Raw Input 不许再处理一次（注册没撤掉，会双处理）
     ("ETW 模式挡住 Raw Input 重复处理", "iprc1000_gui_dotnet/KeyFilter.cs", "if (KeySourceIsEtw) return;"),
     ("过滤后计数（只算遥控器）", "iprc1000_gui_dotnet/KeyFilter.cs", "RawOurs++;"),

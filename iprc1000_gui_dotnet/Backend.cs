@@ -626,6 +626,8 @@ internal sealed class Backend : IDisposable
             ["rawMessages"] = KeyFilter.RawMessages,
             // 过滤后（只算遥控器）的条数 —— 这个 > 0 才说明 Raw Input 直读真的可用
             ["rawOurs"] = KeyFilter.RawOurs,
+            // 各设备的报文数：用来判断"遥控器报文没来"还是"设备名不匹配被过滤了"
+            ["rawSources"] = _filter?.RawSourcesText() ?? "",
             ["winuhid"] = JsonSerializer.SerializeToNode(WinUhidInjector.Status()),
             ["setup"] = SetupStatus(),
             ["stuckGuard"] = new JsonObject
