@@ -191,6 +191,8 @@ def scenario_alt_cid(n=3):
     out = b""
     for i in range(n):
         out = emit_frame(out, i, cid=0x0040)         # 音频走 0x40
+    # 真实流以"空报文"开头（桥会把每段第一条当基线，见 main.rs 的 seeded）
+    out += emit_hid_multi(out, [], cid=0x0040)
     # ⚠ emit_hid_multi 只返回**新的一条**（与 emit_hid_report 同约定），必须 `+=`
     out += emit_hid_multi(out, [0x10], cid=0x0040)   # 语音键也走 0x40
     out += emit_hid_multi(out, [],     cid=0x0040)
@@ -211,8 +213,30 @@ def scenario_two_keys():
     只看计数会假通过。
     """
     out = b""
+    # ★ 真实流一定从"空报文"开始；桥会把**每段第一条**当基线（不产生事件），
+    #   所以用例必须先给一条空的，否则第一个按键会被基线吃掉。
+    out += emit_hid_multi(out, [])
     for u in ([0x09], [0x09, 0x11], [0x11], []):
         out += emit_hid_multi(out, u)
+    return out
+
+
+def scenario_seed_baseline():
+    """★★ 2026-10-18 真机事故的回归用例：**启动瞬间不得凭空触发一次按键**。
+
+    现象：双击 exe 启动程序，光标处的文件**弹出右键菜单** —— 即菜单键(0x4E)被按了一次。
+
+    根因：`held` 初值全 false，而程序刚起来时收到的**第一条报文里就带着那个键**
+    （设备正抱着键，或蓝牙重连补发的一条"当前状态"），于是被当成"刚按下"。
+
+    修法：每段的第一条报文只当基线，不发事件。
+
+    断言：第一份报文就是 `[0x4E]`、第二份还是 `[0x4E]`（真的按住不放）⇒
+    **一个按键事件都不许有**（老实现会先发 4E DOWN）。
+    """
+    out = b""
+    out += emit_hid_multi(out, [0x4E])   # 程序刚起来，设备已经抱着"菜单"
+    out += emit_hid_multi(out, [0x4E])   # 仍然抱着 —— 相对基线没有变化
     return out
 
 
@@ -296,6 +320,25 @@ def run(name, blob, expect, realtime=False):
     got = parse(text)
 
     bad = []
+
+    # ★ 2026-10-18：`key_seq` 是**子序列**匹配，`key_seq=[]` 永远成立（空断言！）。
+    #   「不许有任何按键事件」这种断言必须用它：整段序列完全相等。
+    if "key_seq_exact" in expect:
+        import re as _re2
+        seq_x = [f"{m.group(1)} {m.group(2)}"
+                 for m in _re2.finditer(r"usage=0x([0-9A-F]{2})\s+(DOWN|UP)", text)]
+        if seq_x != list(expect["key_seq_exact"]):
+            bad.append(f"key_seq_exact: 期望 {list(expect['key_seq_exact'])}，实际 {seq_x}")
+
+    # 「不许凭空触发一次按下」的专用断言：整段里**一个 DOWN 都不许有**。
+    # （不能要求序列为空 —— 退出时 release_all_held 会给"基线里按着的键"补一个 UP，
+    #   那是正确行为，不是假按下。）
+    if expect.get("no_key_down"):
+        import re as _re3
+        downs = [m.group(1) for m in _re3.finditer(r"usage=0x([0-9A-F]{2})\s+DOWN", text)]
+        if downs:
+            bad.append(f"no_key_down: 不许有任何 DOWN，实际出现 {downs}")
+
     if "key_seq" in expect:
         # 从 stdout 里按出现顺序抽出 [usage DIR]
         import re as _re
@@ -307,7 +350,7 @@ def run(name, blob, expect, realtime=False):
         if not ok:
             bad.append(f"key_seq: 期望 {want_seq}，实际 {seq}")
     for k, want in expect.items():
-        if k in ("key_seq",):
+        if k in ("key_seq", "key_seq_exact", "no_key_down"):
             continue
         if k == "odd_kinds_has":
             if want not in got.get("odd_kinds", ""):
@@ -370,6 +413,10 @@ CASES = [
     ("⑨ 两键同按（back+menu）：**不许丢第二个键**，且事件顺序正确",
      scenario_two_keys(),
      dict(frames=0, key_seq=["09 DOWN", "11 DOWN", "09 UP", "11 UP"])),
+
+    ("⑪ 启动瞬间第一份报文带着按键 —— **不许凭空触发**（真机表现：弹出右键菜单）",
+     scenario_seed_baseline(),
+     dict(frames=0, no_key_down=True)),
 
     ("⑩ 音频/按键走 CID 0x40（动态分配另一种落法）—— 不许整路失效",
      scenario_alt_cid(3),

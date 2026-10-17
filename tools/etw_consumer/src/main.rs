@@ -138,6 +138,8 @@ struct Stats {
     other: u64,
     key_events: u64,
     hid_reports: u64,
+    /// 被当作"基线"的报文数（每段 1 条；若它带着键，说明挡掉了一次假按下）
+    seed_reports: u64,
     /// 实测按键报告走的是哪个 CID（第一次见到时记录，诊断用）
     key_cid: Option<u16>,
     /// 实测音频走的是哪个 CID
@@ -597,6 +599,10 @@ struct Bridge {
     /// 现在与注入器的模型对齐：把 6 个槽解析成"当前集合"，**与上一份做差集**，
     /// 只对"新按下 / 刚松开"发事件。这样多键同按、先后松开都不会丢。
     held: [bool; 256],
+    /// 本段会话是否已经用第一条报文"记过基线"（见下方 handle_hid_report 的说明）
+    seeded: bool,
+    /// 上一条按键报文到达的时刻（用来判"新一段"：空档 ≥600 ms 就重新取基线）
+    last_report: Option<std::time::Instant>,
     /// 最近一个事件的 ETW 时间戳（100ns 自 1601，即 FILETIME）—— 用来实测投递延迟
     last_ts: u64,
     stats: Arc<Mutex<Stats>>,
@@ -640,6 +646,8 @@ impl Bridge {
             have_prev: false,
             samples16: 0,
             warmup: 0,
+            seeded: false,
+            last_report: None,
             pending: None,
         }
     }
@@ -769,11 +777,35 @@ impl Bridge {
     ///   · 幽灵帧 0x0C 还会**与正在按住的键并存**（`11 0c`）。
     /// 单槽（`Option<u8>`）模型在上述三种情况下都会丢键或错时报文。
     fn handle_hid_report(&mut self, usages: &[u8]) {
+        // ⓪-0 空档 ≥600 ms ⇒ 视为新的一段（程序刚启动 / 蓝牙重连），要重新取基线
+        let t = std::time::Instant::now();
+        if let Some(prev) = self.last_report {
+            if t.duration_since(prev).as_millis() >= 600 {
+                self.seeded = false;
+            }
+        }
+        self.last_report = Some(t);
+
         let mut now = [false; 256];
         for &u in usages {
             if u != 0 {
                 now[u as usize] = true;
             }
+        }
+
+        // ⓪ 本段的第一条报文：只当基线、**不发任何按键事件**。
+        //
+        //   ★ 2026-10-18 用户实测：双击 exe 启动程序 → 光标处的文件**弹出右键菜单**，
+        //     即"菜单键(0x4E)被按下了一次"。原因就是 `held` 初值全 false，
+        //     而程序刚起来时收到的第一条报文里**已经带着那个键**（设备正抱着键 / 重连补发），
+        //     于是被当成"刚按下"。
+        //   ⇒ 每条（段）会话的第一条报文只记账：早已按着的键不算"刚按下"，
+        //     用户真正需要的按键事件从第二条报文开始，代价是 20 ms。
+        if !self.seeded {
+            self.seeded = true;
+            self.held = now;
+            self.stats.lock().unwrap().seed_reports += 1;
+            return;
         }
 
         // ① 先放掉不再按住的（升序，保证事件顺序确定）

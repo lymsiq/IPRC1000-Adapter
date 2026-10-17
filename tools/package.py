@@ -177,6 +177,8 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.23：每段会话第一条报文只当基线（修"启动瞬间凭空触发一次按键"）
+    ("会话基线（防启动假按键）", "tools/etw_consumer/src/main.rs", "if !self.seeded {"),
     # ★ v1.2.22：Raw Input 按设备归类（判断"遥控器报文没来"还是"名字不匹配被过滤"）
     ("按设备归类报文", "iprc1000_gui_dotnet/KeyFilter.cs", "_rawByDevice"),
     ("设备标签汇总", "iprc1000_gui_dotnet/KeyFilter.cs", "RawSourcesText"),
