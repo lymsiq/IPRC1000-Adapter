@@ -173,7 +173,9 @@ internal sealed class EtwKeySource : IDisposable
             // ⚠ 幽灵帧（0x0C）**不更新 LastUsage**：
             //   以前这里先赋值再查表，于是界面会出现「voice（usage 0x0C）」这种
             //   按钮名和 usage 对不上的组合（2026-10-17 用户截图指出）。
-            Log($"KEY  usage=0x{usage:X2}  (未知/幽灵)  {(down ? "DOWN" : "UP")}");
+            // ★ 日志关了就连字符串都不拼（`$"..."` 是先求值再传参，不判开关就是纯浪费）
+            if (LogSwitch.Enabled)
+                Log($"KEY  usage=0x{usage:X2}  (未知/幽灵)  {(down ? "DOWN" : "UP")}");
             _onKey(usage, down);   // 未知也上报，交给上层判断
             return;
         }
@@ -181,7 +183,8 @@ internal sealed class EtwKeySource : IDisposable
         LastUsage = usage;
         LastButton = bid;
         LastPressed = down;
-        Log($"KEY  usage=0x{usage:X2}  {bid}  {(down ? "DOWN" : "UP")}" + (lat >= 0 ? $"  投递延迟={lat}ms" : ""));
+        if (LogSwitch.Enabled)
+            Log($"KEY  usage=0x{usage:X2}  {bid}  {(down ? "DOWN" : "UP")}" + (lat >= 0 ? $"  投递延迟={lat}ms" : ""));
         _onKey(usage, down);
     }
 

@@ -29,6 +29,18 @@ internal sealed class KeyFilter : IDisposable
     private const uint RIDEV_INPUTSINK = 0x00000100;
     private const ushort RI_KEY_BREAK = 0x01;
 
+    /// <summary>
+    /// Raw Input 收到的报文数（**自进程启动累计**）。
+    ///
+    /// 用途很具体：代码里一直有一句未经实测的断言 ——「设备切成 HID-compliant device 后
+    /// `HandleRawInput` 根本不会被调用」。如果它其实**会**被调用，就能用 Raw Input 直读按键，
+    /// 把投递延迟从 ETW 的 **5 ms 降到 ~1 ms**（省 4 ms/次按键）。
+    ///
+    /// 所以这个计数器不参与任何逻辑，只用来**证伪那句断言**：
+    /// 设备非键盘状态下按几下遥控器，这里涨了 ⇒ 直读可用；一直是 0 ⇒ 断言成立。
+    /// </summary>
+    public static long RawMessages { get; private set; }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct RAWINPUTDEVICE { public ushort usUsagePage, usUsage; public uint dwFlags; public IntPtr hwndTarget; }
 
@@ -601,6 +613,10 @@ internal sealed class KeyFilter : IDisposable
 
     public void HandleRawInput(IntPtr lParam)
     {
+        // ★ 放在所有提前 return 之前：这条路径**只要被调用就计数**，
+        //   用来验证"设备非键盘时 WM_INPUT 到底来不来"（见 RawMessages 的说明）。
+        RawMessages++;
+
         uint size = 0;
         GetRawInputData(lParam, RID_INPUT, IntPtr.Zero, ref size, (uint)Marshal.SizeOf<RAWINPUTHEADER>());
         if (size == 0 || size > 1024) return;

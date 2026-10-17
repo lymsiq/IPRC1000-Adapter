@@ -177,6 +177,10 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.19：热路径不再拼日志字符串 + Raw Input 直读可行性探针
+    ("日志关掉后不拼字符串", "iprc1000_gui_dotnet/EtwKeySource.cs", "if (LogSwitch.Enabled)"),
+    ("Raw Input 报文计数", "iprc1000_gui_dotnet/KeyFilter.cs", "RawMessages++;"),
+    ("报文数暴露给界面", "iprc1000_gui_dotnet/Backend.cs", '["rawMessages"] = KeyFilter.RawMessages'),
     # ★ v1.2.18：按键行右侧快捷键与"名字"同基线（曾低 8px，看着像错位）
     ("右值与名字同基线", "iprc1000_gui_dotnet/ui/style.css", "align-self:flex-start"),
     # ★ v1.2.18：pwr 热点校正（8 倍放大原图确认圆心 (141,38)，原写 (140,47)）

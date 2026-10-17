@@ -622,6 +622,8 @@ internal sealed class Backend : IDisposable
             ["inject"] = _filter?.InjectEnabled ?? false,
             // 发布版默认不写日志（LogSwitch 默认 false）—— 界面据此隐藏"按键日志"与"清空日志"
             ["logEnabled"] = LogSwitch.Enabled,
+            // 非键盘设备下 Raw Input 到底收不收得到报文 —— 用来判断能不能把按键延迟从 5 ms 降到 ~1 ms
+            ["rawMessages"] = KeyFilter.RawMessages,
             ["winuhid"] = JsonSerializer.SerializeToNode(WinUhidInjector.Status()),
             ["setup"] = SetupStatus(),
             ["stuckGuard"] = new JsonObject
