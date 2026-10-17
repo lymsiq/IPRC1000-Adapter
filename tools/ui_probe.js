@@ -71,6 +71,11 @@ const PROBE = () => {
     // 背景图是否真的指到了 remote.png（sprite 裁切）
     thumbsOk: thumbs.filter((e) => /remote\.png/.test(getComputedStyle(e).backgroundImage)).length,
     railVer: (document.getElementById('railVer') || {}).textContent || '',
+    // ★ 发布版默认不写日志（v1.2.16）：界面不该出现任何"日志"字样，
+    //   否则用户会以为程序还在写日志（2026-10-17 用户截图指出的正是这个）
+    hasLogUi: /按键日志|清空按键日志/.test(document.body.innerText || ''),
+    // ★ 幽灵帧 0x0C 曾经把"最近按键"污染成「voice（usage 0x0C）」这种错配
+    ghostMismatch: /（usage 0x0C/.test(document.body.innerText || ''),
   };
 };
 
@@ -188,6 +193,10 @@ const PROBE = () => {
     else ok('切到 ' + name + ' 正常（' + t.visibleHeight[0] + 'px / ' + t.visibleText[0] + ' 字）');
     if (t.activeNav.length === 1 && t.activeNav[0] === name) ok('  ' + name + ' 导航高亮正确');
     else bad('  ' + name + ' 导航高亮异常：' + JSON.stringify(t.activeNav));
+    // ★ 发布版默认不写日志：任何页面上都不该出现"按键日志/清空按键日志"
+    if (t.hasLogUi) bad('  ' + name + ' 页面仍出现"日志"字样（发布版默认不写日志，应隐藏）');
+    // ★ 幽灵帧不许污染"最近按键"（曾出现「voice（usage 0x0C）」这种错配）
+    if (t.ghostMismatch) bad('  ' + name + ' 页面出现"（usage 0x0C" —— 幽灵帧污染了最近按键');
     await page.screenshot({ path: path.join(OUT, `02-page-${name}.png`), fullPage: true });
 
     if (name === 'keys') {

@@ -177,6 +177,12 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.17：日志关掉后，前端不许再留任何"日志"字样（用户截图指出）
+    ("日志卡片按开关显示", "iprc1000_gui_dotnet/ui/app.js", "logOn && ks.logPath"),
+    ("清空日志按钮默认隐藏", "iprc1000_gui_dotnet/ui/index.html", 'id="btnClearLog" hidden'),
+    ("状态带 logEnabled", "iprc1000_gui_dotnet/Backend.cs", '["logEnabled"] = LogSwitch.Enabled'),
+    # ★ v1.2.17：幽灵帧 0x0C 不许污染"最近按键"（曾显示成「voice（usage 0x0C）」）
+    ("幽灵帧不更新最近按键", "iprc1000_gui_dotnet/EtwKeySource.cs", "只对**认得的按键**更新"),
     # ★ v1.2.16：发布版默认不写任何文本日志（用户要求"速度只为快和稳定"）
     ("日志总开关存在（默认关）", "iprc1000_gui_dotnet/LogSwitch.cs", "public static bool Enabled"),
     ("按键日志受开关控制", "iprc1000_gui_dotnet/KeyLog.cs", "!LogSwitch.Enabled"),

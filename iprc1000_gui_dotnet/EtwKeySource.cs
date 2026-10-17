@@ -165,16 +165,20 @@ internal sealed class EtwKeySource : IDisposable
 
         Events++;
         Reports++;
-        LastUsage = usage;
         LastAt = DateTime.UtcNow;
 
         if (!UsageToButton.TryGetValue(usage, out var bid))
         {
             UnknownUsage++;
+            // ⚠ 幽灵帧（0x0C）**不更新 LastUsage**：
+            //   以前这里先赋值再查表，于是界面会出现「voice（usage 0x0C）」这种
+            //   按钮名和 usage 对不上的组合（2026-10-17 用户截图指出）。
             Log($"KEY  usage=0x{usage:X2}  (未知/幽灵)  {(down ? "DOWN" : "UP")}");
             _onKey(usage, down);   // 未知也上报，交给上层判断
             return;
         }
+        // 只对**认得的按键**更新"最近按键"，所以两个字段永远自洽
+        LastUsage = usage;
         LastButton = bid;
         LastPressed = down;
         Log($"KEY  usage=0x{usage:X2}  {bid}  {(down ? "DOWN" : "UP")}" + (lat >= 0 ? $"  投递延迟={lat}ms" : ""));

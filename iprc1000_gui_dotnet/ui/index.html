@@ -327,10 +327,11 @@
         <div class="kv" id="uhidKv"></div>
         <div class="note" id="uhidNote"></div>
         <details class="adv">
-          <summary>更多选项：测试注入 · 清空日志 · 导出驱动手动安装</summary>
+          <summary>更多选项：测试注入 · 导出驱动手动安装</summary>
           <div class="panel-actions">
             <button class="btn ghost" id="btnTestInject">测试注入右 Alt</button>
-            <button class="btn ghost" id="btnClearLog">清空按键日志</button>
+            <!-- 只在打开诊断日志时出现（发布版默认不写日志，留个"清空"只会让人以为有日志） -->
+            <button class="btn ghost" id="btnClearLog" hidden>清空按键日志</button>
             <button class="btn ghost" id="btnExportUhid">导出到桌面手动安装</button>
           </div>
         </details>

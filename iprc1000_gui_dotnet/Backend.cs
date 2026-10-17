@@ -620,6 +620,8 @@ internal sealed class Backend : IDisposable
             ["bridge"] = BridgeStatus(),
             ["router"] = JsonSerializer.SerializeToNode(_router.Status()),
             ["inject"] = _filter?.InjectEnabled ?? false,
+            // 发布版默认不写日志（LogSwitch 默认 false）—— 界面据此隐藏"按键日志"与"清空日志"
+            ["logEnabled"] = LogSwitch.Enabled,
             ["winuhid"] = JsonSerializer.SerializeToNode(WinUhidInjector.Status()),
             ["setup"] = SetupStatus(),
             ["stuckGuard"] = new JsonObject
