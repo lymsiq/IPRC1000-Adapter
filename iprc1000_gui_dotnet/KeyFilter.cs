@@ -833,15 +833,28 @@ internal sealed class KeyFilter : IDisposable
             //   否则那段时间的音频会被丢掉，表现为"按住后立刻说的第一个字识别不出来"。
             if (bid == "voice") { try { VoiceKeyDown?.Invoke(); } catch { } }
 
-            bool dup;
-            lock (_heldLock) dup = _heldButtons.ContainsKey(bid);
+            bool dup; double dupAgeMs = 0;
+            lock (_heldLock)
+            {
+                dup = _heldButtons.TryGetValue(bid, out var dupEnt);
+                if (dup) dupAgeMs = (DateTime.UtcNow - dupEnt.at).TotalMilliseconds;
+            }
             if (dup)
             {
-                // 遥控器抖动/自动重复发来第二个 DOWN：只记一条，**不重新注入**
-                // （重新注入会把它自己的键从整份报告里换掉，也会把 at 时间戳刷新、
-                //   让看门狗以为"刚按下"而延后判卡键）
-                EtwKeySource.AppendLog($"INJ  {bid} 重复 DOWN（已在按住集合里）—— 已忽略，避免累积");
-                return;
+                // ★★ 2026-10-18（真机"第一次正常、第二次唤不醒"）：
+                //   这里原来**无条件忽略**重复 DOWN。只要有一次 UP 丢了，
+                //   `_heldButtons` 里就一直留着这个键 ⇒ **之后每一次按下都被当成"抖动"忽略**
+                //   ⇒ 这个键永久失效（豆包再也唤不醒），只能靠紧急复位救回来。
+                //
+                //   正确判据：**离上次按下有多久**。
+                //     · <300 ms → 真的是遥控器抖动/自动重复 → 忽略（保留原意）；
+                //     · ≥300 ms → 上一次的 UP 丢了 → **先强制释放，再正常注入这一次**。
+                if (dupAgeMs < 300)
+                {
+                    EtwKeySource.AppendLog($"INJ  {bid} 重复 DOWN（距上次 {dupAgeMs:F0} ms，判为抖动）—— 已忽略");
+                    return;
+                }
+                ForceReleaseButton(bid, $"再次按下但距上次 {dupAgeMs:F0} ms —— 上一次的 UP 丢了");
             }
 
             // 记进"按住未放"登记表 —— 看门狗 v2 靠它发现丢 UP 的卡键（两种按键来源都走这里）

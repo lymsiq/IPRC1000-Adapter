@@ -181,6 +181,8 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.44：重复 DOWN 要按时间区分"抖动"与"丢 UP"（否则第二次按下永久失效）
+    ("重复DOWN按时间判据", "iprc1000_gui_dotnet/KeyFilter.cs", "上一次的 UP 丢了"),
     # ★ v1.2.43：空档之后必须补发被松开的键的 UP（否则长按必卡）
     ("空档后补发 UP", "tools/etw_consumer/src/main.rs", "空档期间**被松开的键必须补发 UP**"),
     ("长按松开回归用例", "tools/bridge_loss_selftest.py", "scenario_long_hold_release"),
