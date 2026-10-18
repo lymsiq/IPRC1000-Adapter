@@ -52,7 +52,10 @@ internal static class KeyAct
     public static readonly int[] MouseOnes = { Left, Right, WheelUp, WheelDown };
 
     /// <summary>是不是动作值（负数哨兵只在 -5..-1 这一小段里算数）</summary>
-    public static bool Is(int vk) => vk >= SwitchGroup && vk <= Left;
+    // ★ 2026-10-18 修：原来写 `vk >= SwitchGroup(-5) && vk <= Left(-1)`，
+    //   新增 ClickIcon(-6) 后它被判"虚拟键码越界"（真机报错就是这句）。
+    //   区间必须覆盖**最小的哨兵**，否则每加一个动作都要改这里。
+    public static bool Is(int vk) => vk >= ClickIcon && vk <= Left;
 
     /// <summary>是不是鼠标类动作</summary>
     public static bool IsMouse(int vk) => vk >= WheelDown && vk <= Left;
@@ -154,7 +157,7 @@ internal static class KeyAct
               string.Join(" · ", All.Select(v => $"{NameOf(v)}={v}")));
 
         // ③ Parse → Format 往返（这是"存得进、看得懂"的关键）
-        var cases = new[] { "鼠标左键", "鼠标右键", "滚轮上", "滚轮下", "切换配置组" };
+        var cases = new[] { "鼠标左键", "鼠标右键", "滚轮上", "滚轮下", "切换配置组", "截图点击" };
         var bad = cases.Where(c => Keys.Format(Keys.Parse(c)) != c).ToArray();
         Check(bad.Length == 0, "Keys.Parse → Keys.Format 往返（导出/导入与手改 JSON 都靠它）",
               bad.Length == 0
@@ -163,20 +166,22 @@ internal static class KeyAct
 
         // ④ 负数数字也能解析（界面保存时传的就是 "-1" 这种）
         var byNum = Keys.Parse("-1").Length == 1 && Keys.Parse("-1")[0] == Left
-                    && Keys.Parse("-4")[0] == WheelDown;
-        Check(byNum, "Parse 认识 \"-1\"/\"-4\"（界面保存走的就是这种字符串）",
-              $"Parse(\"-1\")=[{Keys.Parse("-1")[0]}] · Parse(\"-4\")=[{Keys.Parse("-4")[0]}]");
+                    && Keys.Parse("-4")[0] == WheelDown
+                    && Keys.Parse("-6").Length == 1 && Keys.Parse("-6")[0] == ClickIcon;
+        Check(byNum, "Parse 认识 \"-1\"/\"-4\"/\"-6\"（界面保存走的就是这种字符串）",
+              $"Parse(\"-1\")=[{Keys.Parse("-1")[0]}] · Parse(\"-4\")=[{Keys.Parse("-4")[0]}] · Parse(\"-6\")=[{Keys.Parse("-6")[0]}]");
 
         // ⑤ 越界负数必须被拒（不能让它变成某个"真实 VK"）
         var rejected = false;
-        foreach (var badVal in new[] { "-6", "-99", "-0x1", "0xEE" })
+        // ★ 2026-10-18：新增 ClickIcon(-6) 后，-6 已是合法动作 —— 越界样例改用 -7。
+        foreach (var badVal in new[] { "-7", "-99", "-0x1", "0xEE" })
         {
             try { Keys.Parse(badVal); } catch { rejected = true; }
             if (!rejected) { sb.AppendLine($"        ★ {badVal} 竟然被接受了"); break; }
             rejected = true;
         }
         Check(rejected, "越界负数被 Parse 拒绝（不会漏成真实 VK）",
-              "试过 -6 / -99 / -0x1，全部抛异常（0xEE 是合法 VK，不受影响）");
+              "试过 -7 / -99 / -0x1，全部抛异常（0xEE 是合法 VK，不受影响）");
 
         // ⑥ 组合语义：鼠标动作只能单独出现
         var combo = IsSingleAction(new[] { Left }) && !IsSingleAction(new[] { 0x11, Left })

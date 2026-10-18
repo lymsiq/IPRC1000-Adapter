@@ -37,7 +37,9 @@ internal static class TemplateClick
 {
     private const int LearnSize = 44;      // 采集边长
     private const double MinScore = 0.72;  // 置信度门槛
-    private const int MaxW = 1200, MaxH = 600; // 搜索区域上限（防御异常窗口尺寸）
+    private const int MaxW = 3000, MaxH = 1600; // 窗口尺寸上限（防御异常窗口）
+    /// <summary>在采集位置附近多大范围内找（±像素）。大窗口全遍历要几秒，收窄到这块足够快。</summary>
+    private const int SearchRadius = 200;
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr FindWindowW(string cls, string? name);
@@ -49,6 +51,7 @@ internal static class TemplateClick
     [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr h, uint flags);
     [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
 
     private const uint GA_ROOT = 2;
     [StructLayout(LayoutKind.Sequential)] private struct RECT { public int L, T, R, B; }
@@ -77,6 +80,17 @@ internal static class TemplateClick
         GetClassNameW(root, sb, sb.Capacity);
         cls = sb.ToString();
 
+        // 类名 `Chrome_WidgetWin_1` 这类很通用（所有 Electron 应用都用），
+        // 所以还要记住**进程名**，触发时用它来确认是同一个程序的窗口。
+        string procName = "";
+        try
+        {
+            GetWindowThreadProcessId(root, out var pid);
+            if (pid != 0) procName = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName;
+        }
+        catch { }
+        Settings.ClickProcess = procName;
+
         Settings.ClickWindowClass = cls;
         Settings.ClickTemplateX = p.X - x;   // 模板中心相对模板左上角（一般就是 half）
         Settings.ClickTemplateY = p.Y - y;
@@ -102,6 +116,15 @@ internal static class TemplateClick
         IntPtr hwnd;
         try { hwnd = FindWindowW(cls, null); }
         catch { hwnd = IntPtr.Zero; }
+
+        // ★ `Chrome_WidgetWin_1` 是所有 Electron 应用共用的类名（Edge/VS Code/WorkBuddy…）。
+        //   只按类名找会拿到**别的程序**的窗口 —— 必须核对进程名，不匹配就换一个。
+        var wantProc = Settings.ClickProcess;
+        if (hwnd != IntPtr.Zero && !string.IsNullOrEmpty(wantProc) && ProcOf(hwnd) != wantProc)
+        {
+            var alt = FindByClassAndProcess(cls, wantProc);
+            if (alt != IntPtr.Zero) hwnd = alt;
+        }
         if (hwnd == IntPtr.Zero || !IsWindowVisible(hwnd))
             return $"找不到可见的窗口 `{cls}`（目标界面没打开？）";
 
@@ -119,13 +142,24 @@ internal static class TemplateClick
         using (var g = Graphics.FromImage(shot))
             g.CopyFromScreen(r.L, r.T, 0, 0, new Size(w, h), CopyPixelOperation.SourceCopy);
 
-        var (score, mx, my) = Match(shot, tpl);
+        // ★ 只在"采集时的位置"附近找 —— 图标位置基本固定，没必要全窗遍历。
+        //   WorkBuddy 那种 1200×800 的窗口，全窗 NCC 要 2~3 秒；±200px 只要 ~0.1 秒。
+        var roiX = Math.Max(0, Settings.ClickRelX - SearchRadius);
+        var roiY = Math.Max(0, Settings.ClickRelY - SearchRadius);
+        var roiW = Math.Min(w - roiX, SearchRadius * 2 + tpl.Width);
+        var roiH = Math.Min(h - roiY, SearchRadius * 2 + tpl.Height);
+        if (roiW <= tpl.Width || roiH <= tpl.Height)
+            return $"窗口太小或采集位置超出（{w}×{h}），请重新采集。";
+
+        using var roi = shot.Clone(new Rectangle(roiX, roiY, roiW, roiH), shot.PixelFormat);
+        var (score, mx, my) = Match(roi, tpl, Settings.ClickRelX - Settings.ClickTemplateX - roiX,
+                                                  Settings.ClickRelY - Settings.ClickTemplateY - roiY);
         if (score < MinScore)
             return $"没找到图标（最高相似度 {score:F2} < {MinScore:F2}）。界面可能变了，重新采集一次。";
 
         // 命中点 = 模板左上角 + 模板中心
-        var cx = r.L + mx + Settings.ClickTemplateX;
-        var cy = r.T + my + Settings.ClickTemplateY;
+        var cx = r.L + roiX + mx + Settings.ClickTemplateX;
+        var cy = r.T + roiY + my + Settings.ClickTemplateY;
         SetCursorPos(cx, cy);
         System.Threading.Thread.Sleep(30);
         MouseInjector.Left(true);
@@ -134,10 +168,38 @@ internal static class TemplateClick
         return $"已在 ({cx},{cy}) 单击（相似度 {score:F2}）。";
     }
 
+    private static string ProcOf(IntPtr h)
+    {
+        try
+        {
+            GetWindowThreadProcessId(h, out var pid);
+            return pid == 0 ? "" : System.Diagnostics.Process.GetProcessById((int)pid).ProcessName;
+        }
+        catch { return ""; }
+    }
+
+    private static IntPtr FindByClassAndProcess(string cls, string procName)
+    {
+        var found = IntPtr.Zero;
+        EnumWindows((h, _) =>
+        {
+            var sb = new System.Text.StringBuilder(256);
+            GetClassNameW(h, sb, sb.Capacity);
+            if (sb.ToString() != cls) return true;
+            if (!IsWindowVisible(h)) return true;
+            if (ProcOf(h) == procName) { found = h; return false; }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    private delegate bool EnumProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc cb, IntPtr l);
+
     // ── 灰度归一化互相关（NCC）──
     // 为什么不用 OpenCV：只需要一个 44×44 模板在一个小窗口里找，纯托管实现足够快（~50ms），
     // 少一个几十 MB 的依赖，也不会因为打包漏 DLL 而静默失效。
-    private static (double score, int x, int y) Match(Bitmap big, Bitmap tpl)
+    private static (double score, int x, int y) Match(Bitmap big, Bitmap tpl, int expX, int expY)
     {
         var bw = big.Width; var bh = big.Height;
         var tw = tpl.Width; var th = tpl.Height;
@@ -182,10 +244,8 @@ internal static class TemplateClick
             }
         }
 
-        // 消歧：分数接近最高（差 ≤0.02）的候选里，挑离"采集时的相对位置"最近的那个。
-        var expX = Settings.ClickRelX - Settings.ClickTemplateX;
-        var expY = Settings.ClickRelY - Settings.ClickTemplateY;
-        if (cands.Count > 1 && (Settings.ClickRelX > 0 || Settings.ClickRelY > 0))
+        // 消歧：分数接近最高（差 ≤0.02）的候选里，挑离"采集时的位置"最近的那个。
+        if (cands.Count > 1)
         {
             var top = double.NegativeInfinity;
             foreach (var c in cands) if (c.s > top) top = c.s;
