@@ -801,13 +801,31 @@ impl Bridge {
     ///   · 幽灵帧 0x0C 还会**与正在按住的键并存**（`11 0c`）。
     /// 单槽（`Option<u8>`）模型在上述三种情况下都会丢键或错时报文。
     fn handle_hid_report(&mut self, usages: &[u8]) {
-        // ⓪-0 空档 ≥600 ms ⇒ 视为新的一段（程序刚启动 / 蓝牙重连），要重新取基线
-        let t = std::time::Instant::now();
-        if let Some(prev) = self.last_report {
-            if t.duration_since(prev).as_millis() >= 600 {
-                self.seeded = false;
-            }
+        // ★★ 2026-10-18：把**原始报文**打出来（排查"按了语音键却零事件"）。
+        //   之前只能看到解析后的 KEY 行，无法判断"遥控器到底发了什么"。
+        //   这条只在日志开启（非 --quiet）时输出，发布版默认静默。
+        if !diag::QUIET.load(std::sync::atomic::Ordering::Relaxed) {
+            let hex: Vec<String> = usages.iter().map(|u| format!("{:02X}", u)).collect();
+            diag::log(&format!("[RAW] len={} usages=[{}]", usages.len(), hex.join(" ")));
         }
+
+        // ★★★ 2026-10-18（真机铁证）：**取消"空档 ≥600ms 就重取基线"**。
+        //
+        //   原始报文（bridge.log [RAW]）：
+        //     20.842 [10] 按下 → 无事件
+        //     22.332 [00] 松开 → 无事件
+        //     23.208 [10] 按下 → 无事件   ← 距上条 876ms
+        //     26.228 [10] 按下 → 无事件   ← 距上条 1.3s
+        //     30.430 [10] 按下 → ★有 DOWN ← 距上条仅 525ms
+        //
+        //   遥控器**只在状态变化时**发报文，所以两次按键间隔通常 1~3 秒。
+        //   而"新一段里出现的键只当基线、不发 DOWN"这条防误触规则，
+        //   在正常使用中会**吞掉几乎每一次按下** —— 只有间隔 <600ms 的才侥幸生效。
+        //
+        //   现在：基线**只在进程启动后的第一份报文取一次**（防"启动瞬间设备已抱着键"），
+        //   之后所有报文一律正常对账。蓝牙重连时若设备补发"当前状态"，按 DOWN 处理是正确的
+        //   （那个键确实被按着），其后的 UP 也会正常发出。
+        let t = std::time::Instant::now();
         self.last_report = Some(t);
 
         let mut now = [false; 256];

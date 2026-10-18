@@ -186,6 +186,8 @@ SRC_REQUIRED = [
     ("语音键随音频结束释放", "iprc1000_gui_dotnet/Backend.cs", "AudioDrivenVoiceRelease"),
     ("幽灵过滤在取基线之后", "tools/etw_consumer/src/main.rs", "必须排在\"取基线\"之后"),
     ("幽灵心跳回归用例", "tools/bridge_loss_selftest.py", "scenario_ghost_before_first_key"),
+    ("桥输出原始报文", "tools/etw_consumer/src/main.rs", '"[RAW] len={} usages=[{}]"'),
+    ("只取一次基线（不按空档重取）", "tools/etw_consumer/src/main.rs", "取消\"空档 ≥600ms 就重取基线\""),
     ("WinUHid 状态与探针同判据", "iprc1000_gui_dotnet/WinUhidInjector.cs", "inUse = Ready"),
     ("幽灵报文回归用例", "tools/bridge_loss_selftest.py", "scenario_ghost_between_hold"),
     # ★ v1.2.44：重复 DOWN 要按时间区分"抖动"与"丢 UP"（否则第二次按下永久失效）
