@@ -352,6 +352,14 @@ internal sealed class Backend : IDisposable
     {
         if (_filter is not { } f) return;
         if (!f.IsOnlyHeld("voice")) return;
+
+        // ★★ 2026-10-18（真机"短按后语音没发出就弹起"）：
+        //   按下后 **2 秒内绝不动手**。语音桥的首包要 300~530ms，这段时间
+        //   `inSession` 还是 0、`silentMs` 已经很大 ⇒ 不加宽限就会在音频起来之前
+        //   把 Alt 放掉（豆包还没开始录音就结束）。
+        var heldMs = f.HeldMs("voice");
+        if (heldMs < 0 || heldMs < 2000) return;
+
         var st = ReadBridgeStats();
         if (st == null) return;
         if ((st["pid"]?.GetValue<int>() ?? -1) != SafePid()) return;

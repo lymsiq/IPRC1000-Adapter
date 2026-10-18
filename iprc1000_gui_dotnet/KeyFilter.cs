@@ -452,6 +452,15 @@ internal sealed class KeyFilter : IDisposable
         catch { }
     }
 
+    /// <summary>这个按钮已经按住了多少毫秒（没按着返回 -1）。</summary>
+    public double HeldMs(string bid)
+    {
+        lock (_heldLock)
+            return _heldButtons.TryGetValue(bid, out var e)
+                ? (DateTime.UtcNow - e.at).TotalMilliseconds
+                : -1;
+    }
+
     /// <summary>是否**只有**这个按钮按着（用于"音频结束就释放语音键"的保守判断）。</summary>
     public bool IsOnlyHeld(string bid)
     {
