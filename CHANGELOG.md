@@ -46,6 +46,40 @@ Explorer 在 **Apps 键抬起**时就弹右键菜单 ⇒ 每次启动必弹一�
 - `WinUhidInjector.SubmitFrame` 每帧打 hex（**热路径**，仅排查期间存在）；
 - 修掉同时引入的一个 bug：JSON 参数顺序错位导致 `keyEvents:-1`、`firstKeyMs:false`。
 
+## [1.2.38] - 2026-10-18
+
+### 修：WinUHid「装好了但要重启」被显示成"未就绪"（误导了好几轮）
+
+真机现象：点语音键 → 右 Alt 没反应；面板显示
+
+```
+虚拟键盘驱动   未安装 / 未就绪
+WinUHid.dll    已内置
+注入通道       回退 SendInput（输入法会过滤）
+```
+
+**根因不在代码**：`pnputil` 里驱动包 `winuhiddriver.inf` 已装好，但控制设备
+`\.\WinUHid` **打不开**（根设备未绑定）⇒ `WinUHidCreateDevice` 失败 ⇒ 退化成 SendInput
+⇒ 豆包过滤 ⇒ 右 Alt"注入了但没反应"。安装脚本的判据（能否打开 `\.\WinUHid`）
+与 app 的判据（能否建虚拟键盘）不是一回事，且**它不提示要重启**。
+
+**处置**：跑了一次强制完整安装，安装器明确要求 **重启 Windows**。
+
+### 代码改动：把三种状态分开说
+
+`WinUhidInjector.EnsureReady()` 失败时，以前统一报"WinUHidCreateDevice 失败（驱动没装好？）"。
+现在先探测控制设备：
+
+| 探测结果 | 提示 |
+|---|---|
+| `\.\WinUHid` 打不开 | **驱动未生效，请重启 Windows**（不重启只能走 SendInput，豆包会过滤）|
+| 能打开但建不出设备 | 设备槽位可能被占，稍后会自愈重试 |
+
+### 验证
+
+C# 0 警告 0 错误 · `ui_probe` 全绿 · `package.py` 全过
+（同一台机器上开日志实测：`UHID frame 40-00-…` + `INJECT DOWN 0xA5 via=winuhid` ⇒ 注入链路本身是好的）
+
 ## [1.2.37] - 2026-10-18
 
 ### 修：`ClearHeld` **放了键却什么都不记**（日志/计数用错了集合）

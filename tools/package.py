@@ -181,6 +181,8 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.38：把"驱动未生效需重启"和"槽位被占"分开提示
+    ("驱动未生效要提示重启", "iprc1000_gui_dotnet/WinUhidInjector.cs", "ControlDeviceOpenable"),
     # ★ v1.2.37：ClearHeld 必须按"真正放掉的按钮"计数并留痕（原来用 Raw Input 集合，恒为 0）
     ("清空按住集合要留痕", "iprc1000_gui_dotnet/KeyFilter.cs", 'GUARD  清空按住集合'),
     # ★ v1.2.36：卡键防线（看门狗定时器必须真的起；切组/改映射前先放掉按住的键）
