@@ -1160,12 +1160,29 @@ internal sealed class KeyFilter : IDisposable
     /// </summary>
     public static void ReleaseAllInjected()
     {
-        // ① 虚拟 HID：一帧全零报告就把**我们这台虚拟键盘**的键全部放掉
-        try { WinUhidInjector.Release(); } catch { }
-        // ② SendInput 兜底：万一注入其实走的是 SendInput（虚拟 HID 没装/失效），逐键补 KEYUP。
-        //    只碰本程序**可能**注入的键（InjectableVks），不动别的键。
+        int[] held;
+        lock (_injLock) held = _injectedSet;
+
+        // ① 虚拟 HID：**只有我们真的持有键时**才发全零报告。
+        //
+        //   ★★ 2026-10-17 真机事故（本次用低级钩子观察者抓到，铁证）：
+        //      无条件发这一帧 ⇒ Windows 给**所有键**补发 KEYUP（新虚拟键盘的首帧就是这样初始化的），
+        //      其中包含 **Apps 键 0x5D** ⇒ Explorer 收到"Apps 抬起"就弹出右键菜单。
+        //      表现：**每次启动程序都弹一次右键菜单**，而且与鼠标/键盘怎么启动无关。
+        //      观察者原始记录：`001172 KEY vk=0x5D UP flags=144`（144 = 已注入），
+        //      同一时刻我们的日志是 `UHID frame 00-00-00-00-00-00-00-00`。
+        if (held.Length > 0)
+        {
+            try { WinUhidInjector.Release(); } catch { }
+        }
+
+        // ② SendInput 兜底：**只对系统里确实还按着的键**补 KEYUP。
+        //    （原来是无条件逐个补，等于每次启动都往系统里灌一遍"全键抬起"——
+        //      同样是弹菜单的来源。干净启动时一个键都不会发。）
+        //    这样"上一个实例被强杀留下卡住的 AltGr"照样能清掉（系统会报它按着）。
         foreach (var vk in InjectableVks())
         {
+            if ((GetAsyncKeyState(vk) & 0x8000) == 0) continue;
             try { Send(new[] { vk }, true); } catch { }
         }
         lock (_injLock) _injectedSet = Array.Empty<int>();
