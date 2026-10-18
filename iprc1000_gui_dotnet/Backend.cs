@@ -705,6 +705,8 @@ internal sealed class Backend : IDisposable
             {
                 ["running"] = _filter?.Running ?? false,
                 ["deviceSeen"] = _filter?.DeviceSeen ?? false,
+            // 启动 3 秒内被挡下的按键数（>0 = 确实存在"启动即按键"）
+            ["startupIgnored"] = _filter?.StartupIgnored ?? 0,
                 ["swallowed"] = _filter?.Swallowed ?? 0,
                 ["passed"] = _filter?.Passed ?? 0,
                 ["error"] = _filter?.LastError,

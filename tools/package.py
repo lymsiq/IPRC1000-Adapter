@@ -181,12 +181,14 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.31：注入侧启动免疫期（启动 3 秒内不注入任何按键）
+    ("注入侧启动免疫期", "iprc1000_gui_dotnet/KeyFilter.cs", "_injectReadyAt"),
     # ★ v1.2.30：清理遗留桥（旧桥会挡掉新桥，导致"改了没生效"）
     ("清理遗留语音桥", "iprc1000_gui_dotnet/Backend.cs", "ReapStaleBridge"),
     # ★ v1.2.29：启动诊断字段（第一个带键报文的时间/键值/是否被静默期吃掉）
     ("首键诊断进 stats", "tools/etw_consumer/src/main.rs", "firstKeyMs"),
     # ★ v1.2.28：启动静默期 + 基线键不发 UP（修"启动弹右键"与"松开比按下多"）
-    ("启动静默期 800ms", "tools/etw_consumer/src/main.rs", "from_millis(800)"),
+    ("启动静默期 3s（可用环境变量调）", "tools/etw_consumer/src/main.rs", 'unwrap_or(3000)'),
     ("基线键不发 UP", "tools/etw_consumer/src/main.rs", "self.seeded_held[u] = false"),
     # ★ v1.2.26：调试工具只在开发版；发包版（DevTools=false）里根本不编译
     ("调试入口有编译开关", "iprc1000_gui_dotnet/Program.cs", "#if IPRC_DEV"),

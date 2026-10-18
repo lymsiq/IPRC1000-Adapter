@@ -147,6 +147,8 @@ struct Stats {
     /// "有没有按键、什么键、是启动瞬间还是几秒后"，不用再猜。
     /// u64::MAX = 还没有收到过任何带键的报文
     first_key_ms: u64,
+    /// 是否收到过"带键"的报文（false ⇒ firstKeyMs 输出 -1）
+    first_key_seen: bool,
     first_key_usage: u8,
     first_key_swallowed: bool,
     /// 实测按键报告走的是哪个 CID（第一次见到时记录，诊断用）
@@ -841,7 +843,9 @@ impl Bridge {
             // （真机表现：启动瞬间弹出右键菜单 = 菜单键被按下一次）。
             // 800 ms 足够覆盖链路建立的那几次重发，人不可能这么快按下。
             if !self.is_replay && self.quiet_until.is_none() {
-                self.quiet_until = Some(t + std::time::Duration::from_millis(800));
+                let ms: u64 = std::env::var("IPRC1000_QUIET_MS")
+                    .ok().and_then(|v| v.parse().ok()).unwrap_or(3000);
+                self.quiet_until = Some(t + std::time::Duration::from_millis(ms));
             }
             return;
         }
@@ -857,6 +861,7 @@ impl Bridge {
             if let Some(u) = now.iter().position(|&b| b) {
                 self.first_key_done = true;
                 let mut st = self.stats.lock().unwrap();
+                st.first_key_seen = true;
                 st.first_key_ms = self.started.elapsed().as_millis() as u64;
                 st.first_key_usage = u as u8;
                 st.first_key_swallowed = in_quiet;
@@ -1360,12 +1365,13 @@ fn main() {
                     s.short_pdu,
                     s.sig_frag,
                     s.hid_reports,
-                    if s.first_key_ms == 0 { -1i64 } else { s.first_key_ms as i64 },
+                    s.key_events,
+                    s.other,
+                    // ⚠ 这四个必须和上面的占位符**同序**：firstKeyMs/Usage/Swallowed、startupSwallowed
+                    if s.first_key_seen { s.first_key_ms as i64 } else { -1i64 },
                     s.first_key_usage,
                     if s.first_key_swallowed { "true" } else { "false" },
                     s.startup_swallowed,
-                    s.key_events,
-                    s.other,
                     silent,
                     if g.in_session { 1 } else { 0 }
                 );
