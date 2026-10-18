@@ -1044,9 +1044,14 @@ internal sealed class Backend : IDisposable
             ["cable"] = new JsonObject { ["ok"] = _cableReady, ["hint"] = "虚拟声卡 VB-CABLE" },
             ["mic"] = new JsonObject { ["ok"] = _micOk, ["hint"] = "默认录音设备 = CABLE Output" },
             ["winuhid"] = new JsonObject { ["ok"] = _uhidReady,
-                ["hint"] = WinUhidInjector.DriverVersion >= 1
+                // ★ 2026-10-18：DriverVersion==0 的**真正原因**通常是"驱动装好了但没重启"
+                //   （控制设备 \.\WinUHid 不存在），以前只显示"驱动未安装"，
+                //   用户照着字面意思反复去点安装，白绕好几圈。现在直接说要重启。
+                ["hint"] = _uhidReady
                     ? $"虚拟键盘驱动已就绪（接口 v{WinUhidInjector.DriverVersion}）"
-                    : "WinUHid 驱动未安装" },
+                    : WinUhidInjector.ControlDeviceOpenable()
+                        ? "WinUHid 设备槽位被占，稍后会自愈重试"
+                        : "WinUHid 驱动未生效 —— 请重启 Windows（不重启注入只能走 SendInput，豆包会过滤）" },
             ["device"] = new JsonObject { ["ok"] = devOk,
                 ["hint"] = !Env.RemoteStillKeyboard() ? "遥控器已不是键盘（零 m）"
                        : (devOk ? "键盘模式 + 钩子拦截中（低延迟）" : "遥控器仍在输出 m") },
