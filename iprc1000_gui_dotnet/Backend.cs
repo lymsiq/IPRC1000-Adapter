@@ -338,6 +338,31 @@ internal sealed class Backend : IDisposable
     /// 每轮轮询都要扫注册表（音频端点、Enum\HID、设备诊断），**界面会卡住**，
     /// 启动时尤其明显（一两秒的顿）。现在：界面只读缓存，后台线程负责刷新。
     /// </summary>
+    /// <summary>
+    /// **结构性改造（2026-10-18）：语音键的释放以「音频会话结束」为准，不再只依赖遥控器的 UP。**
+    ///
+    /// 为什么必须这样：真机反复出现"按住能说话，松开后右 Alt 不弹 / 第二次唤不醒"。
+    /// 日志证明遥控器的 UP 与后续报文都不可靠（长按 5.7s 后，语音键连一条报文都不再发）。
+    /// 而"音频停了"是**可靠信号** —— 用户松手后音频必然停、桥的 inSession 会归 0。
+    ///
+    /// 规则（全部满足才动手，保守）：我们正按着且**只有** voice 一个键 + 桥确实收到过会话
+    /// + 当前不在会话中 + 音频静默 > 400ms ⇒ 强制释放。
+    /// </summary>
+    private void AudioDrivenVoiceRelease()
+    {
+        if (_filter is not { } f) return;
+        if (!f.IsOnlyHeld("voice")) return;
+        var st = ReadBridgeStats();
+        if (st == null) return;
+        if ((st["pid"]?.GetValue<int>() ?? -1) != SafePid()) return;
+        if ((st["sessions"]?.GetValue<long>() ?? 0) <= 0) return;   // 从没收到过音频：别乱动
+        if ((st["inSession"]?.GetValue<int>() ?? 0) != 0) return;   // 还在会话中：正常
+        long silent;
+        try { silent = st["silentMs"]?.GetValue<long>() ?? -1; } catch { return; }
+        if (silent < 400) return;                                   // 刚结束，留点余量
+        f.ClearHeld($"音频会话已结束（静默 {silent} ms）—— 释放语音键");
+    }
+
     private void StartProbeThread()
     {
         if (_probeThread != null) return;
@@ -353,6 +378,8 @@ internal sealed class Backend : IDisposable
                     // 设备变更事件把复查间隔压到 ≤500ms；否则每 2 秒兜底复查一次。
                     // ★ 这些都在**后台线程**上：SetDeviceDriver 要 1~2 秒，
                     //   放到 UI 线程（WndProc 会调 OnDeviceMayChanged）会把界面冻住。
+                    // 每 ~500ms 检查一次"语音键是否该随音频结束而释放"（结构性改造）
+                    if (i % 5 == 0) { try { AudioDrivenVoiceRelease(); } catch { } }
                     if ((_deviceRecheckRequested && i % 5 == 4) || i % 20 == 19)
                     {
                         _deviceRecheckRequested = false;

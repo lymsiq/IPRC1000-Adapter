@@ -452,6 +452,12 @@ internal sealed class KeyFilter : IDisposable
         catch { }
     }
 
+    /// <summary>是否**只有**这个按钮按着（用于"音频结束就释放语音键"的保守判断）。</summary>
+    public bool IsOnlyHeld(string bid)
+    {
+        lock (_heldLock) return _heldButtons.Count == 1 && _heldButtons.ContainsKey(bid);
+    }
+
     /// <summary>某个按钮现在是否真的在「按住」集合里（界面据此显示，而不是靠最后一个事件的方向）。</summary>
     public bool IsHeld(string bid)
     {
