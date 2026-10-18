@@ -336,8 +336,17 @@ internal sealed class KeyFilter : IDisposable
         //   不再装低级钩子、也不再注册 Raw Input（Raw Input 在非键盘设备下收不到遥控器报文，
         //   实测 `遥控器 0 条`；而钩子会吞物理键盘的键，属于"键盘模式"遗留）。
         LastCleared = "按键来源＝ETW（全程不装钩子、不注册 Raw Input）";
-        // 到这里就结束了 —— 旧的"注册 Raw Input + 装低级钩子 + 起看门狗"整段已删除
-        // （2026-10-18：按键来源只剩 ETW，那些代码在 ETW 下从未执行过）。
+
+        // ★ 卡键看门狗：**必须起**，而且与"装不装钩子"无关。
+        //
+        //   ⚠⚠ 2026-10-18 回归修复：v1.2.26 删钩子安装时，把这一行定时器**一起删了**，
+        //      于是 `Watchdog()` 再也没有调用者 ⇒
+        //        · WatchdogV2()（盯"注入了还没放开"，语音 3s/方向 60s/其它 15s）**从不运行**
+        //        · ReapOrphanKeys()（以 GetAsyncKeyState 为准的孤儿键回收）**从不运行**
+        //      两条卡键防线同时失效 —— 而 ETW 模式下它们本来是**唯一**的防线。
+        //      （钩子可以删，看门狗不能删：它防的是"UP 丢了 → 永久卡键"，与按键来源无关。）
+        _watchdog?.Dispose();
+        _watchdog = new System.Threading.Timer(_ => Watchdog(), null, 300, 300);
     }
 
     /// <summary>长时间没有遥控器上报 → 清空按住集合并释放可能卡住的注入键</summary>

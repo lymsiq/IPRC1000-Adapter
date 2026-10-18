@@ -205,6 +205,11 @@ internal sealed class Backend : IDisposable
     /// </summary>
     private void CycleGroup()
     {
+        // ★ 切组前先放掉正按住的键（2026-10-18 卡键排查）：
+        //   旧组里按着的键（如语音键→右 Alt）在**新组**里可能没有映射，
+        //   之后那次"松开"就找不到该释放谁 ⇒ 修饰键永久卡住。
+        //   必须在 Keymaps.NextGroup() **之前**释放，那时用的还是旧映射。
+        try { _filter?.ClearHeld("切换配置组，先放掉按住的键"); } catch { }
         var g = Keymaps.NextGroup();
         SyncMouseWithGroup();
         _groupToast = _mouse.Enabled ? $"已切换到「{g}」（鼠标模式）" : $"已切换到配置组「{g}」";
@@ -284,6 +289,7 @@ internal sealed class Backend : IDisposable
         {
             var back = _lastNonMouseGroup;
             if (back == mi || back < 0 || back >= Keymaps.Groups.Count) back = mi == 0 ? 1 : 0;
+            try { _filter?.ClearHeld("方块键切回键盘模式，先放掉按住的键"); } catch { }
             Keymaps.SwitchTo(back);
         }
         SyncMouseWithGroup();
@@ -754,6 +760,7 @@ internal sealed class Backend : IDisposable
     // ─────────── 配置组 ───────────
     public string SwitchGroup(string? idx)
     {
+        try { _filter?.ClearHeld("切换配置组，先放掉按住的键"); } catch { }   // 见 CycleGroup 的说明
         var name = Keymaps.SwitchTo(int.TryParse(idx, out var i) ? i : 0);
         SyncMouseWithGroup();
         return Env.Json(new { ok = true, message = $"已切换到配置组「{name}」"
@@ -762,6 +769,7 @@ internal sealed class Backend : IDisposable
 
     public string NewGroup()
     {
+        try { _filter?.ClearHeld("新建配置组，先放掉按住的键"); } catch { }
         var name = Keymaps.Duplicate();
         SyncMouseWithGroup();
         return Env.Json(new { ok = true, message = $"已复制当前映射并新建配置组「{name}」。" });
@@ -796,6 +804,9 @@ internal sealed class Backend : IDisposable
         int[] vks;
         try { vks = Keys.Parse(text ?? ""); }
         catch (ArgumentException e) { return Env.Json(new { ok = false, message = e.Message }); }
+        // ★ 改当前组的映射前也先放掉按住的键：正在按的这个键如果被改掉/清空，
+        //   接下来那次"松开"就不知道该释放谁（修饰键会永久卡住）。
+        try { _filter?.ClearHeld($"修改「{bid}」映射，先放掉按住的键"); } catch { }
         Keymaps.Set(bid, vks);                       // 写进**当前配置组**
         var name = Keys.Table.FirstOrDefault(x => x.Id == bid)?.Name ?? bid;
         var shown = Keys.FormatSymbols(vks);

@@ -181,6 +181,10 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.36：卡键防线（看门狗定时器必须真的起；切组/改映射前先放掉按住的键）
+    ("卡键看门狗定时器必须启动", "iprc1000_gui_dotnet/KeyFilter.cs", "new System.Threading.Timer(_ => Watchdog()"),
+    ("切组前释放按住的键", "iprc1000_gui_dotnet/Backend.cs", 'ClearHeld("切换配置组，先放掉按住的键")'),
+    ("改映射前释放按住的键", "iprc1000_gui_dotnet/Backend.cs", 'ClearHeld($"修改「{bid}」映射，先放掉按住的键")'),
     # ★ v1.2.35：注入测试按钮/说明跟着当前映射走（不再写死"右 Alt"）
     ("测试按钮动态文案", "iprc1000_gui_dotnet/ui/app.js", "测试注入 ${voiceBind}"),
     # ★ v1.2.30：清理遗留桥（旧桥会挡掉新桥，导致"改了没生效"）
