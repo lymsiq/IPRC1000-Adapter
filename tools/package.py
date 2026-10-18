@@ -181,6 +181,9 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.40：桥重启要清按住集合；面板"按住"要反映真实状态
+    ("桥重启清按住集合", "iprc1000_gui_dotnet/Backend.cs", 'ClearHeld("语音桥重启，之前的 UP 不会再来")'),
+    ("按住状态取真实集合", "iprc1000_gui_dotnet/Backend.cs", "PatchEtwPressed"),
     # ★ v1.2.39：探针提示要说清"要重启"（原来只显示"驱动未安装"）
     ("驱动探针提示重启", "iprc1000_gui_dotnet/Backend.cs", "请重启 Windows（不重启注入只能走 SendInput"),
     # ★ v1.2.38：把"驱动未生效需重启"和"槽位被占"分开提示

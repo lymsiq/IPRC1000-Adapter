@@ -452,6 +452,12 @@ internal sealed class KeyFilter : IDisposable
         catch { }
     }
 
+    /// <summary>某个按钮现在是否真的在「按住」集合里（界面据此显示，而不是靠最后一个事件的方向）。</summary>
+    public bool IsHeld(string bid)
+    {
+        lock (_heldLock) return _heldButtons.ContainsKey(bid);
+    }
+
     /// <summary>清空「按住」集合并释放所有已注入未释放的键。返回清掉的键数。</summary>
     public int ClearHeld(string reason = "手动清空")
     {

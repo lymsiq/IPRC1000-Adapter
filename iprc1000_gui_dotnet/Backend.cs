@@ -566,6 +566,13 @@ internal sealed class Backend : IDisposable
         //   那会连本程序自己的桥一起杀掉）。清理后本实例拉起的才真正生效。
         ReapStaleBridge();
 
+        // ★★ 2026-10-18（真机卡键）：**桥一换，按住的键就永远等不到 UP 了**。
+        //   旧桥被杀 / 僵死重启时，它没来得及发的 UP 不会再有第二个人补发 ⇒
+        //   程序会一直认为那个键「按着」⇒ 注入的修饰键（右 Alt）永久卡住，
+        //   而且之后按同一个键也"没反应"（状态已经在按住里，不会重复注入）。
+        //   所以启新桥之前必须把按住集合清空并释放。
+        try { _filter?.ClearHeld("语音桥重启，之前的 UP 不会再来"); } catch { }
+
         StartBridge();
     }
 
@@ -703,7 +710,10 @@ internal sealed class Backend : IDisposable
                 ["mode"] = _keySource,
                 ["stillKeyboard"] = Env.RemoteStillKeyboard(),
                 ["guard"] = _keySourceGuard,
-                ["etw"] = JsonSerializer.SerializeToNode(_etwKeys?.Status()),
+                // ★ 2026-10-18：`pressed` 以前取"最后一个事件是不是 DOWN"——
+                //   一旦 UP 丢了，面板就永远显示「按住」，看起来像卡键（真机被误判过）。
+                //   现在直接查**按住集合**：键真被释放了，显示也就跟着变。
+                ["etw"] = PatchEtwPressed(JsonSerializer.SerializeToNode(_etwKeys?.Status())),
                 ["logPath"] = EtwKeySource.EventsLogPath,
                 ["hookActive"] = _filter is { Running: true, KeySourceIsEtw: false },
             },
@@ -948,6 +958,21 @@ internal sealed class Backend : IDisposable
             if ((st["pid"]?.GetValue<int>() ?? -1) != SafePid()) return false;
             return now - hb > 10_000;
         }
+    }
+
+    /// <summary>把 etw 状态里的 pressed 改成"真实按住集合"里有没有这个按钮。</summary>
+    private JsonNode? PatchEtwPressed(JsonNode? node)
+    {
+        try
+        {
+            if (node is JsonObject o && _filter is { } f)
+            {
+                var bid = o["lastButton"]?.GetValue<string>();
+                o["pressed"] = !string.IsNullOrEmpty(bid) && f.IsHeld(bid!);
+            }
+        }
+        catch { }
+        return node;
     }
 
     private int SafePid()

@@ -30,7 +30,7 @@
     <!-- ── 版本信息 ──
          改版本只需要改下面这一个 <Version>：程序内显示、exe 文件属性、
          发布包文件名（package.py 会读它）都从这里取，避免多处各写一份而漂移。 -->
-    <Version>1.2.39</Version>
+    <Version>1.2.40</Version>
     <FileVersion>1.2.0.0</FileVersion>
     <AssemblyVersion>1.2.0.0</AssemblyVersion>
     <Product>IPRC1000 遥控器适配器</Product>
