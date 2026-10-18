@@ -190,6 +190,7 @@ SRC_REQUIRED = [
     ("只取一次基线（不按空档重取）", "tools/etw_consumer/src/main.rs", "取消\"空档 ≥600ms 就重取基线\""),
     ("音频释放有 2s 宽限", "iprc1000_gui_dotnet/Backend.cs", "heldMs < 2000"),
     ("音频释放只在长时间静默后兜底", "iprc1000_gui_dotnet/Backend.cs", "silent < 5000"),
+    ("映射页说明左键单击用法", "iprc1000_gui_dotnet/ui/app.js", "「增强提示词」</b>按钮上"),
     ("WinUHid 状态与探针同判据", "iprc1000_gui_dotnet/WinUhidInjector.cs", "inUse = Ready"),
     ("幽灵报文回归用例", "tools/bridge_loss_selftest.py", "scenario_ghost_between_hold"),
     # ★ v1.2.44：重复 DOWN 要按时间区分"抖动"与"丢 UP"（否则第二次按下永久失效）

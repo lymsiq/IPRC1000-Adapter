@@ -383,6 +383,18 @@ function buildKeyboard() {
       k.onclick = () => { kbKey = vk; kbKeyLabel = label; kbMods.clear(); paintKb(); };
       mo.appendChild(k);
     });
+
+    // ★ 2026-10-18（用户需求）：把「左键单击」的用法直接写在界面上。
+    //   典型场景：豆包的「增强提示词」按钮没有快捷键，必须用鼠标点。
+    //   把鼠标停在那个按钮上 → 说话结束后按映射了「鼠标左键」的遥控器键 → 就地单击。
+    const hint = document.createElement('div');
+    hint.className = 'note';
+    hint.style.marginTop = '6px';
+    hint.innerHTML =
+      '提示：「鼠标左键」= 在<b>光标当前位置</b>单击一次（按住不放 = 拖拽）。<br>' +
+      '典型用法：把鼠标停在豆包的<b>「增强提示词」</b>按钮上，说完话按映射了这个动作的遥控器键，' +
+      '就能直接点它 —— 不用再动鼠标。';
+    mo.appendChild(hint);
   }
   mods.dataset.built = '1';
 }
@@ -1152,9 +1164,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.8',
+      version: '1.2.9',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.8（构建于 2026-10-19 05:08）',
+      versionLine: 'v1.2.9（构建于 2026-10-19 05:20）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
