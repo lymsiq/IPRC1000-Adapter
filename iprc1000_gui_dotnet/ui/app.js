@@ -581,7 +581,7 @@ function renderEnv(s) {
       `一直涨 = 帧没来（遥控器/BT/ETW）。<br>` +
       `「丢失帧数」用帧头序号量出来，是<b>真丢了多少帧</b>；「丢帧分类」说明丢在哪一层 —— ` +
       `组装失败=续片没到（事件被丢或线路丢）；长度不认识=分片长度/标志变了（★ 不是丢，是变了，` +
-      `说明帧格式与预期不同）；分片被截断=ETW 截断负载（改注册表 MaxEtwBytes 后**必须重启**）。<br>` +
+      `说明帧格式与预期不同）；分片被截断=ETW 截断负载（改注册表 MaxEtwBytes 后<b>必须重启</b>）。<br>` +
       `逐秒明细见 <code>bridge.log</code> 的「音频丢失明细」。</span>`
     : '语音桥需要<b>管理员权限</b>才能创建 ETW 会话（<code>StartTrace</code> 要求 Administrators）。' +
       '请点下面的「以管理员身份重启本程序」。';
@@ -593,6 +593,9 @@ function renderEnv(s) {
   setDot('#d-perm2', sw.running ? 'on' : 'err');
   $('#btnInject').textContent = s.inject ? '关闭快捷键注入' : '开启快捷键注入';
   const voiceBind = (s.keys.items.find((k) => k.id === 'voice') || {}).binding || '未设置';
+  // ★ 按钮/说明都跟着**当前映射**走：以前写死"右 Alt"，用户一改映射就变成错的说明
+  const btnTI = $('#btnTestInject');
+  if (btnTI) btnTI.textContent = voiceBind === '未设置' ? '测试注入语音键' : `测试注入 ${voiceBind}`;
   // 只有 ETW 一种来源了：不再有"键盘模式/拦截/漏键"这一套说明
   setDot('#d-perm2', 'on');
   $('#injectNote').className = 'note';
@@ -691,8 +694,8 @@ function renderEnv(s) {
   $('#uhidNote').innerHTML = uh.ready
     ? '虚拟键盘已就绪：注入的按键在系统里与真实键盘完全等价，输入法不会过滤。'
     : '⚠ <b>豆包等输入法会主动过滤 SendInput 注入的按键</b>（检测 keyboard hook 的 INJECTED 标志），' +
-      '这就是"右 Alt 注入了但豆包没反应"的原因。点「安装虚拟键盘驱动」装上 WinUHid（UMDF 用户态驱动，' +
-      '不受内核隔离限制），装完回来点「测试注入右 Alt」确认。' +
+      `这就是"${voiceBind} 注入了但豆包没反应"的原因。点「安装虚拟键盘驱动」装上 WinUHid（UMDF 用户态驱动，` +
+      '不受内核隔离限制），装完回来点「测试注入」确认。' +
       (uh.error ? `<br>当前状态：${uh.error}` : '');
 
   // 面板精简：去掉「拦截状态」（ETW 模式下无意义）与「豆包设置对应」（与上行重复）；
