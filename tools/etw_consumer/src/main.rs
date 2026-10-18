@@ -817,25 +817,6 @@ impl Bridge {
             }
         }
 
-        // ★★★ 2026-10-18（真机日志铁证）：**只含"幽灵 usage"的报文不是键盘快照**。
-        //
-        //   真机日志（同一毫秒的两行，三组完全一致）：
-        //     10:15:19.001  voice DOWN
-        //     10:15:19.144  voice UP
-        //     10:15:19.144  KEY usage=0x0C (未知/幽灵) DOWN
-        //   ⇒ 遥控器在按住语音键时，中间插了一条**只带 0x0C 的报文**。
-        //     我们按"整份快照"处理 ⇒ voice 从集合里消失 ⇒ 判定"松开" ⇒
-        //     长按被硬生生截断在 142~213 ms（豆包的门槛是 300~500 ms）⇒ 永不触发。
-        //
-        //   规则：只含幽灵键（0x01 / 0x0C）的报文**不参与状态对账**，只当噪声丢弃；
-        //         真空报文 `[]` 仍然表示"全部松开"（这条必须保留）。
-        const GHOST: [u8; 2] = [0x01, 0x0C];
-        let has_real = usages.iter().any(|&u| u != 0 && !GHOST.contains(&u));
-        let all_empty = usages.iter().all(|&u| u == 0);
-        if !has_real && !all_empty {
-            self.stats.lock().unwrap().ghost_reports += 1;
-            return;
-        }
 
         // ⓪ 本段的第一条报文：只当基线、**不发任何按键事件**。
         //
@@ -874,6 +855,22 @@ impl Bridge {
             }
             self.held = now;
             self.stats.lock().unwrap().seed_reports += 1;
+            return;
+        }
+        // ★★★ 2026-10-18（真机日志铁证）：**只含"幽灵 usage"的报文不是键盘快照**。
+        //
+        //   遥控器按住语音键时会插一条只带 0x0C 的报文；按"整份快照"处理会误判松开，
+        //   把长按截断在 142~213 ms（豆包门槛 300~500ms）。
+        //
+        //   ⚠ 位置很关键：这段**必须排在"取基线"之后**。
+        //     之前放在前面 ⇒ 空闲时的 0x0C 心跳一直走这条 return ⇒ `seeded` 永远是 false
+        //     ⇒ 第一份**真实**报文被当成"段首基线"吃掉 ⇒ `keyEvents` 恒为 0
+        //     （真机症状：音频正常、按键面板"按下 0 / 松开 0"、豆包完全不响应）。
+        const GHOST: [u8; 2] = [0x01, 0x0C];
+        let has_real = usages.iter().any(|&u| u != 0 && !GHOST.contains(&u));
+        let all_empty = usages.iter().all(|&u| u == 0);
+        if !has_real && !all_empty {
+            self.stats.lock().unwrap().ghost_reports += 1;
             return;
         }
 

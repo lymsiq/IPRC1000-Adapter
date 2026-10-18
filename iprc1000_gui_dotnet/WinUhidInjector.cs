@@ -421,13 +421,23 @@ internal static class WinUhidInjector
     /// <summary>全部松开（空报告）。</summary>
     public static bool Release() => Send(Array.Empty<int>());
 
-    public static object Status() => new
+    public static object Status()
     {
-        dllFound = DllPath() != null,
-        driverVersion = DriverVersion,
-        ready = Ready,
-        error = LastError,
-    };
+        // ★ 2026-10-18：`ready` 原来取 `Ready`（= 已经成功发过一次键），
+        //   于是**还没按过键时**面板显示"未安装/未就绪 · 回退 SendInput"，
+        //   而同一屏的「环境自检」用 `ProbeDriver()` 显示"就绪" —— 两个面板互相打脸。
+        //   现在两者用同一个判据：**驱动可用**（interface version ≥ 1）。
+        //   `inUse` 单独表示"真的用虚拟 HID 发过键"。
+        var drv = DriverVersion >= 1 || ProbeDriver();
+        return new
+        {
+            dllFound = DllPath() != null,
+            driverVersion = DriverVersion,
+            ready = drv,
+            inUse = Ready,
+            error = LastError,
+        };
+    }
 
     public static void Shutdown()
     {

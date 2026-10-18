@@ -701,6 +701,9 @@ internal sealed class Backend : IDisposable
                 ["unlockCount"] = UnlockCount,
                 ["lastUnlock"] = LastUnlock,
                 ["watchdogMs"] = KeyFilter.HoldTimeoutMs,
+                // ★ 面板上要显示的是**语音键**的判据（音频静默阈值），不是 Raw Input 的静默超时
+                ["voiceSilentMs"] = StuckGuard.VoiceSilentMs,
+                ["voiceGraceSec"] = (long)StuckGuard.VoiceGraceSec,
             },
             ["bind"] = new JsonObject
             {

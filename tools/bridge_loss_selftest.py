@@ -287,6 +287,27 @@ def scenario_ghost_between_hold():
     return out
 
 
+def scenario_ghost_before_first_key():
+    """★★★ 2026-10-18 真机"按下 0 / 松开 0，一个事件都没有"的回归用例。
+
+    真机数据：`hidReports: 6` / `firstKeyUsage: 0x10` / **`keyEvents: 0`**
+    —— 报告收到了，事件一个没发出。
+
+    根因：幽灵报文过滤被放在"取基线"**之前**。遥控器空闲时反复发 0x0C 心跳，
+    每条都走幽灵分支 return ⇒ `seeded` 永远 false ⇒ 第一份**真实**报文
+    （语音键 0x10）被当成"段首基线"吃掉 ⇒ 永远不产生 DOWN。
+
+    断言：`[0x0C]`（心跳）→ `[0x10]`（按下）→ `[]`（松开）
+    正确结果：`10 DOWN` + `10 UP`。
+    老实现：`0x0C` 被丢弃且不推进 seeded，`[0x10]` 被当基线 ⇒ **零事件**。
+    """
+    out = b""
+    out += emit_hid_multi(out, [0x0C])   # 空闲心跳（幽灵）
+    out += emit_hid_multi(out, [0x10])   # 按下语音键
+    out += emit_hid_multi(out, [])       # 松开
+    return out
+
+
 def scenario_audio_with_keys(audio=20, keys=10):
     """音频与按键**交替**到达：音频一帧不丢、按键一条不落。"""
     out = b""
@@ -468,6 +489,10 @@ CASES = [
     ("⑫ 长按后空档 700ms 才松开 —— **UP 必须发出去**（否则右 Alt 永久卡键）",
      scenario_long_hold_release(),
      dict(frames=0, key_seq=["10 DOWN", "10 UP"]), True),
+
+    ("⑭ 先来一条幽灵心跳、再按语音键 —— **不许把真实按下当成基线吃掉**",
+     scenario_ghost_before_first_key(),
+     dict(frames=0, key_seq=["10 DOWN", "10 UP"])),
 
     ("⑬ 按住期间夹一条幽灵报文(0x0C) —— **不许把长按截断**（豆包需 300~500ms）",
      scenario_ghost_between_hold(),

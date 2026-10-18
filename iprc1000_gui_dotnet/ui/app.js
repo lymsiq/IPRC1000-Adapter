@@ -603,7 +603,7 @@ function renderEnv(s) {
     `遥控器已被系统当作<b>普通 HID 设备</b>（非键盘）→ <b>不会输出任何字符</b>，` +
     `无需拦截，也没有「丢 UP 卡键」风险。按键从 <b>BthPort ETW</b> 读取。`;
   $('#injectNote').innerHTML +=
-    `<br>卡键自动解锁：设备移除<b>即时响应</b> · 静默看门狗 ${(s.stuckGuard || {}).watchdogMs || 800} ms · ` +
+    `<br>卡键自动解锁：设备移除<b>即时响应</b> · 语音键判据 音频静默 ${((s.stuckGuard || {}).voiceSilentMs || 30000) / 1000}s · ` +
     `已解锁 <b>${((s.stuckGuard || {}).unlockCount) || 0}</b> 次` +
     (((s.stuckGuard || {}).lastUnlock) ? `（${(s.stuckGuard || {}).lastUnlock}）` : '');
   // ── 按键来源 ──
@@ -1152,9 +1152,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.47',
+      version: '1.2.48',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.47（构建于 2026-10-18 21:10）',
+      versionLine: 'v1.2.48（构建于 2026-10-18 21:40）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

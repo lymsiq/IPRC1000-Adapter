@@ -184,6 +184,9 @@ SRC_REQUIRED = [
     # ★ v1.2.46：纯幽灵报文不参与状态对账（否则长按被截断在 ~200ms）
     ("纯幽灵报文不参与对账", "tools/etw_consumer/src/main.rs", "const GHOST: [u8; 2] = [0x01, 0x0C]"),
     ("语音键随音频结束释放", "iprc1000_gui_dotnet/Backend.cs", "AudioDrivenVoiceRelease"),
+    ("幽灵过滤在取基线之后", "tools/etw_consumer/src/main.rs", "必须排在\"取基线\"之后"),
+    ("幽灵心跳回归用例", "tools/bridge_loss_selftest.py", "scenario_ghost_before_first_key"),
+    ("WinUHid 状态与探针同判据", "iprc1000_gui_dotnet/WinUhidInjector.cs", "inUse = Ready"),
     ("幽灵报文回归用例", "tools/bridge_loss_selftest.py", "scenario_ghost_between_hold"),
     # ★ v1.2.44：重复 DOWN 要按时间区分"抖动"与"丢 UP"（否则第二次按下永久失效）
     ("重复DOWN按时间判据", "iprc1000_gui_dotnet/KeyFilter.cs", "上一次的 UP 丢了"),
