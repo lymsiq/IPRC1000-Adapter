@@ -849,7 +849,11 @@ internal sealed class KeyFilter : IDisposable
                 //   正确判据：**离上次按下有多久**。
                 //     · <300 ms → 真的是遥控器抖动/自动重复 → 忽略（保留原意）；
                 //     · ≥300 ms → 上一次的 UP 丢了 → **先强制释放，再正常注入这一次**。
-                if (dupAgeMs < 300)
+                // ★ ETW 来源**不会产生"自动重复的 DOWN"**：桥已经做过状态差分，
+                //   只有"状态真的从抬起变成按下"才会发 DOWN。所以 ETW 下的重复 DOWN
+                //   **必然是上一次的 UP 丢了** ⇒ 无条件自愈（门槛只会让"快速按第二次"漏掉）。
+                //   只有 Raw Input 来源（钩子直读）才需要 300ms 门槛挡自动重复。
+                if (src != "etw" && dupAgeMs < 300)
                 {
                     EtwKeySource.AppendLog($"INJ  {bid} 重复 DOWN（距上次 {dupAgeMs:F0} ms，判为抖动）—— 已忽略");
                     return;
