@@ -380,14 +380,6 @@ internal static class WinUhidInjector
     /// <summary>提交一帧 8 字节键盘报告</summary>
     private static bool SubmitFrame(byte[] report)
     {
-        // ★ 排查"启动瞬间有按键注入"（2026-10-18）：每提交一帧都记 hex，
-        //   这样观察者看到注入事件时，能立刻对上是不是我们发的、发的是什么。
-        EtwKeySource.AppendLog("UHID frame " + BitConverter.ToString(report));
-        return SubmitFrameInner(report);
-    }
-
-    private static bool SubmitFrameInner(byte[] report)
-    {
         var buf = Marshal.AllocHGlobal(8);
         try
         {

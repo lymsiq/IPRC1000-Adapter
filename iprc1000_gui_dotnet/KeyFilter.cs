@@ -698,27 +698,8 @@ internal sealed class KeyFilter : IDisposable
     /// <summary>
     /// 处理一次按键事件（**Raw Input 与 ETW 两条来源共用**）：通知订阅者 + 按映射注入快捷键。
     /// </summary>
-    /// <summary>程序启动后的"注入免疫期"：这段时间内**任何按键都不注入**。</summary>
-    private readonly DateTime _injectReadyAt = DateTime.UtcNow.AddSeconds(3);
-
-    /// <summary>启动免疫期内被挡下的按键数（>0 说明确实存在"启动即按键"）</summary>
-    public long StartupIgnored { get; private set; }
-
     public void ApplyButton(string bid, bool pressed, string src = "rawinput")
-    {
-        // ★★ 启动免疫期（2026-10-18）：程序刚起来那几秒，**任何按键都不注入**。
-        //   上游已有两道闸（桥的会话基线 + 3s 静默期），但用户实测"启动仍弹右键菜单"。
-        //   这里是最后一道、也是唯一能给出绝对保证的地方：无论事件从哪来，
-        //   启动 3 秒内一个键都不会发到系统。
-        //   ⇒ 加了这道之后若菜单还弹，它百分之百不是本程序产生的（有证据，不再靠猜）。
-        if (DateTime.UtcNow < _injectReadyAt)
-        {
-            StartupIgnored++;
-            try { OnButton?.Invoke(bid, pressed); } catch { }   // 只通知界面，不注入
-            return;
-        }
-
-        try { OnButton?.Invoke(bid, pressed); } catch { }
+    {        try { OnButton?.Invoke(bid, pressed); } catch { }
 
         // ★ 鼠标模式：方向键 / 确认 / info 交给 MouseEngine 接管（它有自己的线程按 tick 下发位移）。
         //   必须在键盘映射**之前**分流，而且**不能**登记进 _heldButtons ——

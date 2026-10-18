@@ -140,8 +140,6 @@ struct Stats {
     hid_reports: u64,
     /// 被当作"基线"的报文数（每段 1 条；若它带着键，说明挡掉了一次假按下）
     seed_reports: u64,
-    /// 启动静默期里被吃掉的报文数（>0 说明确实有"启动即按键"的情况）
-    startup_swallowed: u64,
     /// 桥启动后收到的**第一个按键事件**：距启动多少毫秒 / 是哪个 usage / 是否被静默期吃掉。
     /// 用途很具体：下一次"启动就弹右键"发生时，直接看这三个数就知道
     /// "有没有按键、什么键、是启动瞬间还是几秒后"，不用再猜。
@@ -150,7 +148,6 @@ struct Stats {
     /// 是否收到过"带键"的报文（false ⇒ firstKeyMs 输出 -1）
     first_key_seen: bool,
     first_key_usage: u8,
-    first_key_swallowed: bool,
     /// 实测按键报告走的是哪个 CID（第一次见到时记录，诊断用）
     key_cid: Option<u16>,
     /// 实测音频走的是哪个 CID
@@ -619,10 +616,6 @@ struct Bridge {
     seeded: bool,
     /// 基线里"已经按着"的键（只用于记账，**它的 UP 不发**，否则会出现"无对应的松开"）
     seeded_held: [bool; 256],
-    /// 桥启动后这么多毫秒内**不发按键事件**（见下方 ⓪-1）
-    quiet_until: Option<std::time::Instant>,
-    /// 是否是离线回放（回放要跳过"启动静默期"，否则自检里的按键会被全部吃掉）
-    is_replay: bool,
     /// 桥的启动时刻（用于记录"第一个按键距启动多久"）
     started: std::time::Instant,
     /// 是否已经记录过"启动后第一个带键的报文"
@@ -674,8 +667,6 @@ impl Bridge {
             warmup: 0,
             seeded: false,
             seeded_held: [false; 256],
-            quiet_until: None,
-            is_replay: false,
             started: std::time::Instant::now(),
             first_key_done: false,
             last_report: None,
@@ -837,26 +828,12 @@ impl Bridge {
             self.held = now;
             self.seeded_held = now;      // 这些键的 UP 不发（避免"无对应的松开"）
             self.stats.lock().unwrap().seed_reports += 1;
-            // 启动静默期：从"第一次收到报文"起算 800 ms。
-            // 为什么要它：设备在蓝牙链路建立时会把**当前状态连发几次**，
-            // 基线只能挡住第一条；如果后面又出现一次"按下"，仍会被当成真实按键
-            // （真机表现：启动瞬间弹出右键菜单 = 菜单键被按下一次）。
-            // 800 ms 足够覆盖链路建立的那几次重发，人不可能这么快按下。
-            if !self.is_replay && self.quiet_until.is_none() {
-                let ms: u64 = std::env::var("IPRC1000_QUIET_MS")
-                    .ok().and_then(|v| v.parse().ok()).unwrap_or(3000);
-                self.quiet_until = Some(t + std::time::Duration::from_millis(ms));
-            }
             return;
         }
 
-        // ⓪-1 启动静默期判定（先算出来，因为下面要按它记录诊断字段）
-        let in_quiet = self.quiet_until.map(|u| t < u).unwrap_or(false);
-
-        // ⓪-2 记录"启动后第一个带键的报文"——**无论是否被静默期吃掉都记**。
-        //   下次"启动就弹右键"时，看 bridge-stats.json 里
-        //   first_key_ms / first_key_usage / first_key_swallowed 就能定性：
-        //   有没有按键、是哪个键、在启动后多久、有没有被挡住。
+        // ⓪-2 记录"启动后第一个带键的报文"（**纯诊断，不参与逻辑**）。
+        //   真机出现过"启动瞬间弹出右键菜单"，最后查明是**上位机自己**发的全零报告
+        //   （见 v1.2.33），与这里无关；但留下这两个数，下次再有类似现象能直接定性。
         if !self.first_key_done {
             if let Some(u) = now.iter().position(|&b| b) {
                 self.first_key_done = true;
@@ -864,16 +841,8 @@ impl Bridge {
                 st.first_key_seen = true;
                 st.first_key_ms = self.started.elapsed().as_millis() as u64;
                 st.first_key_usage = u as u8;
-                st.first_key_swallowed = in_quiet;
             }
         }
-
-        if in_quiet {
-            self.held = now;
-            self.stats.lock().unwrap().startup_swallowed += 1;
-            return;
-        }
-        self.quiet_until = None;   // 静默期已过，正常放行
 
         // ① 先放掉不再按住的（升序，保证事件顺序确定）
         for u in 0..256usize {
@@ -1336,8 +1305,7 @@ fn main() {
                         "\"orphanCont\":{},\"shortPdu\":{},\"sigFrag\":{},",
                         "\"hidReports\":{},\"keyEvents\":{},\"otherEvents\":{},",
                         // 启动诊断：第一个带键的报文（-1 = 至今没收到过任何带键报文）
-                        "\"firstKeyMs\":{},\"firstKeyUsage\":\"0x{:02X}\",\"firstKeySwallowed\":{},",
-                        "\"startupSwallowed\":{},",
+                        "\"firstKeyMs\":{},\"firstKeyUsage\":\"0x{:02X}\",",
                         "\"silentMs\":{},\"inSession\":{}}}"
                     ),
                     std::process::id(),
@@ -1367,11 +1335,8 @@ fn main() {
                     s.hid_reports,
                     s.key_events,
                     s.other,
-                    // ⚠ 这四个必须和上面的占位符**同序**：firstKeyMs/Usage/Swallowed、startupSwallowed
                     if s.first_key_seen { s.first_key_ms as i64 } else { -1i64 },
                     s.first_key_usage,
-                    if s.first_key_swallowed { "true" } else { "false" },
-                    s.startup_swallowed,
                     silent,
                     if g.in_session { 1 } else { 0 }
                 );
@@ -1672,8 +1637,6 @@ fn main() {
 ///   `dlen` 是 ACL 头里声明的长度（首片被截断时会是 344 而实际只有几字节），
 ///   `acl_len` 是实际存下来的字节数；`dt_ms` 相对上一条的毫秒间隔，用于精确节奏。
 fn replay_mode(path: &str, bridge: Arc<Mutex<Bridge>>, realtime: bool, stats: Arc<Mutex<Stats>>) {
-    // 回放不是真机：跳过"启动静默期"，否则全速回放时按键会被整段吃掉
-    if let Ok(mut b) = bridge.lock() { b.is_replay = true; }
     let data = match std::fs::read(path) {
         Ok(d) => d,
         Err(e) => {

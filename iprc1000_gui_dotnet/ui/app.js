@@ -639,10 +639,6 @@ function renderEnv(s) {
              : '等待采样',
            (ke.maxLatencyMs || 0) > 200 ? 'bad' : 'ok') +
     kvItem('最近按键', ke.lastButton ? `${ke.lastButton}（usage ${ke.lastUsage}${ke.pressed ? ' 按住' : ''}）` : '—') +
-    // 启动 3 秒内的按键：本程序**一律不注入**（最后一道防线）。>0 说明确实有"启动即按键"。
-    ((s.startupIgnored || 0) > 0
-       ? kvItem('启动瞬间被挡住', `${s.startupIgnored} 个按键（启动 3 秒内不注入）`, 'warn')
-       : '') +
     // 日志只在打开诊断开关时才有意义；默认关就不显示这一格（否则用户会以为"还有日志"）
     (logOn && ks.logPath ? kvItem('按键日志', '已写入 ' + ks.logPath) : '');
   $('#keySrcNote').className = 'note' + (ks.stillKeyboard ? ' warn' : '');
@@ -1153,9 +1149,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.33',
+      version: '1.2.34',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.33（构建于 2026-10-18 13:50）',
+      versionLine: 'v1.2.34（构建于 2026-10-18 14:10）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
