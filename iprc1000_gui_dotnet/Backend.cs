@@ -367,7 +367,11 @@ internal sealed class Backend : IDisposable
         if ((st["inSession"]?.GetValue<int>() ?? 0) != 0) return;   // 还在会话中：正常
         long silent;
         try { silent = st["silentMs"]?.GetValue<long>() ?? -1; } catch { return; }
-        if (silent < 400) return;                                   // 刚结束，留点余量
+        // ★★ 2026-10-18 二次确认（时序常量审计）：
+        //   桥的 IDLE_END_MS = 600ms —— 也就是说**说话中途停顿 0.6 秒**就会把会话判结束。
+        //   原来这里只要静默 > 400ms 就放键 ⇒ 用户"想一想再说"会被硬生生切断。
+        //   改成 **5 秒**：只作为"UP 彻底失效"的兜底，不会打断正常停顿。
+        if (silent < 5000) return;
         f.ClearHeld($"音频会话已结束（静默 {silent} ms）—— 释放语音键");
     }
 
