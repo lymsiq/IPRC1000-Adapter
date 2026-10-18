@@ -15,11 +15,28 @@ namespace Iprc1000Adapter;
 /// </summary>
 internal static class StuckGuard
 {
-    /// <summary>语音键宽限期：刚按下时 silentMs 还是上一会话的旧值，不能立刻判死。</summary>
-    public const double VoiceGraceSec = 3.0;
+    /// <summary>
+    /// 语音键宽限期：刚按下时 silentMs 还是上一会话的旧值，不能立刻判死。
+    /// ★ 与 VoiceSilentMs 同步放宽到 30 秒（见下面那条注释的原因）。
+    /// </summary>
+    public const double VoiceGraceSec = 30.0;
 
-    /// <summary>语音键按住期间，音频静默超过这个毫秒数就判定 UP 丢了。</summary>
-    public const long VoiceSilentMs = 3000;
+    /// <summary>
+    /// 语音键按住期间，音频静默超过这个毫秒数才判 UP 丢了。
+    ///
+    /// ★★ 2026-10-18 真机修正：原来是 3000 ms，**误杀真实长按**。
+    ///   实测音频流并不稳定（真机 bridge-stats 里出现过 `maxGapMs: 39635`，
+    ///   即中途断流 39.6 秒）。断流一旦超过 3 秒，看门狗就把用户**正按着的**
+    ///   右 Alt 强制放掉 ⇒ "长按"被打断成"点击" ⇒ 语音功能不触发。
+    ///   ⇒ 2026-10-18 第二次修正（拿到铁证后）：真机 watchdog 日志显示
+    ///     `GUARD voice 强制释放 原因=语音键按着但音频已停 3004 ms`，
+    ///     而系统侧实测用户按了 **8192 / 6507 / 9347 ms** —— 也就是说
+    ///     **每一次真实长按都在 3 秒时被误杀**，豆包只看到"3 秒就松手"，语音永不触发。
+    ///   ⇒ 阈值改为 **30 秒**（宽限与静默同步）。取舍：宁可"真丢了 UP 多卡 30 秒"
+    ///     （用户按一下紧急复位即可），也不能"每次都把正常长按砍断" ——
+    ///     后者是**核心功能不可用**，前者只是偶发不适。
+    /// </summary>
+    public const long VoiceSilentMs = 30_000;
 
     /// <summary>拿不到音频信号时（桥没运行），语音键的绝对兜底超时（秒）。</summary>
     public const double VoiceNoSignalSec = 120;

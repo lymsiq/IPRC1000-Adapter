@@ -181,6 +181,8 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.42：语音键的音频判据不能误杀正常长按（3s→30s）
+    ("语音键静默阈值 30s", "iprc1000_gui_dotnet/StuckGuard.cs", "VoiceSilentMs = 30_000"),
     # ★ v1.2.41：日志要记录"这一按持续多久"（长按类功能的关键判据）
     ("日志记录按住时长", "iprc1000_gui_dotnet/KeyFilter.cs", '按住 {holdMs:F0} ms'),
     # ★ v1.2.40：桥重启要清按住集合；面板"按住"要反映真实状态
