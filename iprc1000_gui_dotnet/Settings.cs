@@ -87,6 +87,16 @@ internal static class Settings
         get => _data.ClickTemplateX;
         set { _data.ClickTemplateX = value; Save(); }
     }
+    public static int ClickRelX
+    {
+        get => _data.ClickRelX;
+        set { _data.ClickRelX = value; Save(); }
+    }
+    public static int ClickRelY
+    {
+        get => _data.ClickRelY;
+        set { _data.ClickRelY = value; Save(); }
+    }
     public static int ClickTemplateY
     {
         get => _data.ClickTemplateY;
@@ -143,6 +153,9 @@ internal static class Settings
         /// <summary>命中点相对模板左上角的偏移（通常等于半个采集边长）</summary>
         public int ClickTemplateX { get; set; }
         public int ClickTemplateY { get; set; }
+        /// <summary>采集时光标相对**目标窗口左上角**的位置；多处同形图标时用它挑对的那个</summary>
+        public int ClickRelX { get; set; }
+        public int ClickRelY { get; set; }
 
         /// <summary>配置版本号，用于一次性迁移（0 = v1.2.14 及更早）</summary>
         public int SchemaVersion { get; set; }

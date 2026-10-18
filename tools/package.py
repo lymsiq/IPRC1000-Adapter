@@ -190,7 +190,7 @@ SRC_REQUIRED = [
     ("只取一次基线（不按空档重取）", "tools/etw_consumer/src/main.rs", "取消\"空档 ≥600ms 就重取基线\""),
     ("音频释放有 2s 宽限", "iprc1000_gui_dotnet/Backend.cs", "heldMs < 2000"),
     ("音频释放只在长时间静默后兜底", "iprc1000_gui_dotnet/Backend.cs", "silent < 5000"),
-    ("映射页说明左键单击用法", "iprc1000_gui_dotnet/ui/app.js", "「增强提示词」</b>按钮上"),
+    ("映射页说明鼠标左键用法", "iprc1000_gui_dotnet/ui/app.js", "在<b>光标当前位置</b>单击一次"),
     ("截图点击：模板匹配实现", "iprc1000_gui_dotnet/TemplateClick.cs", "归一化互相关"),
     ("截图点击：动作哨兵 -6", "iprc1000_gui_dotnet/KeyAct.cs", "ClickIcon = -6"),
     ("截图点击：采集入口", "iprc1000_gui_dotnet/ui/app.js", "learnClickIcon"),

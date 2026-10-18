@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
@@ -79,6 +80,14 @@ internal static class TemplateClick
         Settings.ClickWindowClass = cls;
         Settings.ClickTemplateX = p.X - x;   // 模板中心相对模板左上角（一般就是 half）
         Settings.ClickTemplateY = p.Y - y;
+
+        // 记住"图标在窗口里的相对位置" —— 工具栏上可能有多个长得一样的图标，
+        // 光靠模板会点错第一个，用它才能挑对。
+        if (GetWindowRect(root, out var wr))
+        {
+            Settings.ClickRelX = p.X - wr.L;
+            Settings.ClickRelY = p.Y - wr.T;
+        }
         return $"已采集 {LearnSize}×{LearnSize} 图标（窗口类名 `{cls}`）。之后按动作键就会在它附近找并点击。";
     }
 
@@ -143,6 +152,9 @@ internal static class TemplateClick
         if (tv <= 1e-9) return (0, 0, 0);   // 纯色模板没意义
 
         double best = double.NegativeInfinity; int bx = 0, by = 0;
+        // ★ 同形图标消歧：工具栏上可能有多个长得一样的按钮（实测会把第一个当命中）。
+        //   收集所有达标的候选，最后选"离采集时那个位置最近"的一个。
+        var cands = new List<(double s, int x, int y)>();
         for (int y = 0; y <= bh - th; y++)
         {
             for (int x = 0; x <= bw - tw; x++)
@@ -166,7 +178,26 @@ internal static class TemplateClick
                 // NCC = (Σ b·t - n·mean·tm) / sqrt(varB · tv)
                 var ncc = (cross - n * mean * tm) / Math.Sqrt(varB * tv);
                 if (ncc > best) { best = ncc; bx = x; by = y; }
+                if (ncc >= MinScore && cands.Count < 400) cands.Add((ncc, x, y));
             }
+        }
+
+        // 消歧：分数接近最高（差 ≤0.02）的候选里，挑离"采集时的相对位置"最近的那个。
+        var expX = Settings.ClickRelX - Settings.ClickTemplateX;
+        var expY = Settings.ClickRelY - Settings.ClickTemplateY;
+        if (cands.Count > 1 && (Settings.ClickRelX > 0 || Settings.ClickRelY > 0))
+        {
+            var top = double.NegativeInfinity;
+            foreach (var c in cands) if (c.s > top) top = c.s;
+            var pick = cands[0];
+            var bestDist = int.MaxValue;
+            foreach (var c in cands)
+            {
+                if (c.s < top - 0.02) continue;
+                var d = Math.Abs(c.x - expX) + Math.Abs(c.y - expY);
+                if (d < bestDist) { bestDist = d; pick = c; }
+            }
+            return pick;
         }
         return (best, bx, by);
     }
