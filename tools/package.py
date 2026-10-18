@@ -181,6 +181,9 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.46：纯幽灵报文不参与状态对账（否则长按被截断在 ~200ms）
+    ("纯幽灵报文不参与对账", "tools/etw_consumer/src/main.rs", "const GHOST: [u8; 2] = [0x01, 0x0C]"),
+    ("幽灵报文回归用例", "tools/bridge_loss_selftest.py", "scenario_ghost_between_hold"),
     # ★ v1.2.44：重复 DOWN 要按时间区分"抖动"与"丢 UP"（否则第二次按下永久失效）
     ("重复DOWN按时间判据", "iprc1000_gui_dotnet/KeyFilter.cs", "上一次的 UP 丢了"),
     ("ETW 下重复DOWN无条件自愈", "iprc1000_gui_dotnet/KeyFilter.cs", 'src != "etw" && dupAgeMs < 300'),

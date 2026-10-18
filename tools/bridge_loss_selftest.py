@@ -262,6 +262,31 @@ def scenario_long_hold_release():
     return out
 
 
+def scenario_ghost_between_hold():
+    """★★★ 2026-10-18 真机"长按被截断在 200ms"的回归用例。
+
+    真机日志（三组时间戳完全一致）：
+        10:15:19.001  voice DOWN
+        10:15:19.144  voice UP          ← 才 142ms
+        10:15:19.144  0x0C (幽灵) DOWN   ← 同一毫秒
+    遥控器在按住语音键期间**插了一条只带 0x0C 的报文**，我们按"整份快照"处理
+    ⇒ voice 从集合里消失 ⇒ 判定松开 ⇒ 长按永远只有 ~150-210ms
+    ⇒ 豆包「长按说话」（需 300~500ms）永不触发。
+
+    断言：`[0x10]` → `[0x0C]` → **仍按着** `[0x10]` → `[]`
+    正确结果：只有一条 `10 DOWN` 和一条 `10 UP`。
+    老实现会在幽灵那条上误报 `10 UP`，随后把 `[0x10]` 又当成一次新按下
+    ⇒ 变成 `DOWN / UP / DOWN / UP` 四条。
+    """
+    out = b""
+    out += emit_hid_multi(out, [])          # 基线
+    out += emit_hid_multi(out, [0x10])      # 按下语音键
+    out += emit_hid_multi(out, [0x0C])      # 幽灵报文：不许影响按住状态
+    out += emit_hid_multi(out, [0x10])      # 仍然按着
+    out += emit_hid_multi(out, [])          # 真松开
+    return out
+
+
 def scenario_audio_with_keys(audio=20, keys=10):
     """音频与按键**交替**到达：音频一帧不丢、按键一条不落。"""
     out = b""
@@ -443,6 +468,10 @@ CASES = [
     ("⑫ 长按后空档 700ms 才松开 —— **UP 必须发出去**（否则右 Alt 永久卡键）",
      scenario_long_hold_release(),
      dict(frames=0, key_seq=["10 DOWN", "10 UP"]), True),
+
+    ("⑬ 按住期间夹一条幽灵报文(0x0C) —— **不许把长按截断**（豆包需 300~500ms）",
+     scenario_ghost_between_hold(),
+     dict(frames=0, key_seq=["10 DOWN", "10 UP"])),
 
     ("⑩ 音频/按键走 CID 0x40（动态分配另一种落法）—— 不许整路失效",
      scenario_alt_cid(3),
