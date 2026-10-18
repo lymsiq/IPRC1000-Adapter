@@ -181,6 +181,8 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.41：日志要记录"这一按持续多久"（长按类功能的关键判据）
+    ("日志记录按住时长", "iprc1000_gui_dotnet/KeyFilter.cs", '按住 {holdMs:F0} ms'),
     # ★ v1.2.40：桥重启要清按住集合；面板"按住"要反映真实状态
     ("桥重启清按住集合", "iprc1000_gui_dotnet/Backend.cs", 'ClearHeld("语音桥重启，之前的 UP 不会再来")'),
     ("按住状态取真实集合", "iprc1000_gui_dotnet/Backend.cs", "PatchEtwPressed"),

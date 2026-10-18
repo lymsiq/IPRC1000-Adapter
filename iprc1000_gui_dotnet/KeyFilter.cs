@@ -803,8 +803,20 @@ internal sealed class KeyFilter : IDisposable
             return;
         }
 
+        // ★ 2026-10-18：把"这一按持续了多久"写进日志。
+        //   真机排查时最有用的一条：豆包「长按说话」要求 ≥300~500ms，
+        //   而实测有些按下只有 213ms（等于点击）—— 光看"按了没反应"根本分不出
+        //   是程序没注入、还是这一按本身太短。
+        double holdMs = -1;
+        if (!pressed)
+        {
+            lock (_heldLock)
+                if (_heldButtons.TryGetValue(bid, out var e0))
+                    holdMs = (DateTime.UtcNow - e0.at).TotalMilliseconds;
+        }
         EtwKeySource.AppendLog($"APPLY  {bid}  {(pressed ? "DOWN" : "UP")}  来源={src}" +
-            $"  映射={Keys.Format(vks)}  组={Keymaps.Current.Name}");
+            $"  映射={Keys.Format(vks)}  组={Keymaps.Current.Name}" +
+            (holdMs >= 0 ? $"  按住 {holdMs:F0} ms" : ""));
 
         if (pressed)
         {
