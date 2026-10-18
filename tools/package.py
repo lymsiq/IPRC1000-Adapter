@@ -191,6 +191,9 @@ SRC_REQUIRED = [
     ("音频释放有 2s 宽限", "iprc1000_gui_dotnet/Backend.cs", "heldMs < 2000"),
     ("音频释放只在长时间静默后兜底", "iprc1000_gui_dotnet/Backend.cs", "silent < 5000"),
     ("映射页说明左键单击用法", "iprc1000_gui_dotnet/ui/app.js", "「增强提示词」</b>按钮上"),
+    ("截图点击：模板匹配实现", "iprc1000_gui_dotnet/TemplateClick.cs", "归一化互相关"),
+    ("截图点击：动作哨兵 -6", "iprc1000_gui_dotnet/KeyAct.cs", "ClickIcon = -6"),
+    ("截图点击：采集入口", "iprc1000_gui_dotnet/ui/app.js", "learnClickIcon"),
     ("WinUHid 状态与探针同判据", "iprc1000_gui_dotnet/WinUhidInjector.cs", "inUse = Ready"),
     ("幽灵报文回归用例", "tools/bridge_loss_selftest.py", "scenario_ghost_between_hold"),
     # ★ v1.2.44：重复 DOWN 要按时间区分"抖动"与"丢 UP"（否则第二次按下永久失效）

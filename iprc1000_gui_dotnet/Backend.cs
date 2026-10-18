@@ -1338,6 +1338,21 @@ internal sealed class Backend : IDisposable
             message = AutoStartBridge ? "已开启：启动本程序后自动拉起语音桥。" : "已关闭自动启动语音桥。" });
     }
 
+    /// <summary>采集「截图点击」的图标：取光标周围 44×44 存成模板（用户把鼠标停在目标按钮上再点）。</summary>
+    public string LearnClickIcon()
+    {
+        try
+        {
+            var msg = TemplateClick.Learn();
+            EtwKeySource.AppendLog($"APPLY  采集图标  {msg}");
+            return Env.Json(new { ok = true, message = msg });
+        }
+        catch (Exception e)
+        {
+            return Env.Json(new { ok = false, message = "采集失败：" + e.Message });
+        }
+    }
+
     public string InstallWinuhid()
     {
         var (ok, msg) = Env.InstallWinuhid();

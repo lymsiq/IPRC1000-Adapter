@@ -41,11 +41,13 @@ internal static class KeyAct
     /// <summary>切换配置组（方块键的出厂值）。★ v1.2.4 起鼠标模式=一个配置组，
     /// 于是"切配置组"成了普通可绑定动作，方块键不再硬编码。</summary>
     public const int SwitchGroup = -5;
+    /// <summary>截图点击：在目标窗口里找**采集过的图标**并单击（见 <see cref="TemplateClick"/>）。</summary>
+    public const int ClickIcon = -6;
 
     /// <summary>一格滚轮（`WHEEL_DELTA`）</summary>
     public const int WheelStep = 120;
 
-    public static readonly int[] All = { Left, Right, WheelUp, WheelDown, SwitchGroup };
+    public static readonly int[] All = { Left, Right, WheelUp, WheelDown, SwitchGroup, ClickIcon };
     /// <summary>只属于"鼠标"的那几个（滚轮/左右键）</summary>
     public static readonly int[] MouseOnes = { Left, Right, WheelUp, WheelDown };
 
@@ -63,6 +65,7 @@ internal static class KeyAct
         WheelUp => "滚轮上",
         WheelDown => "滚轮下",
         SwitchGroup => "切换配置组",
+        ClickIcon => "截图点击",
         _ => null,
     };
 
@@ -75,6 +78,7 @@ internal static class KeyAct
         "滚轮上" or "滚轮向上" or "wheelup" => WheelUp,
         "滚轮下" or "滚轮向下" or "wheeldown" => WheelDown,
         "切换配置组" or "nextgroup" or "group" => SwitchGroup,
+        "截图点击" or "clickicon" or "iconshot" => ClickIcon,
         _ => null,
     };
 
@@ -92,8 +96,26 @@ internal static class KeyAct
         WheelDown => down && MouseInjector.Wheel(-WheelStep),
         // 切配置组**只在按下时**做一次（等抬起就等于"丢一次 UP 这个键就失灵"）
         SwitchGroup => true,
+        // 截图点击**只在按下时**做一次（它是一次性动作，抬起无需处理）
+        ClickIcon => down && ClickIconNow(),
         _ => false,
     };
+
+    /// <summary>截图点击：找图标并单击。结果写进日志（失败原因要能看出来）。</summary>
+    private static bool ClickIconNow()
+    {
+        try
+        {
+            var msg = TemplateClick.TryClick();
+            EtwKeySource.AppendLog($"APPLY  截图点击  {msg}");
+            return true;
+        }
+        catch (Exception e)
+        {
+            EtwKeySource.AppendLog($"APPLY  截图点击  异常：{e.Message}");
+            return false;
+        }
+    }
 
     /// <summary>
     /// 映射值是不是"单个动作" —— 动作**不能和其它键组合**

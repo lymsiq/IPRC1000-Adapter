@@ -71,6 +71,28 @@ internal static class Settings
     }
 
     /// <summary>是否写文本日志（默认关；见 LogSwitch）</summary>
+    /// <summary>「截图点击」模板（PNG base64，空 = 还没采集）</summary>
+    public static string ClickTemplate
+    {
+        get => _data.ClickTemplate;
+        set { _data.ClickTemplate = value; Save(); }
+    }
+    public static string ClickWindowClass
+    {
+        get => _data.ClickWindowClass;
+        set { _data.ClickWindowClass = value; Save(); }
+    }
+    public static int ClickTemplateX
+    {
+        get => _data.ClickTemplateX;
+        set { _data.ClickTemplateX = value; Save(); }
+    }
+    public static int ClickTemplateY
+    {
+        get => _data.ClickTemplateY;
+        set { _data.ClickTemplateY = value; Save(); }
+    }
+
     public static bool LogEnabled
     {
         get => _data.LogEnabled;
@@ -113,6 +135,14 @@ internal static class Settings
         /// 排查问题时在环境设置页勾上，或设环境变量 `IPRC1000_LOG=on`。
         /// </summary>
         public bool LogEnabled { get; set; }
+
+        /// <summary>「截图点击」的图标模板（PNG base64，由用户采集）</summary>
+        public string ClickTemplate { get; set; } = "";
+        /// <summary>采集时所在顶层窗口的类名（如 OimeDirectUIWindow）</summary>
+        public string ClickWindowClass { get; set; } = "";
+        /// <summary>命中点相对模板左上角的偏移（通常等于半个采集边长）</summary>
+        public int ClickTemplateX { get; set; }
+        public int ClickTemplateY { get; set; }
 
         /// <summary>配置版本号，用于一次性迁移（0 = v1.2.14 及更早）</summary>
         public int SchemaVersion { get; set; }

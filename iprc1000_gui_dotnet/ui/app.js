@@ -27,9 +27,9 @@ const VK_SYM = {0x11:'Ctrl',0x12:'Alt',0x10:'Shift',0x5B:'Win'};
    万一哪里漏了分派，它会立刻变成明确的越界值，而不是悄悄注入一个错的键盘键。
    ★ 「切换配置组」(-5) 是**方块键的出厂值** —— v1.2.4 起方块键不再是硬编码的特殊键，
      它就是个普通键，所以这里和鼠标动作放在同一行里供选择。 */
-const KEY_ACTS = [['切换配置组',-5],['鼠标左键',-1],['鼠标右键',-2],['滚轮上',-3],['滚轮下',-4]];
+const KEY_ACTS = [['切换配置组',-5],['鼠标左键',-1],['鼠标右键',-2],['滚轮上',-3],['滚轮下',-4],['截图点击',-6]];
 const ACT_NAME = Object.fromEntries(KEY_ACTS.map(([n,v]) => [v, n]));
-const isKeyAct = (v) => Number.isInteger(v) && v >= -5 && v <= -1;
+const isKeyAct = (v) => Number.isInteger(v) && v >= -6 && v <= -1;
 let kbMods = new Set();    // 已选修饰键
 let kbKey = null;          // 已选主键 vk
 let kbKeyLabel = '';       // 主键显示名
@@ -392,9 +392,20 @@ function buildKeyboard() {
     hint.style.marginTop = '6px';
     hint.innerHTML =
       '提示：「鼠标左键」= 在<b>光标当前位置</b>单击一次（按住不放 = 拖拽）。<br>' +
-      '典型用法：把鼠标停在豆包的<b>「增强提示词」</b>按钮上，说完话按映射了这个动作的遥控器键，' +
-      '就能直接点它 —— 不用再动鼠标。';
+      '「<b>截图点击</b>」= 在目标窗口里<b>找到你采集过的图标</b>并点它（窗口移动也跟得住）。' +
+      '豆包那个 DirectUI 工具栏不支持无障碍接口，所以只能靠截图找。';
     mo.appendChild(hint);
+
+    // 采集图标：把鼠标停在目标按钮上再点这里
+    const learn = document.createElement('button');
+    learn.className = 'btn ghost';
+    learn.style.marginTop = '6px';
+    learn.textContent = '采集图标（把鼠标停在目标按钮上再点）';
+    learn.onclick = async () => {
+      const r = JSON.parse(await B.learnClickIcon());
+      toast(r.message, 9000);
+    };
+    mo.appendChild(learn);
   }
   mods.dataset.built = '1';
 }
@@ -1164,9 +1175,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.9',
+      version: '1.2.10',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.9（构建于 2026-10-19 05:20）',
+      versionLine: 'v1.2.10（构建于 2026-10-19 05:30）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
