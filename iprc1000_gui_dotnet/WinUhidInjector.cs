@@ -118,6 +118,19 @@ internal static class WinUhidInjector
         }
     }
 
+    /// <summary>WinUHid 的控制设备能否打开（能打开 ≠ 能建虚拟键盘，但打不开基本就是没生效）。</summary>
+    public static bool ControlDeviceOpenable()
+    {
+        try
+        {
+            using var fs = new System.IO.FileStream(@"\\.\WinUHid", System.IO.FileMode.Open,
+                                                    System.IO.FileAccess.ReadWrite,
+                                                    System.IO.FileShare.ReadWrite);
+            return true;
+        }
+        catch { return false; }
+    }
+
     public static bool EnsureReady()
     {
         lock (Gate)
@@ -262,7 +275,19 @@ internal static class WinUhidInjector
             Marshal.StructureToPtr(c, cfg, false);
 
             var dev = create(cfg);
-            if (dev == IntPtr.Zero) { LastError = "WinUHidCreateDevice 失败（驱动没装好？）"; return IntPtr.Zero; }
+            if (dev == IntPtr.Zero)
+            {
+                // ★ 2026-10-18：把"驱动没装好"和"装好了但要重启"分开说。
+                //   真机上反复出现：驱动包已在驱动存储里、`\.\WinUHid` 却打不开
+                //   （根设备未绑定）⇒ 建不出虚拟键盘 ⇒ 注入退化成 SendInput ⇒ 豆包没反应。
+                //   以前只显示"未就绪"，用户被误导了好几轮。
+                LastError = ControlDeviceOpenable()
+                    ? "WinUHidCreateDevice 失败（设备槽位可能被占，稍后会自愈重试）"
+                    : "WinUHid 驱动未生效：控制设备 WinUHid 不存在。"
+                      + "若刚安装/重装过 WinUHid，请重启 Windows 后再试"
+                      + "（不重启的话注入只能走 SendInput，豆包会把它过滤掉）";
+                return IntPtr.Zero;
+            }
             if (start(dev, IntPtr.Zero, IntPtr.Zero) == 0)
             {
                 LastError = "WinUHidStartDevice 失败";
