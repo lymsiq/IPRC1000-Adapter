@@ -86,8 +86,8 @@ def emit_frame(out, seq, split=None, truncate_cont=0, force_len=None, cid=0x0041
     return out
 
 
-def _rec(flag, dlen, acl):
-    return struct.pack("<BBHIH", flag, 0, dlen, 0, len(acl)) + acl
+def _rec(flag, dlen, acl, dt_ms=0):
+    return struct.pack("<BBHIH", flag, 0, dlen, dt_ms, len(acl)) + acl
 
 
 def scenario_normal(n=50):
@@ -167,7 +167,7 @@ def emit_hid_report(out, usage=0x10):
     return _rec(2, 14, acl)
 
 
-def emit_hid_multi(out, usages, cid=0x0041):
+def emit_hid_multi(out, usages, cid=0x0041, dt_ms=0):
     """一条按键报告，**6 个 usage 槽可填多个**（最多 6 个）。
 
     遥控器上同时按两个键时就是这个形状（实测 `back+menu` → `a1 01 00 00 09 11 ...`）。
@@ -175,7 +175,7 @@ def emit_hid_multi(out, usages, cid=0x0041):
     slots = list(usages) + [0] * (6 - len(usages))
     acl = struct.pack("<HH", 10, cid) + bytes([0xA1, 0x01, 0x00, 0x00]) + bytes(slots)
     assert len(acl) == 14
-    return _rec(2, 14, acl)
+    return _rec(2, 14, acl, dt_ms)
 
 
 def scenario_alt_cid(n=3):
@@ -237,6 +237,28 @@ def scenario_seed_baseline():
     out = b""
     out += emit_hid_multi(out, [0x4E])   # 程序刚起来，设备已经抱着"菜单"
     out += emit_hid_multi(out, [0x4E])   # 仍然抱着 —— 相对基线没有变化
+    return out
+
+
+def scenario_long_hold_release():
+    """★★★ 2026-10-18 真机反复卡键的回归用例：**长按后松开，UP 必须发出去**。
+
+    真机现象：按住语音键说话（正常）、松开后 **右 Alt 一直按着不弹起**。
+
+    根因：语音键按住期间遥控器**在按住期间不上报**（实测 30 秒内 0 次），
+    松开时才发一条报文。它与上一条的间隔远超 600ms ⇒ 桥会把它当成"新的一段"、
+    只取基线、**不发任何事件** ⇒ 那条"松开"被吞掉 ⇒ 永久卡键。
+
+    断言：`[0x10]` 之后空档 700ms 再来一条 `[]` ⇒ 必须产生 `10 UP`。
+    老实现只会给出 `10 DOWN`，没有 UP。
+
+    ⚠ 必须按真实时间轴跑（realtime）：`--fast` 下 dt 被忽略、空档不存在 ⇒ 会假通过。
+    """
+    out = b""
+    out += emit_hid_multi(out, [])                 # 段首基线
+    out += emit_hid_multi(out, [0x10])             # 按下语音键
+    # 长按期间设备不上报；这是"松开"那条，间隔 700ms 触发"空档重置基线"
+    out += emit_hid_multi(out, [], dt_ms=700)
     return out
 
 
@@ -417,6 +439,10 @@ CASES = [
     ("⑪ 启动瞬间第一份报文带着按键 —— **不许凭空触发**（真机表现：弹出右键菜单）",
      scenario_seed_baseline(),
      dict(frames=0, no_key_down=True)),
+
+    ("⑫ 长按后空档 700ms 才松开 —— **UP 必须发出去**（否则右 Alt 永久卡键）",
+     scenario_long_hold_release(),
+     dict(frames=0, key_seq=["10 DOWN", "10 UP"]), True),
 
     ("⑩ 音频/按键走 CID 0x40（动态分配另一种落法）—— 不许整路失效",
      scenario_alt_cid(3),

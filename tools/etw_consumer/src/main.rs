@@ -825,8 +825,32 @@ impl Bridge {
         //     用户真正需要的按键事件从第二条报文开始，代价是 20 ms。
         if !self.seeded {
             self.seeded = true;
+
+            // ★★★ 2026-10-18（真机卡键，反复出现）：空档期间**被松开的键必须补发 UP**。
+            //
+            //   为什么会长按必卡：语音键按住时遥控器**在按住期间不上报**
+            //   （实测按住 30 秒内上报 0 次），松开时才发一条。这条报文与上一条的间隔
+            //   远超 600 ms ⇒ 一定会走到这里。而这里原来直接 `self.held = now; return;`，
+            //   于是那条"松开"被当成新基线**吞掉** ⇒ 右 Alt 永远等不到 UP ⇒ 永久卡键。
+            //
+            //   正确规则：
+            //     · 消失了（held 有、now 没有）→ **发 UP**（本段基线里"早已按着"的除外，
+            //       那种键我们从没发过 DOWN）；
+            //     · 新出现（now 有、held 没有）→ 只记账、**不发 DOWN**（防启动/重连时误触发）。
+            for u in 0..256usize {
+                if self.held[u] && !now[u] {
+                    if !self.seeded_held[u] {
+                        self.emit_key(Some(u as u8), false);
+                    }
+                    self.seeded_held[u] = false;
+                }
+            }
+            for u in 0..256usize {
+                if now[u] && !self.held[u] {
+                    self.seeded_held[u] = true;   // 新出现的键按"基线"处理：不发 DOWN
+                }
+            }
             self.held = now;
-            self.seeded_held = now;      // 这些键的 UP 不发（避免"无对应的松开"）
             self.stats.lock().unwrap().seed_reports += 1;
             return;
         }

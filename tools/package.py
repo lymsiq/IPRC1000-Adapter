@@ -181,6 +181,9 @@ SRC_FORBIDDEN = [
 
 # 源码级「正向校验」：(标签, 相对仓库根的路径, 必须出现的子串)
 SRC_REQUIRED = [
+    # ★ v1.2.43：空档之后必须补发被松开的键的 UP（否则长按必卡）
+    ("空档后补发 UP", "tools/etw_consumer/src/main.rs", "空档期间**被松开的键必须补发 UP**"),
+    ("长按松开回归用例", "tools/bridge_loss_selftest.py", "scenario_long_hold_release"),
     # ★ v1.2.42：语音键的音频判据不能误杀正常长按（3s→30s）
     ("语音键静默阈值 30s", "iprc1000_gui_dotnet/StuckGuard.cs", "VoiceSilentMs = 30_000"),
     # ★ v1.2.41：日志要记录"这一按持续多久"（长按类功能的关键判据）
