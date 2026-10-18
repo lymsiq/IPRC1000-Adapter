@@ -470,8 +470,22 @@ internal sealed class KeyFilter : IDisposable
             cleared = _held.ToArray();
             _held.Clear();
         }
-        var n = cleared.Length;
+        // ★ 2026-10-18 修：原来这里用 `cleared.Length`（**Raw Input 的 _held**）当"释放了几个键"，
+        //   而 ETW 模式下 _held 恒为空 ⇒ n 永远是 0 ⇒ **明明放掉了注入的键，却既不记日志、
+        //   也不更新 LastCleared**。真机表现就是"按语音键后右 Alt 过了好几秒才自己弹起，
+        //   而日志里什么都看不到"（排查时完全无法定位是谁放的）。
+        //   现在用**真正放掉的按钮数**（heldButtons）来计数并留痕。
+        var n = heldButtons.Count;
         lock (_lastState) _lastState.Clear();
+
+        if (n > 0)
+        {
+            var msg = $"GUARD  清空按住集合  {reason}  释放 {n} 个按键"
+                      + $"（{string.Join(" ", heldButtons.Select(v => Keys.Format(v)))}）";
+            EtwKeySource.AppendLog(msg);
+            GuardLog(msg);
+            LastCleared = $"{reason}（释放 {n} 个）";
+        }
 
         foreach (var vks in heldButtons)
         {
@@ -492,7 +506,6 @@ internal sealed class KeyFilter : IDisposable
             try { InjectSet(ComputeIntended()); } catch { }
             _viaVirtualHid = false;
         }
-        if (n > 0) LastCleared = $"{reason}（释放 {n} 个）";
         return n;
     }
 

@@ -46,6 +46,37 @@ Explorer 在 **Apps 键抬起**时就弹右键菜单 ⇒ 每次启动必弹一�
 - `WinUhidInjector.SubmitFrame` 每帧打 hex（**热路径**，仅排查期间存在）；
 - 修掉同时引入的一个 bug：JSON 参数顺序错位导致 `keyEvents:-1`、`firstKeyMs:false`。
 
+## [1.2.37] - 2026-10-18
+
+### 修：`ClearHeld` **放了键却什么都不记**（日志/计数用错了集合）
+
+真机日志（带 `IPRC1000_LOG=on` 抓到的）：
+
+```
+08:55:14.612  KEY  usage=0x10  voice  DOWN  投递延迟=8ms
+08:55:14.614  APPLY  voice  DOWN  映射=右 Alt
+08:55:14.619  INJECT DOWN 0xA5 via=winuhid        ← 注入成功
+08:55:21.383  INJECT UP   0xA5 via=winuhid        ← 6.7 秒后才弹起，且没有 KEY UP
+```
+
+**注入是好的**，但松开事件丢了，右 Alt 被某条清理路径在 6.7 秒后放掉 ——
+而日志里**看不到任何原因**。
+
+根因：`ClearHeld()` 用 `cleared.Length`（**Raw Input 的 `_held`** 集合）当"释放了几个键"，
+而 ETW 模式下 `_held` **恒为空** ⇒ `n` 永远是 0 ⇒
+
+- 不放 `GUARD` 日志
+- 不更新 `LastCleared`（界面上"最近一次清空"也永远空着）
+
+**表现**：明明放掉了注入的键，却毫无痕迹 —— 这类"静默行为"正是最难查的一类。
+
+修法：改用**真正放掉的按钮数**（`heldButtons.Count`），并补一行 `GUARD 清空按住集合 …`。
+
+### 顺带确认（不是 bug）
+
+- `OnDeviceMayChanged()`（设备断开即清键）有 `RemotePresent()` 保护，**不会误触发**；
+- 往 31681 发假的 `KEY 10 1/0` 能正确注入/释放右 Alt ⇒ **UDP→映射→WinUHid 整条链路是好的**。
+
 ## [1.2.36] - 2026-10-18
 
 ### ★ 修：**卡键看门狗根本没在跑**（v1.2.26 删钩子时误删了定时器）
