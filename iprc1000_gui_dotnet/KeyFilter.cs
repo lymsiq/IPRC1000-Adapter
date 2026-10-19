@@ -350,10 +350,56 @@ internal sealed class KeyFilter : IDisposable
     }
 
     /// <summary>长时间没有遥控器上报 → 清空按住集合并释放可能卡住的注入键</summary>
+    // 每个键上次"系统侧缺失"的补发时间（500ms 内不重复补，避免刷屏）
+    private readonly Dictionary<int, DateTime> _lastReinject = new();
+    private DateTime _lastHealthNote = DateTime.MinValue;
+
+    /// <summary>
+    /// **按键健康检查**（2026-10-19，对应"按住语音键、右 Alt 自己弹起"）。
+    ///
+    /// 背景：真机抓包证明报文是干净的（长按期间遥控器一条都不发，松手才发空报文），
+    /// 程序也按 2.5 秒完整按住、准时松开。那么"自己弹起"只可能来自**系统侧把我们注入的
+    /// 按住悄悄丢了** —— 虚拟 HID 设备被重枚举、系统电源管理、驱动重绑定都会这样。
+    /// （与同类项目的"音频假正常"是同一类问题：**我们以为按着，系统里其实已经抬起**。）
+    ///
+    /// 判据：程序认为按着的每一个 VK，系统 `GetAsyncKeyState` 必须也是按下。
+    /// 不是 ⇒ 记一条 `KEY HEALTH` 并**重新下发整份报告**把按住补回去。
+    /// </summary>
+    private void CheckHeldHealth()
+    {
+        try
+        {
+            List<(string bid, int[] vks)> snapshot;
+            lock (_heldLock) snapshot = _heldButtons.Select(kv => (kv.Key, kv.Value.vks)).ToList();
+            if (snapshot.Count == 0) return;
+
+            var needFix = false;
+            foreach (var (bid, vks) in snapshot)
+                foreach (var vk in vks)
+                {
+                    if ((GetAsyncKeyState(vk) & 0x8000) != 0) continue;   // 系统里是按下的 ✓
+                    needFix = true;
+                    var now = DateTime.UtcNow;
+                    if (_lastReinject.TryGetValue(vk, out var last) && (now - last).TotalMilliseconds < 500)
+                        continue;
+                    _lastReinject[vk] = now;
+                    if ((now - _lastHealthNote).TotalMilliseconds > 1000)
+                    {
+                        _lastHealthNote = now;
+                        Safe.Note($"KEY HEALTH  {bid}(0x{vk:X2}) 程序认为按着，但系统里已抬起 —— 重新注入");
+                    }
+                }
+
+            if (needFix) InjectSet(ComputeIntended());   // 按整份报告重发，把按住的键补回去
+        }
+        catch (Exception e) { Safe.Log(e, "按键健康检查失败"); }
+    }
+
     private void Watchdog()
     {
         try
         {
+            CheckHeldHealth();
             bool empty;
             lock (_heldLock) empty = _held.Count == 0;
             // ★★ 这里原来写的是 `if (empty) return;` —— 而 ETW 模式下 _held **永远是空的**
