@@ -433,6 +433,23 @@ function buildKeyboard() {
     };
     mo.appendChild(test);
 
+    // 匹配门槛：模板质量天生不同（小图标/半透明按钮的分数上不去），所以开放可调。
+    const th = document.createElement('label');
+    th.style.cssText = 'display:inline-flex;align-items:center;gap:5px;margin-left:10px;font-size:12.5px;color:#556';
+    th.appendChild(document.createTextNode('匹配门槛'));
+    const thIn = document.createElement('input');
+    thIn.type = 'number'; thIn.step = '0.01'; thIn.min = '0.50'; thIn.max = '0.98';
+    thIn.style.cssText = 'width:64px;padding:2px 4px';
+    thIn.value = String((state && state.clickMinScore) || 0.75);
+    thIn.onchange = async () => {
+      const r = JSON.parse(await B.setClickMinScore(thIn.value));
+      toast(r.message, 6000);
+      thIn.value = String(r.score || thIn.value);
+    };
+    th.appendChild(thIn);
+    th.appendChild(document.createTextNode('（默认 0.75；「试一下」看分数再定）'));
+    mo.appendChild(th);
+
     // 「点完回到原位再点一下」：默认开。点目标按钮会让焦点落到按钮上，
     // 之后 OK→Enter 就发不出去（真机现象）；点回原位能把焦点还给输入框。
     const back = document.createElement('label');
@@ -1268,9 +1285,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.31',
+      version: '1.2.32',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.31（构建于 2026-10-19 15:35）',
+      versionLine: 'v1.2.32（构建于 2026-10-19 15:45）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

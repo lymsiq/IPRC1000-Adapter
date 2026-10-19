@@ -96,6 +96,12 @@ internal static class Settings
         get => _data.ClickProcess;
         set { _data.ClickProcess = value; Save(); }
     }
+    public static double ClickMinScore
+    {
+        get => _data.ClickMinScore is >= 0.5 and <= 0.98 ? _data.ClickMinScore : 0.75;
+        set { _data.ClickMinScore = Math.Clamp(value, 0.5, 0.98); Save(); }
+    }
+
     public static bool ClickLastOk
     {
         get => _data.ClickLastOk;
@@ -210,6 +216,16 @@ internal static class Settings
         /// <summary>采集时光标相对**目标窗口左上角**的位置；多处同形图标时用它挑对的那个</summary>
         /// <summary>采集时目标窗口所属进程名（类名通用的场景靠它确认是同一个程序）</summary>
         public string ClickProcess { get; set; } = "";
+        /// <summary>
+        /// 截图点击的相似度门槛（默认 **0.75**）。
+        ///
+        /// 可配置的理由：模板质量天生不同 —— 小图标、低对比、半透明按钮的分数就是上不去
+        /// （实测某目标最高只有 0.76，卡在 0.80 之下就"找不到"）。
+        /// SikuliX 也是把 `MinSimilarity` 暴露给用户的（默认 0.7）。
+        /// 有"唯一性校验"兜底：分数不高但**明显领先次佳**时才接受，避免误点。
+        /// </summary>
+        public double ClickMinScore { get; set; } = 0.75;
+
         /// <summary>上次命中点（窗口内坐标）—— SikuliX 的 "still-there" 预检用，省掉整段搜索</summary>
         public bool ClickLastOk { get; set; }
         public int ClickLastX { get; set; }

@@ -222,6 +222,8 @@ internal static class TemplateClick
         //   如果上次命中过，目标通常还在同一个位置 —— 先在那附近 ±24px 做一次**极小范围**
         //   匹配（几十个位置，约 1ms）。命中就直接用它，省掉整段搜索。
         double score = 0; int mx = 0, my = 0; double sx = 1.0, sy = 1.0;
+        double second = 0;
+        var minScore = Settings.ClickMinScore;   // 可配置（默认 0.75）
         var hadCache = Settings.ClickLastOk &&
                        Settings.ClickLastX > 0 && Settings.ClickLastY > 0;
         if (hadCache)
@@ -234,8 +236,8 @@ internal static class TemplateClick
             var ph = Math.Min(h - py, StillThereRadius * 2 + tpl.Height);
             if (pw > tpl.Width && ph > tpl.Height)
             {
-                var (sc0, x0, y0, _, _, _) = FindBest(shot, tpl, px, py, pw, ph, 1.0);
-                if (sc0 >= MinScore)
+                var (sc0, x0, y0, sec0, _, _) = FindBest(shot, tpl, px, py, pw, ph, 1.0);
+                if (sc0 >= minScore)
                 {
                     score = sc0; mx = x0; my = y0;
                     roiX = px; roiY = py;          // 让后面的坐标换算用同一个原点
@@ -246,21 +248,21 @@ internal static class TemplateClick
 
         // 三段式：① 原尺寸、近处快查（~0.1s）；② 换几个尺度（DPI/缩放变化）；
         //         ③ 仍失败就放宽搜索半径（布局挪动）。三段都失败才放弃。
-        if (score < MinScore)
+        if (score < minScore)
         {
-        var (s1, x1, y1, sx1, sy1, _) = FindBest(shot, tpl, roiX, roiY, roiW, roiH, 1.0);
-        score = s1; mx = x1; my = y1; sx = sx1; sy = sy1;
+        var (s1, x1, y1, sec1, sx1, sy1) = FindBest(shot, tpl, roiX, roiY, roiW, roiH, 1.0);
+        score = s1; mx = x1; my = y1; sx = sx1; sy = sy1; second = sec1;
         }
-        if (score < MinScore)
+        if (score < minScore)
         {
             foreach (var k in Rescales)
             {
-                var (s2, x2, y2, _, _, _) = FindBest(shot, tpl, roiX, roiY, roiW, roiH, k);
-                if (s2 > score) { score = s2; mx = x2; my = y2; sx = k; sy = k; }
+                var (s2, x2, y2, sec2, _, _) = FindBest(shot, tpl, roiX, roiY, roiW, roiH, k);
+                if (s2 > score) { score = s2; mx = x2; my = y2; second = sec2; sx = k; sy = k; }
                 if (score >= MinScore) break;
             }
         }
-        if (score < MinScore)
+        if (score < minScore)
         {
             // 放宽半径再试一次（只按原尺寸，避免太慢）
             var wx = Math.Max(0, Settings.ClickRelX - WideRadius);
@@ -269,12 +271,21 @@ internal static class TemplateClick
             var wh = Math.Min(h - wy, WideRadius * 2 + tpl.Height);
             if (ww > tpl.Width && wh > tpl.Height)
             {
-                var (s3, x3, y3, _, _, _) = FindBest(shot, tpl, wx, wy, ww, wh, 1.0);
-                if (s3 > score) { score = s3; mx = x3; my = y3; roiX = wx; roiY = wy; }
+                var (s3, x3, y3, sec3, _, _) = FindBest(shot, tpl, wx, wy, ww, wh, 1.0);
+                if (s3 > score) { score = s3; mx = x3; my = y3; second = sec3; roiX = wx; roiY = wy; }
             }
         }
-        if (score < MinScore)
-            return $"没找到图标（最高相似度 {score:F2} < {MinScore:F2}）。界面可能变了，重新采集一次。";
+        if (score < minScore)
+            return $"没找到图标（最高相似度 {score:F2} < 门槛 {minScore:F2}" +
+                   (second > 0 ? $"，次佳 {second:F2}" : "") +
+                   "）。界面可能变了，重新采集一次；或把「匹配门槛」调低一档再试。";
+
+        // ★ 唯一性校验（2026-10-19）：分数不高时必须**明显领先次佳**，否则很可能是
+        //   "整片区域都像"（模板选得太泛，比如只截到背景）——这种情况下点下去就是误点。
+        //   高分（≥0.85）不设此限，因为 0.85+ 本身已足够可信。
+        if (score < 0.85 && second > 0 && score - second < 0.08)
+            return $"找到相似区域但**不确定**（最高 {score:F2}、次佳 {second:F2}，差距 {score - second:F2} 太小）。" +
+                   "像是模板选得太泛 —— 请把鼠标对准图标**更中心**处重新采集。";
 
         // 命中点 = 模板左上角 + 模板中心
         // 用"实际命中的模板"尺寸换算中心（缩放后模板边长会变）
@@ -357,7 +368,7 @@ internal static class TemplateClick
     /// 在 <paramref name="roiX/Y/W/H"/> 指定的区域内、按 <paramref name="scale"/> 缩放模板后匹配一次。
     /// 返回的 (x,y) 是**相对 ROI** 的坐标；(sx,sy) 是该次实际使用的缩放比。
     /// </summary>
-    private static (double score, int x, int y, double sx, double sy, Bitmap usedTpl)
+    private static (double score, int x, int y, double second, double sx, double sy)
         FindBest(Bitmap shot, Bitmap tpl, int roiX, int roiY, int roiW, int roiH, double scale)
     {
         Bitmap use = tpl;
@@ -378,17 +389,17 @@ internal static class TemplateClick
         if (use.Width > roiW || use.Height > roiH)
         {
             if (own) use.Dispose();
-            return (0, 0, 0, scale, scale, tpl);
+            return (0, 0, 0, 0, scale, scale);
         }
         using var roi = shot.Clone(new Rectangle(roiX, roiY, roiW, roiH), shot.PixelFormat);
         var expX = Settings.ClickRelX - (int)Math.Round(Settings.ClickTemplateX * scale) - roiX;
         var expY = Settings.ClickRelY - (int)Math.Round(Settings.ClickTemplateY * scale) - roiY;
-        var (sc, x, y) = Match(roi, use, expX, expY);
+        var (sc, x, y, sec) = Match(roi, use, expX, expY);
         if (own) use.Dispose();
-        return (sc, x, y, scale, scale, tpl);
+        return (sc, x, y, sec, scale, scale);
     }
 
-    private static (double score, int x, int y) Match(Bitmap big, Bitmap tpl, int expX, int expY)
+    private static (double score, int x, int y, double second) Match(Bitmap big, Bitmap tpl, int expX, int expY)
     {
         var bw = big.Width; var bh = big.Height;
         var tw = tpl.Width; var th = tpl.Height;
@@ -400,9 +411,11 @@ internal static class TemplateClick
         tm /= td.Length;
         double tv = 0;
         for (int i = 0; i < td.Length; i++) { var d = td[i] - tm; tv += d * d; }
-        if (tv <= 1e-9) return (0, 0, 0);   // 纯色模板没意义
+        if (tv <= 1e-9) return (0, 0, 0, 0);   // 纯色模板没意义
 
         double best = double.NegativeInfinity; int bx = 0, by = 0;
+        // 次佳：用于"唯一性校验" —— 分数不高但**明显领先第二名**时才算可信
+        double second = double.NegativeInfinity;
         // ★ 同形图标消歧：工具栏上可能有多个长得一样的按钮（实测会把第一个当命中）。
         //   收集所有达标的候选，最后选"离采集时那个位置最近"的一个。
         var cands = new List<(double s, int x, int y)>();
@@ -428,7 +441,8 @@ internal static class TemplateClick
                 if (varB <= 1e-9) continue;
                 // NCC = (Σ b·t - n·mean·tm) / sqrt(varB · tv)
                 var ncc = (cross - n * mean * tm) / Math.Sqrt(varB * tv);
-                if (ncc > best) { best = ncc; bx = x; by = y; }
+                if (ncc > best) { second = best; best = ncc; bx = x; by = y; }
+                else if (ncc > second && (Math.Abs(x - bx) > 8 || Math.Abs(y - by) > 8)) second = ncc;
                 if (ncc >= MinScore && cands.Count < 400) cands.Add((ncc, x, y));
             }
         }
@@ -446,9 +460,9 @@ internal static class TemplateClick
                 var d = Math.Abs(c.x - expX) + Math.Abs(c.y - expY);
                 if (d < bestDist) { bestDist = d; pick = c; }
             }
-            return pick;
+            return (pick.s, pick.x, pick.y, second);
         }
-        return (best, bx, by);
+        return (best, bx, by, second);
     }
 
     private static float[] ToGray(Bitmap bmp)

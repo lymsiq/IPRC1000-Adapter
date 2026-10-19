@@ -750,6 +750,8 @@ internal sealed class Backend : IDisposable
                 // ★ 面板上要显示的是**语音键**的判据（音频静默阈值），不是 Raw Input 的静默超时
                 ["voiceSilentMs"] = StuckGuard.VoiceSilentMs,
                 ["voiceAudioRelease"] = Settings.VoiceAudioRelease,
+                ["clickMinScore"] = Settings.ClickMinScore,
+                ["clickReturnToOrigin"] = Settings.ClickReturnToOrigin,
                 ["voiceGraceSec"] = (long)StuckGuard.VoiceGraceSec,
             },
             ["bind"] = new JsonObject
@@ -1411,6 +1413,17 @@ internal sealed class Backend : IDisposable
         {
             return Env.Json(new { ok = false, message = "采集失败：" + e.Message });
         }
+    }
+
+    /// <summary>设置截图点击的相似度门槛（0.50~0.98）。</summary>
+    public string SetClickMinScore(string v)
+    {
+        if (!double.TryParse(v, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var d))
+            return Env.Json(new { ok = false, message = "门槛必须是数字（例如 0.75）" });
+        Settings.ClickMinScore = d;
+        return Env.Json(new { ok = true, score = Settings.ClickMinScore,
+            message = $"匹配门槛已设为 {Settings.ClickMinScore:F2}。越低越容易点中，也越容易点错。" });
     }
 
     /// <summary>发送 1 秒测试音，用于验证"CABLE Output 有没有声音"。</summary>
