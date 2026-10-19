@@ -168,7 +168,15 @@ internal static class Settings
         public bool StartMinimized { get; set; } = true;
         public bool AutoStartBridge { get; set; } = true;
         public bool AutoSwitchDriver { get; set; } = true;
-        public bool AutoKeepDefaultMic { get; set; } = true;
+        /// <summary>
+        /// 默认麦克风被系统改走时**自动改回** CABLE Output。
+        ///
+        /// ★ 2026-10-19 默认值 true → **false**（参考无线麦 SayAll 的原则：
+        ///   "不会为了语音输入自动修改系统默认输入/输出设备"）。
+        ///   自动改默认设备会与输入法/其他程序的设备缓存打架，反而造成"录音启动失败/无波形"。
+        ///   现在改为**只提示**，由用户在输入法里自己选 CABLE Output；需要时点按钮手动改。
+        /// </summary>
+        public bool AutoKeepDefaultMic { get; set; }
         public string KeySource { get; set; } = "auto";
         /// <summary>
         /// 是否写文本日志。**默认 false**（发布版性能优先，见 LogSwitch 的说明）。

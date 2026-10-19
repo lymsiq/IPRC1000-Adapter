@@ -444,6 +444,35 @@ function buildKeyboard() {
     back.appendChild(backCB);
     back.appendChild(document.createTextNode('点完回到原位再点一下（恢复焦点）'));
     mo.appendChild(back);
+
+    // ── 语音键预设（参考同类项目：语音键本质就是一条普通按键映射）──
+    //   ⚠ Windows 上**无法注入 Fn** —— Fn 没有标准 HID 键值，只能由键盘固件处理。
+    const vp = document.createElement('div');
+    vp.style.cssText = 'margin-top:8px;font-size:12.5px;color:#556';
+    const cap2 = document.createElement('span');
+    cap2.textContent = '语音键预设：';
+    vp.appendChild(cap2);
+    [['右 Alt（豆包）', '165'], ['Ctrl+Win（微信等）', '17,91'], ['右 Win', '92'], ['F11', '122']]
+      .forEach(([label, csv], i) => {
+        const b = document.createElement('button');
+        b.className = 'btn ghost';
+        b.style.marginLeft = i === 0 ? '4px' : '6px';
+        b.textContent = label;
+        b.onclick = async () => {
+          const r = JSON.parse(await B.saveKey('voice', csv));
+          toast('语音键已设为 ' + label + '：' + r.message, 6000);
+          await refresh();
+        };
+        vp.appendChild(b);
+      });
+    const vpn = document.createElement('div');
+    vpn.className = 'note';
+    vpn.style.marginTop = '6px';
+    vpn.innerHTML = '语音键就是一条<b>普通按键映射</b>（在下面按键表里也能直接改）。' +
+      'Windows 上<b>无法注入 Fn</b>（Fn 没有标准 HID 键值，只由键盘固件处理），所以不提供 Fn 选项。' +
+      '目标输入法必须也把这个键设成"按住说话"。';
+    vp.appendChild(vpn);
+    mo.appendChild(vp);
   }
   mods.dataset.built = '1';
 }
@@ -744,7 +773,12 @@ function renderEnv(s) {
   $('#defaultMicNote').innerHTML = dmOk
     ? `当前默认录音设备：<b>${dm}</b> ✓`
     : `当前默认录音设备：<b>${dm}</b> —— <b>不是 CABLE Output</b>，输入法/通话软件会读错设备。` +
-      (s.autoKeepMic ? '程序会在一分钟内自动改回。' : '请点下方「一键完成全部」改回，或开启上面的自动改回。');
+      (s.autoKeepMic
+        ? '已开启「自动改回」（一分钟内会改回来）。'
+        : '请<b>在输入法设置里把麦克风选成 CABLE Output</b>；' +
+          '要改系统默认，点下方「设为 CABLE Output」。' +
+          '<br>（程序默认<b>不自动抢</b>默认设备 —— 自动改会和输入法的设备缓存打架，' +
+          '反而出现"录音启动失败/无波形"。）');
 
   const uh = s.winuhid || {};
   setDot('#d-uhid', uh.ready ? 'on' : 'warn');
@@ -1103,6 +1137,19 @@ function bindUI() {
     toast(r.message, r.canOpen && r.isCable ? 6000 : 14000);
     await refresh();
   };
+  // 测试音：一键区分"链路没声"还是"输入法选错设备"
+  const tt = $('#btnTestTone');
+  if (tt) tt.onclick = async () => {
+    const r = JSON.parse(await B.testTone());
+    toast(r.message, 9000);
+  };
+  // 手动把默认录音设备设为 CABLE Output（不再自动抢）
+  const sm = $('#btnSetMic');
+  if (sm) sm.onclick = async () => {
+    const r = JSON.parse(await B.setDefaultMic());
+    toast(r.message, 8000);
+    await refresh();
+  };
   // ── 屏幕键盘弹窗：保存 / 不执行 / 取消 ──
   const curKey = () => ((state && state.keys && state.keys.items) || []).find(x => x.id === selectedKey);
   const comboVks = () => {
@@ -1216,9 +1263,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.24',
+      version: '1.2.25',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.24（构建于 2026-10-19 13:35）',
+      versionLine: 'v1.2.25（构建于 2026-10-19 13:45）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

@@ -627,6 +627,7 @@ internal sealed class MainForm : Form
             "checkCaptureDevice" => _backend.CheckCaptureDevice(),
             "learnClickIcon" => _backend.LearnClickIcon(),
             "testClickIcon" => _backend.TestClickIcon(),
+            "testTone" => _backend.PlayTestTone(),
             "setClickReturnOrigin" => _backend.SetClickReturnOrigin(Arg(0)),
             "installWinuhid" => _backend.InstallWinuhid(),
             "exportWinuhid" => _backend.ExportWinuhid(),

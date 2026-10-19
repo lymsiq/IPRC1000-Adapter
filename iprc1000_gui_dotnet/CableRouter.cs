@@ -180,6 +180,39 @@ internal sealed class CableRouter : IDisposable
         }) { IsBackground = true, Name = "cable-prewarm" }.Start();
     }
 
+    /// <summary>
+    /// **发送 1 秒测试音**（440 Hz 正弦，48k/16bit/单声道）到 CABLE Input。
+    ///
+    /// 用途（参考无线麦 SayAll 的"发送 1 秒测试音"）：一键区分两种故障 ——
+    ///   · 测试音**有电平** ⇒ 音频链路正常，问题在"采不到遥控器音频"；
+    ///   · 测试音**也没电平** ⇒ 输入法选错了录音设备（没选 CABLE Output）。
+    /// 比"按住说话猜一下"高效得多。
+    /// </summary>
+    public string PlayTestTone(int ms = 1000)
+    {
+        if (!_running) return "音频路由未启动（请先启动语音桥）。";
+        if (!EnsureSink()) return "打不开 CABLE Input —— 虚拟声卡没装好？";
+        const int SR = 48000;
+        var n = SR * ms / 1000;
+        var buf = new byte[n * 2];
+        for (var i = 0; i < n; i++)
+        {
+            var v = (short)(Math.Sin(2 * Math.PI * 440 * i / SR) * 12000);
+            buf[i * 2] = (byte)(v & 0xFF);
+            buf[i * 2 + 1] = (byte)((v >> 8) & 0xFF);
+        }
+        try
+        {
+            _jit!.AddSamples(buf, 0, buf.Length);
+            Log($"[TEST] 已向 CABLE Input 写入 {ms} ms 测试音（440Hz）");
+            return $"已发送 {ms} 毫秒测试音（440Hz）。请在输入法/录音软件里选 CABLE Output，看电平是否跳动。";
+        }
+        catch (Exception e)
+        {
+            return "写入测试音失败：" + e.Message;
+        }
+    }
+
     private bool EnsureSink()
     {
         lock (_sinkLock)

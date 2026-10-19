@@ -1413,6 +1413,20 @@ internal sealed class Backend : IDisposable
         }
     }
 
+    /// <summary>发送 1 秒测试音，用于验证"CABLE Output 有没有声音"。</summary>
+    public string PlayTestTone()
+    {
+        try
+        {
+            var msg = _router.PlayTestTone(1000);
+            return Env.Json(new { ok = true, message = msg });
+        }
+        catch (Exception e)
+        {
+            return Env.Json(new { ok = false, message = "发送测试音失败：" + e.Message });
+        }
+    }
+
     /// <summary>「截图点击」的试运行：就地执行一次，把结果（相似度/失败原因）回给界面。</summary>
     /// <summary>截图点击后是否"回到原位再点一下"（恢复输入焦点）。</summary>
     public string SetClickReturnOrigin(string v)
