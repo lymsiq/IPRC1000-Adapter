@@ -240,6 +240,9 @@ internal static class TemplateClick
         // 用"实际命中的模板"尺寸换算中心（缩放后模板边长会变）
         var cx = r.L + roiX + mx + (int)Math.Round(Settings.ClickTemplateX * sx);
         var cy = r.T + roiY + my + (int)Math.Round(Settings.ClickTemplateY * sy);
+        // 记住"点之前光标在哪"（通常就是输入框 —— 点回去能把焦点还给它）
+        var hadOrigin = GetCursorPos(out var before);
+
         if (!SetCursorPos(cx, cy))
             return $"找到了图标 ({cx},{cy})，但**移动光标失败**（被系统拒绝）。";
 
@@ -254,7 +257,24 @@ internal static class TemplateClick
                    "请让目标程序与本源程序（或目标程序）以相同权限运行。";
 
         var scaleNote = Math.Abs(sx - 1.0) < 0.01 ? "" : $"，缩放 {sx:F2}×";
-        return $"已在 ({cx},{cy}) 单击（相似度 {score:F2}{scaleNote}）。";
+        var tail = "";
+
+        // ★ 回到原位再点一下（把焦点还给输入框，否则之后的 Enter 发不出去）
+        if (Settings.ClickReturnToOrigin && hadOrigin &&
+            (Math.Abs(before.X - cx) > 4 || Math.Abs(before.Y - cy) > 4))
+        {
+            System.Threading.Thread.Sleep(120);          // 让刚才那一下先落到目标上
+            SetCursorPos(before.X, before.Y);
+            System.Threading.Thread.Sleep(60);
+            var d2 = MouseInjector.Left(true);
+            System.Threading.Thread.Sleep(30);
+            var u2 = MouseInjector.Left(false);
+            tail = (d2 && u2)
+                ? $"，并已回到原位 ({before.X},{before.Y}) 点了一下（恢复焦点）"
+                : "，但回原位点击被系统拒绝";
+        }
+
+        return $"已在 ({cx},{cy}) 单击（相似度 {score:F2}{scaleNote}）{tail}。";
     }
 
     private static string ProcOf(IntPtr h)

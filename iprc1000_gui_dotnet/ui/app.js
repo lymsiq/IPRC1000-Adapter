@@ -432,6 +432,18 @@ function buildKeyboard() {
       toast(r.message, 9000);
     };
     mo.appendChild(test);
+
+    // 「点完回到原位再点一下」：默认开。点目标按钮会让焦点落到按钮上，
+    // 之后 OK→Enter 就发不出去（真机现象）；点回原位能把焦点还给输入框。
+    const back = document.createElement('label');
+    back.style.cssText = 'display:inline-flex;align-items:center;gap:6px;margin-left:10px;font-size:12.5px;color:#556';
+    const backCB = document.createElement('input');
+    backCB.type = 'checkbox';
+    backCB.checked = !!(window.__clickBack !== false);
+    backCB.onchange = async () => { await B.setClickReturnOrigin(backCB.checked ? '1' : '0'); };
+    back.appendChild(backCB);
+    back.appendChild(document.createTextNode('点完回到原位再点一下（恢复焦点）'));
+    mo.appendChild(back);
   }
   mods.dataset.built = '1';
 }
@@ -1201,9 +1213,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.16',
+      version: '1.2.17',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.16（构建于 2026-10-19 08:40）',
+      versionLine: 'v1.2.17（构建于 2026-10-19 09:30）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

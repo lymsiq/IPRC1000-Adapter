@@ -101,6 +101,11 @@ internal static class Settings
         get => _data.ClickTitle;
         set { _data.ClickTitle = value; Save(); }
     }
+    public static bool ClickReturnToOrigin
+    {
+        get => _data.ClickReturnToOrigin;
+        set { _data.ClickReturnToOrigin = value; Save(); }
+    }
     public static int ClickRelX
     {
         get => _data.ClickRelX;
@@ -178,6 +183,14 @@ internal static class Settings
         public string ClickProcess { get; set; } = "";
         /// <summary>采集时目标窗口的标题（同进程多窗口时用于精确匹配）</summary>
         public string ClickTitle { get; set; } = "";
+        /// <summary>
+        /// 截图点击后**回到原来的光标位置再点一下**（默认开）。
+        ///
+        /// 为什么需要（2026-10-19 真机）：点目标按钮会让焦点落到那个按钮上，
+        /// 之后按 OK（Enter）就不再发给输入框 —— 表现为"Enter 发不出去"。
+        /// 点回原位（通常就是输入框）可以把焦点还回去。
+        /// </summary>
+        public bool ClickReturnToOrigin { get; set; } = true;
         public int ClickRelX { get; set; }
         public int ClickRelY { get; set; }
 

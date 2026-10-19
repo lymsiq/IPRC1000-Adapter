@@ -1356,6 +1356,20 @@ internal sealed class Backend : IDisposable
     }
 
     /// <summary>「截图点击」的试运行：就地执行一次，把结果（相似度/失败原因）回给界面。</summary>
+    /// <summary>截图点击后是否"回到原位再点一下"（恢复输入焦点）。</summary>
+    public string SetClickReturnOrigin(string v)
+    {
+        var on = v == "1";
+        Settings.ClickReturnToOrigin = on;
+        return Env.Json(new
+        {
+            ok = true,
+            message = on
+                ? "已开启：点完目标会回到原来的位置再点一下（恢复输入焦点）"
+                : "已关闭：只点目标，不回到原位"
+        });
+    }
+
     public string TestClickIcon()
     {
         try
