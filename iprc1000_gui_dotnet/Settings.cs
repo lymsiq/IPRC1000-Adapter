@@ -96,6 +96,22 @@ internal static class Settings
         get => _data.ClickProcess;
         set { _data.ClickProcess = value; Save(); }
     }
+    public static bool ClickLastOk
+    {
+        get => _data.ClickLastOk;
+        set { _data.ClickLastOk = value; Save(); }
+    }
+    public static int ClickLastX
+    {
+        get => _data.ClickLastX;
+        set { _data.ClickLastX = value; Save(); }
+    }
+    public static int ClickLastY
+    {
+        get => _data.ClickLastY;
+        set { _data.ClickLastY = value; Save(); }
+    }
+
     public static string ClickTitle
     {
         get => _data.ClickTitle;
@@ -194,6 +210,11 @@ internal static class Settings
         /// <summary>采集时光标相对**目标窗口左上角**的位置；多处同形图标时用它挑对的那个</summary>
         /// <summary>采集时目标窗口所属进程名（类名通用的场景靠它确认是同一个程序）</summary>
         public string ClickProcess { get; set; } = "";
+        /// <summary>上次命中点（窗口内坐标）—— SikuliX 的 "still-there" 预检用，省掉整段搜索</summary>
+        public bool ClickLastOk { get; set; }
+        public int ClickLastX { get; set; }
+        public int ClickLastY { get; set; }
+
         /// <summary>采集时目标窗口的标题（同进程多窗口时用于精确匹配）</summary>
         public string ClickTitle { get; set; } = "";
         /// <summary>

@@ -31,18 +31,27 @@ namespace Iprc1000Adapter;
 ///
 /// - 目标窗口必须可见（不能完全被其他窗口挡住，因为用的是屏幕截取）；
 /// - 主题/缩放变化会让模板失效 —— 重新采集一次即可；
-/// - 匹配阈值 0.72，低于它就不点（宁可不动，也不要在错误位置乱点）。
+/// - 匹配阈值 **0.80**（SikuliX 默认 0.7，但其文档说"要防误点应 >0.85"）；
+///   低于它就不点 —— 宁可不动，也不要在错误位置乱点。
 /// </summary>
 internal static class TemplateClick
 {
     private const int LearnSize = 44;      // 采集边长
-    private const double MinScore = 0.72;  // 置信度门槛
+    /// <summary>
+    /// 置信度门槛。**0.72 → 0.80**（2026-10-19 参考 SikuliX 的经验）：
+    /// SikuliX 默认 0.7，但其文档明确"要防误点应取 **>0.85**，0.7 会带来假阳性"。
+    /// 我们宁可"不点"也不能"点错"，所以取 0.80 作为下限；
+    /// 面板/采集提示里继续以 0.85 作为"建议重采"的界线。
+    /// </summary>
+    private const double MinScore = 0.80;
     private const int MaxW = 3000, MaxH = 1600; // 窗口尺寸上限（防御异常窗口）
     /// <summary>在采集位置附近多大范围内找（±像素）。大窗口全遍历要几秒，收窄到这块足够快。</summary>
     private const int SearchRadius = 120;
     /// <summary>失败时先试这些缩放比（应对 DPI / 窗口缩放 / 主题字号变化）</summary>
     private static readonly double[] Rescales = { 0.80, 0.90, 1.10, 1.25 };
     private const int WideRadius = 300;   // 全缩放都失败后，再放宽一次搜索半径
+    /// <summary>"still-there" 预检：上次命中点附近这个半径内先试一次（SikuliX 的核心加速手段）</summary>
+    private const int StillThereRadius = 24;
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr FindWindowW(string cls, string? name);
@@ -92,7 +101,8 @@ internal static class TemplateClick
                 return $"采集失败：光标周围几乎是一片纯色（标准差仅 {sd:F1}）。" +
                        "请把鼠标**正对着图标的图案中心**再试一次。";
 
-            Settings.ClickTemplate = ToBase64(bmp);
+                Settings.ClickTemplate = ToBase64(bmp);
+            Settings.ClickLastOk = false;      // 模板换了，旧的命中点作废
         }
 
         // 光标所在处 → 顶层窗口的类名（DirectUI 的子窗口可能不是它，所以取 root）
@@ -147,7 +157,7 @@ internal static class TemplateClick
             Settings.ClickRelY = p.Y - wr.T;
         }
         return $"已采集 {LearnSize}×{LearnSize} 图标（进程 {procName} / 窗口 `{cls}`）。" +
-               "请立刻点「试一下截图点击」验证：相似度 ≥0.90 很好；0.72~0.85 建议把鼠标对准图标更中心处重采。" +
+               "请立刻点「试一下截图点击」验证：相似度 ≥0.90 很好；0.80~0.85 建议把鼠标对准图标更中心处重采。" +
                "（采集时若图标处于悬停高亮态，请挪开再回来重采 —— 高亮态和常态长得不一样）";
     }
 
@@ -208,9 +218,39 @@ internal static class TemplateClick
         if (roiW <= tpl.Width || roiH <= tpl.Height)
             return $"窗口太小或采集位置超出（{w}×{h}），请重新采集。";
 
+        // ★ 0) "still-there" 预检（SikuliX 的做法）：
+        //   如果上次命中过，目标通常还在同一个位置 —— 先在那附近 ±24px 做一次**极小范围**
+        //   匹配（几十个位置，约 1ms）。命中就直接用它，省掉整段搜索。
+        double score = 0; int mx = 0, my = 0; double sx = 1.0, sy = 1.0;
+        var hadCache = Settings.ClickLastOk &&
+                       Settings.ClickLastX > 0 && Settings.ClickLastY > 0;
+        if (hadCache)
+        {
+            var cx0 = Math.Clamp(Settings.ClickLastX - Settings.ClickTemplateX, 0, Math.Max(0, w - tpl.Width));
+            var cy0 = Math.Clamp(Settings.ClickLastY - Settings.ClickTemplateY, 0, Math.Max(0, h - tpl.Height));
+            var px = Math.Max(0, cx0 - StillThereRadius);
+            var py = Math.Max(0, cy0 - StillThereRadius);
+            var pw = Math.Min(w - px, StillThereRadius * 2 + tpl.Width);
+            var ph = Math.Min(h - py, StillThereRadius * 2 + tpl.Height);
+            if (pw > tpl.Width && ph > tpl.Height)
+            {
+                var (sc0, x0, y0, _, _, _) = FindBest(shot, tpl, px, py, pw, ph, 1.0);
+                if (sc0 >= MinScore)
+                {
+                    score = sc0; mx = x0; my = y0;
+                    roiX = px; roiY = py;          // 让后面的坐标换算用同一个原点
+                    Safe.Note($"CLICK still-there 命中（相似度 {sc0:F2}，省掉整段搜索）");
+                }
+            }
+        }
+
         // 三段式：① 原尺寸、近处快查（~0.1s）；② 换几个尺度（DPI/缩放变化）；
         //         ③ 仍失败就放宽搜索半径（布局挪动）。三段都失败才放弃。
-        var (score, mx, my, sx, sy, _) = FindBest(shot, tpl, roiX, roiY, roiW, roiH, 1.0);
+        if (score < MinScore)
+        {
+        var (s1, x1, y1, sx1, sy1, _) = FindBest(shot, tpl, roiX, roiY, roiW, roiH, 1.0);
+        score = s1; mx = x1; my = y1; sx = sx1; sy = sy1;
+        }
         if (score < MinScore)
         {
             foreach (var k in Rescales)
@@ -255,6 +295,11 @@ internal static class TemplateClick
         if (!down || !up)
             return $"找到图标 ({cx},{cy})，但**点击被系统拒绝**（前台窗口权限更高）。" +
                    "请让目标程序与本源程序（或目标程序）以相同权限运行。";
+
+        // 记住命中点（窗口内坐标）—— 下次先做 still-there 预检
+        Settings.ClickLastX = cx - r.L;
+        Settings.ClickLastY = cy - r.T;
+        Settings.ClickLastOk = true;
 
         var scaleNote = Math.Abs(sx - 1.0) < 0.01 ? "" : $"，缩放 {sx:F2}×";
         var tail = "";

@@ -5,6 +5,47 @@
 
 ---
 
+## [1.2.31] - 2026-10-19
+
+### 截图点击：借 SikuliX 的两条经验 —— **still-there 预检** + **阈值提到 0.80**
+
+#### 调研（SikuliX 官方文档）
+
+> - `matchTemplate()` 返回每个位置的相似度 0~1，**">0.7-0.8 表示很可能在这里"**；
+> - "**只把 >0.7 当作找到**"是它的默认值，但文档同时强调：
+>   **"To make your scripts robust against false positives, you should take care to get
+>   similarity scores >0.85 or even >0.9."**
+> - **"SikuliX implements a still-there-feature: before searching in the search region,
+>   it is first checked, whether the image is still in the same place as at the time of
+>   the last search. On success, this preflight operation usually takes some milliseconds."**
+
+#### 改动一：阈值 0.72 → **0.80**
+
+我们原来的 0.72 比 SikuliX 默认的 0.7 还低，接近"假阳性"区间。截图点击是**会真的点下去**的动作，
+宁可不点也不能点错 ⇒ 取 **0.80**（采集提示里仍以 0.85 作为"建议重采"的界线）。
+
+#### 改动二：**still-there 预检**（提速的主要来源）
+
+```
+① 上次命中过？ → 在上次命中点 ±24px 的极小范围里匹配（几十个位置，约 1ms）
+   ├ 命中（≥0.80）⇒ 直接用，**省掉整段搜索**
+   └ 落空 ⇒ 走原来的三段式（原尺寸 → 4 个缩放 → 放宽 ±300px）
+```
+
+- 命中点写入 `settings.json`（`ClickLastX/Y`），采集新模板时**作废**；
+- 日志留痕：`CLICK still-there 命中（相似度 0.93，省掉整段搜索）`。
+
+典型收益：**连续使用时从 ~100 ms 降到 ~1-3 ms**（SikuliX 原话："usually takes some milliseconds"）。
+
+#### 参考里看过但**这次没做**的
+
+| 做法 | 为什么没做 |
+|---|---|
+| 失败重试（扫描 3 次/秒、超时 3 秒）| 我们是"按键触发的一次性动作"，等 3 秒反而让用户以为卡住；失败已明确报错 |
+| 边缘/梯度匹配（抗主题变化）| 收益大但要重写匹配核，留作下一版（若换深色主题需重采时再做） |
+| 多模板（常态/悬停/深色各一张）| 需要改采集交互，收益待验证 |
+| 全局扫描（不限 ROI）| 大窗口全扫要 2~3 秒，与"按键要立刻响应"冲突 |
+
 ## [1.2.30] - 2026-10-19
 
 ### 抖动缓冲上限 `CapMs`：**96 → 160 ms**（查同领域实现后定）
