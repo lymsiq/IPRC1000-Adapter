@@ -397,12 +397,26 @@ function buildKeyboard() {
     mo.appendChild(hint);
 
     // 采集图标：把鼠标停在目标按钮上再点这里
+    // ★ 采集必须**倒计时**：点按钮时鼠标在按钮上，而采集取的是"当前光标位置" ——
+    //   如果立刻采，采到的永远是按钮自己（真机就这样把自己的窗口采成了目标）。
+    //   所以点下后给 3 秒，让用户把鼠标移到目标图标上。
     const learn = document.createElement('button');
     learn.className = 'btn ghost';
     learn.style.marginTop = '6px';
-    learn.textContent = '采集图标（把鼠标停在目标按钮上再点）';
+    learn.textContent = '采集图标（点这里，然后把鼠标移到目标按钮上，3 秒后自动采集）';
+    let counting = false;
     learn.onclick = async () => {
+      if (counting) return;
+      counting = true;
+      const old = learn.textContent;
+      for (let n = 3; n > 0; n--) {
+        learn.textContent = `★ ${n} 秒后采集 —— 现在把鼠标移到目标按钮上！`;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      learn.textContent = '正在采集…';
       const r = JSON.parse(await B.learnClickIcon());
+      learn.textContent = old;
+      counting = false;
       toast(r.message, 9000);
     };
     mo.appendChild(learn);
@@ -1187,9 +1201,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.14',
+      version: '1.2.15',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.14（构建于 2026-10-19 07:45）',
+      versionLine: 'v1.2.15（构建于 2026-10-19 08:05）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
