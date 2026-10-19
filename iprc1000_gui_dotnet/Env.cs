@@ -13,7 +13,87 @@ internal static class Env
     public const string AppName = "IPRC1000 Adapter";
     public const string RegPath = @"SYSTEM\CurrentControlSet\Services\BthPort\Parameters";
     public const int PcmPort = 31680;
-    public const string RemoteMac = "20c0470a3483";
+    /// <summary>
+    /// 出厂那台遥控器的 MAC —— **仅作最后兜底**。
+    ///
+    /// ★ 2026-10-19 真机问题：这个值原来是 `const` 且被三处直接使用，
+    ///   换**另一只同名遥控器**后（真机注册表里同时存在 3 只 `IPRC1000`：
+    ///   `20c0470a3483` / `20c047f313d6` / `20c047f31941`），面板永远显示
+    ///   "已配对·休眠中 / HID 节点不在线 / 蓝牙节点不在线" —— 因为只认这一个 MAC。
+    ///   现在改为**按蓝牙设备名动态识别**（见 <see cref="PairedRemoteMacs"/>）。
+    /// </summary>
+    public const string LegacyRemoteMac = "20c0470a3483";
+
+    /// <summary>蓝牙里遥控器的设备名关键字（用于识别"哪些配对设备是遥控器"）</summary>
+    private const string RemoteNameHint = "IPRC";
+
+    private static (DateTime at, List<string> macs) _macCache = (DateTime.MinValue, new());
+
+    /// <summary>
+    /// **所有已配对的遥控器 MAC**（按 `BTHPORT\Parameters\Devices\{mac}` 的 `Name` 识别）。
+    /// 缓存 5 秒，避免面板轮询时反复读注册表。
+    /// </summary>
+    public static List<string> PairedRemoteMacs()
+    {
+        if ((DateTime.UtcNow - _macCache.at).TotalSeconds < 5) return _macCache.macs;
+        var list = new List<string>();
+        try
+        {
+            using var k = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices", false);
+            if (k != null)
+            {
+                foreach (var mac in k.GetSubKeyNames())
+                {
+                    try
+                    {
+                        using var d = k.OpenSubKey(mac, false);
+                        var v = d?.GetValue("Name");
+                        string name;
+                        if (v is byte[] b) name = System.Text.Encoding.UTF8.GetString(b).TrimEnd('\0');
+                        else name = v as string ?? "";
+                        if (name.IndexOf(RemoteNameHint, StringComparison.OrdinalIgnoreCase) >= 0)
+                            list.Add(mac.ToLowerInvariant());
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch { }
+        _macCache = (DateTime.UtcNow, list);
+        return list;
+    }
+
+    /// <summary>当前使用的遥控器 MAC：**优先在线的那只**，其次第一只，最后回退出厂值。</summary>
+    public static string RemoteMac
+    {
+        get
+        {
+            var macs = PairedRemoteMacs();
+            foreach (var m in macs)
+            {
+                // BTHENUM 里有 DEV_<MAC> 且至少一个子实例在线 ⇒ 这一只在线
+                foreach (var top in SubKeys(Registry.LocalMachine, @"SYSTEM\CurrentControlSet\Enum\BTHENUM"))
+                {
+                    if (!top.ToLowerInvariant().Contains(m)) continue;
+                    foreach (var inst in SubKeys(Registry.LocalMachine, $@"SYSTEM\CurrentControlSet\Enum\BTHENUM\{top}"))
+                        if (DevNodeStarted($@"BTHENUM\{top}\{inst}")) return m;
+                }
+            }
+            return macs.Count > 0 ? macs[0] : LegacyRemoteMac;
+        }
+    }
+
+    /// <summary>这个 HID 顶层节点是不是遥控器的（不写死 PID；同名设备换一只也能认出来）</summary>
+    private static bool IsRemoteHid(string lowTop)
+    {
+        // ① 同型号遥控器走 Broadcom 蓝牙 HID（VID_0A5C）——只校验 VID，**不校验 PID**
+        //    （原来写死 `8502`，换一只 PID 不同就漏掉）
+        if (lowTop.Contains("vid_0a5c")) return true;
+        // ② 实例路径里带遥控器 MAC 的也算（有些堆栈会这么拼）
+        foreach (var m in PairedRemoteMacs())
+            if (lowTop.Contains(m)) return true;
+        return false;
+    }
 
     /// <summary>
     /// `%APPDATA%\IPRC1000 Adapter` —— 配置、日志、语音桥统计都放这里。
@@ -179,19 +259,21 @@ internal static class Env
         foreach (var top in SubKeys(Registry.LocalMachine, @"SYSTEM\CurrentControlSet\Enum\HID"))
         {
             var low = top.ToLowerInvariant();
-            if (!(low.Contains("0a5c") && low.Contains("8502"))) continue;
+            if (!IsRemoteHid(low)) continue;
             foreach (var inst in SubKeys(Registry.LocalMachine, $@"SYSTEM\CurrentControlSet\Enum\HID\{top}"))
                 hid.Add(new { id = $"HID\\{top}\\{inst}", online = DevNodeStarted($"HID\\{top}\\{inst}") });
         }
+        // 蓝牙节点：**遍历所有候选 MAC**（换一只遥控器也能认出来）
+        var macs = PairedRemoteMacs();
         foreach (var top in SubKeys(Registry.LocalMachine, @"SYSTEM\CurrentControlSet\Enum\BTHENUM"))
         {
-            if (!top.ToLowerInvariant().Contains(RemoteMac)) continue;
+            var lowT = top.ToLowerInvariant();
+            if (!macs.Any(m => lowT.Contains(m)) && !lowT.Contains(LegacyRemoteMac)) continue;
             foreach (var inst in SubKeys(Registry.LocalMachine, $@"SYSTEM\CurrentControlSet\Enum\BTHENUM\{top}"))
                 bth.Add(new { id = $"BTHENUM\\{top}\\{inst}", online = DevNodeStarted($"BTHENUM\\{top}\\{inst}") });
         }
-        bool paired;
-        using (var k = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices", false))
-            paired = k?.GetSubKeyNames().Any(s => s.Equals(RemoteMac, StringComparison.OrdinalIgnoreCase)) ?? false;
+        // 已配对：只要**任意一只**遥控器在 BTHPORT 里就算（原来只认一个写死的 MAC）
+        bool paired = macs.Count > 0;
 
         bool Online(List<object> list) => list.Any(o => (bool)o.GetType().GetProperty("online")!.GetValue(o)!);
         return (Online(hid) || Online(bth), paired, hid, bth);
@@ -295,7 +377,7 @@ internal static class Env
         foreach (var top in SubKeys(Registry.LocalMachine, @"SYSTEM\CurrentControlSet\Enum\HID"))
         {
             var low = top.ToLowerInvariant();
-            if (!(low.Contains("0a5c") && low.Contains("8502"))) continue;
+            if (!IsRemoteHid(low)) continue;
             foreach (var inst in SubKeys(Registry.LocalMachine, $@"SYSTEM\CurrentControlSet\Enum\HID\{top}"))
             {
                 using var k = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Enum\HID\{top}\{inst}", false);
@@ -312,8 +394,7 @@ internal static class Env
     {
         foreach (var top in SubKeys(Registry.LocalMachine, @"SYSTEM\CurrentControlSet\Enum\HID"))
         {
-            var low = top.ToLowerInvariant();
-            if (low.Contains("0a5c") && low.Contains("8502")) return true;
+            if (IsRemoteHid(top.ToLowerInvariant())) return true;
         }
         return false;
     }

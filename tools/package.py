@@ -192,6 +192,7 @@ SRC_REQUIRED = [
     ("音频释放只在长时间静默后兜底", "iprc1000_gui_dotnet/Backend.cs", "silent < 5000"),
     ("映射页说明鼠标左键用法", "iprc1000_gui_dotnet/ui/app.js", "在<b>光标当前位置</b>单击一次"),
     ("异常留痕与日志治理", "iprc1000_gui_dotnet/Safe.cs", "只保留当天的日志"),
+    ("遥控器按名字动态识别", "iprc1000_gui_dotnet/Env.cs", "PairedRemoteMacs"),
     ("配置原子写", "iprc1000_gui_dotnet/Settings.cs", "File.Replace(tmp, File_, File_ + \".bak\""),
     ("截图点击：模板匹配实现", "iprc1000_gui_dotnet/TemplateClick.cs", "归一化互相关"),
     ("截图点击：动作哨兵 -6", "iprc1000_gui_dotnet/KeyAct.cs", "ClickIcon = -6"),
