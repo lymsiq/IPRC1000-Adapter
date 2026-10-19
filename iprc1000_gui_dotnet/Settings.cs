@@ -101,6 +101,11 @@ internal static class Settings
         get => _data.ClickTitle;
         set { _data.ClickTitle = value; Save(); }
     }
+    public static bool VoiceAudioRelease
+    {
+        get => _data.VoiceAudioRelease;
+        set { _data.VoiceAudioRelease = value; Save(); }
+    }
     public static bool ClickReturnToOrigin
     {
         get => _data.ClickReturnToOrigin;
@@ -193,6 +198,17 @@ internal static class Settings
         public bool ClickReturnToOrigin { get; set; } = true;
         public int ClickRelX { get; set; }
         public int ClickRelY { get; set; }
+
+        /// <summary>
+        /// 「音频静默就释放语音键」——**默认关闭**（2026-10-19 真机）。
+        ///
+        /// 这条是 v1.2.7 为了"UP 丢了也能放开"加的保险。但遥控器在**不说话时会停止出流**
+        /// （VAD 行为），于是"按住想一下再说"会被判成"静默超时"⇒ 右 Alt 被主动放掉
+        /// ⇒ 豆包显示"已识别"，用户以为按键自己弹起来了。
+        /// UP 路径在 v1.2.50 之后已可靠，这条反而成了主要误伤源，因此默认关闭。
+        /// 若哪天又出现"松开不弹起"，可在设置里重新打开。
+        /// </summary>
+        public bool VoiceAudioRelease { get; set; }
 
         /// <summary>配置版本号，用于一次性迁移（0 = v1.2.14 及更早）</summary>
         public int SchemaVersion { get; set; }

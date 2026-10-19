@@ -350,6 +350,10 @@ internal sealed class Backend : IDisposable
     /// </summary>
     private void AudioDrivenVoiceRelease()
     {
+        // ★★ 2026-10-19（真机"还没说话就自动弹起"）：默认**不做**这件事。
+        //   遥控器不说话时会停止出流 ⇒ "按住想一下"被误判成静默超时 ⇒ 主动放掉右 Alt。
+        //   UP 路径已可靠（v1.2.50），这条只作可选的兜底。
+        if (!Settings.VoiceAudioRelease) return;
         if (_filter is not { } f) return;
         if (!f.IsOnlyHeld("voice")) return;
 
@@ -745,6 +749,7 @@ internal sealed class Backend : IDisposable
                 ["watchdogMs"] = KeyFilter.HoldTimeoutMs,
                 // ★ 面板上要显示的是**语音键**的判据（音频静默阈值），不是 Raw Input 的静默超时
                 ["voiceSilentMs"] = StuckGuard.VoiceSilentMs,
+                ["voiceAudioRelease"] = Settings.VoiceAudioRelease,
                 ["voiceGraceSec"] = (long)StuckGuard.VoiceGraceSec,
             },
             ["bind"] = new JsonObject
