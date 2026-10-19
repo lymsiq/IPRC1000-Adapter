@@ -308,6 +308,26 @@ def scenario_ghost_before_first_key():
     return out
 
 
+def scenario_other_key_during_hold():
+    """★★★ 2026-10-19「按住语音键没说话、Alt 自己弹起」的回归用例。
+
+    真机机制：遥控器按住语音键期间会插一条**别的按键**报文（实测见过 0x05）。
+    按"整份快照"对账 ⇒ 那条报文里没有 0x10 ⇒ 判定语音键"松开" ⇒ 注入的右 Alt 被放掉。
+
+    修法：**语音键（0x10）只认"空报文"为松手**；非空报文里没有它，不算松手。
+
+    断言：`[0x10]` → `[0x05]` → `[]`
+    正确结果：只有 `10 DOWN` 和 `10 UP` 两条（中间的 0x05 不动语音键）。
+    老实现会多出一条 `10 UP`（在 0x05 那条上误判）。
+    """
+    out = b""
+    out += emit_hid_multi(out, [])          # 基线
+    out += emit_hid_multi(out, [0x10])      # 按住语音键
+    out += emit_hid_multi(out, [0x05])      # 按住期间插进来的别的键 —— 不许释放语音键
+    out += emit_hid_multi(out, [])          # 真正松手
+    return out
+
+
 def scenario_audio_with_keys(audio=20, keys=10):
     """音频与按键**交替**到达：音频一帧不丢、按键一条不落。"""
     out = b""
@@ -489,6 +509,11 @@ CASES = [
     ("⑫ 长按后空档 700ms 才松开 —— **UP 必须发出去**（否则右 Alt 永久卡键）",
      scenario_long_hold_release(),
      dict(frames=0, key_seq=["10 DOWN", "10 UP"]), True),
+
+    ("⑮ 按住语音键期间来了别的按键报文 —— **不许因此释放语音键**",
+     scenario_other_key_during_hold(),
+     # 06/05 自己仍要正常出事件；关键是 **10 UP 只有一条，且出现在最后**
+     dict(frames=0, key_seq=["10 DOWN", "05 DOWN", "05 UP", "10 UP"])),
 
     ("⑭ 先来一条幽灵心跳、再按语音键 —— **不许把真实按下当成基线吃掉**",
      scenario_ghost_before_first_key(),
