@@ -430,6 +430,24 @@ internal sealed class Backend : IDisposable
 
             AutoSwitchDriver();
             try { AutoSelectKeySource(); } catch { }
+
+            // ★★★ 2026-10-19（真机三段式：第1次无反应 / 第2次有图标但不录 / 第3次正常）
+            //   虚拟 HID 设备原本是**首次按键时才创建**（日志里 `虚拟 HID 设备已创建` 出现在第一次注入前）。
+            //   而设备刚被创建时 Windows 正在**枚举这个新键盘**：
+            //     · 第 1 次按下 → 系统还没把新设备接上 ⇒ 按键被丢（完全无反应）
+            //     · 第 2 次按下 → 输入法刚发现"多了个键盘"，只显示麦克风图标、不进入录音
+            //     · 第 3 次 → 一切就绪 ⇒ 正常
+            //   启动时就把它建好，让枚举在用户按键之前完成。
+            //   ⚠ 只建**设备**、**绝不发报告**：启动时发空报告会让 Windows 给所有键补发
+            //     KEYUP（含 Apps 键），历史上表现为"开机自动弹出右键菜单"。
+            try
+            {
+                if (WinUhidInjector.EnsureReady())
+                    EtwKeySource.AppendLog("INJ  虚拟 HID 设备已预创建（启动预热，避免首次按键被吞）");
+                else
+                    EtwKeySource.AppendLog($"INJ  虚拟 HID 预创建未成功：{WinUhidInjector.LastError ?? "未知"}（首次按键时再试）");
+            }
+            catch (Exception e) { Safe.Log(e, "启动预创建虚拟 HID 失败"); }
         }
         catch { }
     }
