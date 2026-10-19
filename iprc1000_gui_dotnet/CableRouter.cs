@@ -130,6 +130,20 @@ internal sealed class CableRouter : IDisposable
                 (DateTime.UtcNow - _voiceDownAt).TotalMilliseconds < 400)
                 return;
             _voiceDownAt = DateTime.UtcNow;
+
+            // ★★ 2026-10-19（真机"麦克风图标出现但音量指示不动"）：
+            //   图标 = 输入法收到了"右 Alt 按下"这**个键盘事件**（延迟 ~10ms）；
+            //   电平 = 输入法从**默认录音设备**收到 PCM（首包实测双峰：10~30ms 或 468~538ms）。
+            //   若按住时间短于首包延迟（常见 500ms 左右），就会"图标闪一下、电平一格都没动"。
+            //   这里在按下 1200ms 后仍无音频时留一条明确诊断（首包到达会把 _voiceDownAt 清掉）。
+            var stamp = _voiceDownAt;
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                await System.Threading.Tasks.Task.Delay(1200);
+                if (_voiceDownAt == stamp)
+                    Log("[LAT] ⚠ 按下 1200 ms 仍无音频 —— 遥控器还没开始出流" +
+                        "（短按 < 首包延迟 / 信号弱 / 遥控器刚被唤醒）");
+            });
         }
         if (!_running) return;
         var t0 = DateTime.UtcNow;

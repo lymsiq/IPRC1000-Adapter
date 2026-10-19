@@ -845,6 +845,14 @@ impl Bridge {
         //   ⇒ 每条（段）会话的第一条报文只记账：早已按着的键不算"刚按下"，
         //     用户真正需要的按键事件从第二条报文开始，代价是 20 ms。
         if !self.seeded {
+            // ★ 基线规则只在**启动后 1.5 秒内**生效。
+            //   超过这个时间还出现"首份报文"，说明是用户真的按下了（不是启动时设备就已抱着键），
+            //   必须正常对账、发出 DOWN —— 否则"启动后第一次按下被吞"这个 bug 会一直存在。
+            if self.started.elapsed().as_millis() > 1500 {
+                self.seeded = true;
+                self.stats.lock().unwrap().seed_reports += 0;   // 不计入"基线吞掉"
+                // 落到下面的正常差分逻辑（held 初始为空 ⇒ 会正常发 DOWN）
+            } else {
             self.seeded = true;
 
             // ★★★ 2026-10-18（真机卡键，反复出现）：空档期间**被松开的键必须补发 UP**。
@@ -874,6 +882,7 @@ impl Bridge {
             self.held = now;
             self.stats.lock().unwrap().seed_reports += 1;
             return;
+            }
         }
         // ★★★ 2026-10-18（真机日志铁证）：**只含"幽灵 usage"的报文不是键盘快照**。
         //

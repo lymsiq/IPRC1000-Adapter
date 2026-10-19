@@ -416,10 +416,20 @@ internal sealed class Backend : IDisposable
             // ★ 启动兜底：清掉上一次异常退出（例如被强杀）残留的「按着不放」的注入键。
             //   最要命的是右 Alt(AltGr) —— 卡住会让字母键输出特殊字符、中文输入法失效。
             try { KeyFilter.ReleaseAllInjected(); } catch { }
-            RefreshProbes(true);
+
+            RefreshProbes(true);          // ← 必须先跑：它才会设置 _cableReady（起桥的前置条件）
+
+            // ★★ 2026-10-19（真机"启动后 3~5 秒内按语音键无响应"）：
+            //   原来顺序是 RefreshProbes → AutoSwitchDriver → AutoSelectKeySource → 起桥，
+            //   而切驱动实测要 1~2 秒、选来源也要时间 ⇒ 桥要 2.5 秒后才开始监听 ETW，
+            //   这段时间遥控器的按键**根本没有接收者**（界面表现为完全无响应）。
+            //   桥只依赖 ETW + 音频设备，**不依赖驱动切换** ⇒ 提到切驱动之前。
+            //   ⚠ 不能提到 RefreshProbes 之前：_cableReady 还没设，MaybeAutoStartBridge 会直接 return
+            //     （真机 A/B 实测：那样桥 20 秒都不启动）。
+            try { MaybeAutoStartBridge(); } catch { }
+
             AutoSwitchDriver();
             try { AutoSelectKeySource(); } catch { }
-            try { MaybeAutoStartBridge(); } catch { }
         }
         catch { }
     }
