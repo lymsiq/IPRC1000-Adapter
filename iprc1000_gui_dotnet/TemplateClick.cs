@@ -111,6 +111,20 @@ internal static class TemplateClick
             if (pid != 0) procName = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName;
         }
         catch { }
+
+        // ★ 采集前必须排除"本程序自己"。
+        //   真机出现过：用户在弹窗上点「采集图标」⇒ 记下了 IPRC1000 Adapter 自己的窗口，
+        //   消息还显示"采集成功"（看着完全正常），之后每次触发都在自己窗口里找图标。
+        try
+        {
+            var self = System.Diagnostics.Process.GetCurrentProcess().ProcessName;
+            if (!string.IsNullOrEmpty(procName) &&
+                string.Equals(procName, self, StringComparison.OrdinalIgnoreCase))
+                return $"采集失败：光标停在本程序自己的窗口上（进程 {procName}）。" +
+                       "请把鼠标移到**目标程序**的那个按钮上再点「采集图标」。";
+        }
+        catch { }
+
         Settings.ClickProcess = procName;
         try
         {

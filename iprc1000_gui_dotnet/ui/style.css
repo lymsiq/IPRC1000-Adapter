@@ -180,6 +180,10 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
   position:fixed;left:50%;bottom:30px;transform:translateX(-50%) translateY(16px);
   background:rgba(31,42,55,.93);color:#fff;padding:11px 20px;border-radius:11px;font-size:13.5px;
   opacity:0;transition:.22s;pointer-events:none;max-width:70vw;
+  /* ★ 2026-10-19 修：.mask 是 z-index:60 且带 backdrop-filter:blur(2px)，
+     #toast 原来没有 z-index ⇒ 被压在遮罩**下面**，还被模糊滤镜糊掉（真机"文字模糊、被挡在后面"）。
+     toast 必须盖在所有遮罩之上。 */
+  z-index:999;white-space:pre-line;
 }
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
