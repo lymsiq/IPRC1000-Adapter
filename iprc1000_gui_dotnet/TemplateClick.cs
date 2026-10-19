@@ -55,6 +55,9 @@ internal static class TemplateClick
     [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT p);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowTextW(IntPtr h, System.Text.StringBuilder sb, int max);
 
     private const uint GA_ROOT = 2;
     [StructLayout(LayoutKind.Sequential)] private struct RECT { public int L, T, R, B; }
@@ -73,6 +76,22 @@ internal static class TemplateClick
         {
             using (var g = Graphics.FromImage(bmp))
                 g.CopyFromScreen(x, y, 0, 0, new Size(LearnSize, LearnSize), CopyPixelOperation.SourceCopy);
+
+            // ★ 采集必须校验"这块地方真的有图案"。
+            //   在纯色空白处采集，模板方差≈0 ⇒ 匹配永远返回 0 ⇒ 之后每次点都失败，
+            //   而当时却提示"采集成功" —— 这是最误导人的一种失败。
+            var gray = ToGray(bmp);
+            double mean = 0;
+            foreach (var v in gray) mean += v;
+            mean /= gray.Length;
+            double var2 = 0;
+            foreach (var v in gray) { var d = v - mean; var2 += d * d; }
+            var2 /= gray.Length;
+            var sd = Math.Sqrt(var2);
+            if (sd < 6.0)
+                return $"采集失败：光标周围几乎是一片纯色（标准差仅 {sd:F1}）。" +
+                       "请把鼠标**正对着图标的图案中心**再试一次。";
+
             Settings.ClickTemplate = ToBase64(bmp);
         }
 
@@ -93,6 +112,13 @@ internal static class TemplateClick
         }
         catch { }
         Settings.ClickProcess = procName;
+        try
+        {
+            var sbT = new System.Text.StringBuilder(512);
+            GetWindowTextW(root, sbT, sbT.Capacity);
+            Settings.ClickTitle = sbT.ToString();
+        }
+        catch { }
 
         Settings.ClickWindowClass = cls;
         Settings.ClickTemplateX = p.X - x;   // 模板中心相对模板左上角（一般就是 half）
@@ -100,12 +126,18 @@ internal static class TemplateClick
 
         // 记住"图标在窗口里的相对位置" —— 工具栏上可能有多个长得一样的图标，
         // 光靠模板会点错第一个，用它才能挑对。
+        if (IsIconic(root)) return "采集失败：目标窗口处于最小化状态，请先恢复窗口。";
         if (GetWindowRect(root, out var wr))
         {
             Settings.ClickRelX = p.X - wr.L;
             Settings.ClickRelY = p.Y - wr.T;
         }
-        return $"已采集 {LearnSize}×{LearnSize} 图标（窗口类名 `{cls}`）。之后按动作键就会在它附近找并点击。";
+        return $"已采集 {LearnSize}×{LearnSize} 图标（进程 {procName} / 窗口 `{cls}`）。" +
+               "请立刻点「试一下截图点击」验证：
+" +
+               "· 相似度 ≥0.90 → 很好；0.72~0.85 → 勉强可用，建议把鼠标对准图标更中心处重采；
+" +
+               "· 若采集时图标处于**悬停高亮**状态，请把鼠标挪开再回来重新采集（高亮态和常态长得不一样）。";
     }
 
     /// <summary>触发：在目标窗口里找模板并点击。返回给人看的说明。</summary>
@@ -116,9 +148,18 @@ internal static class TemplateClick
         if (string.IsNullOrEmpty(b64) || string.IsNullOrEmpty(cls))
             return "还没采集图标：先在「按键映射」页把鼠标停在目标按钮上，点「采集图标」。";
 
-        IntPtr hwnd;
-        try { hwnd = FindWindowW(cls, null); }
-        catch { hwnd = IntPtr.Zero; }
+        // 先按**标题**精确找（同一进程常有多个同类名窗口：主窗、浮层、隐藏窗）。
+        IntPtr hwnd = IntPtr.Zero;
+        var title = Settings.ClickTitle;
+        if (!string.IsNullOrEmpty(title))
+        {
+            try { hwnd = FindWindowW(cls, title); } catch { hwnd = IntPtr.Zero; }
+        }
+        if (hwnd == IntPtr.Zero)
+        {
+            try { hwnd = FindWindowW(cls, null); }
+            catch { hwnd = IntPtr.Zero; }
+        }
 
         // ★ `Chrome_WidgetWin_1` 是所有 Electron 应用共用的类名（Edge/VS Code/WorkBuddy…）。
         //   只按类名找会拿到**别的程序**的窗口 —— 必须核对进程名，不匹配就换一个。
@@ -130,6 +171,8 @@ internal static class TemplateClick
         }
         if (hwnd == IntPtr.Zero || !IsWindowVisible(hwnd))
             return $"找不到可见的窗口 `{cls}`（目标界面没打开？）";
+        if (IsIconic(hwnd))
+            return $"窗口 `{cls}` 处于最小化状态，请先恢复窗口。";
 
         GetWindowRect(hwnd, out var r);
         var w = r.R - r.L;
@@ -186,11 +229,19 @@ internal static class TemplateClick
         // 用"实际命中的模板"尺寸换算中心（缩放后模板边长会变）
         var cx = r.L + roiX + mx + (int)Math.Round(Settings.ClickTemplateX * sx);
         var cy = r.T + roiY + my + (int)Math.Round(Settings.ClickTemplateY * sy);
-        SetCursorPos(cx, cy);
+        if (!SetCursorPos(cx, cy))
+            return $"找到了图标 ({cx},{cy})，但**移动光标失败**（被系统拒绝）。";
+
         System.Threading.Thread.Sleep(30);
-        MouseInjector.Left(true);
+        // ★ SendInput 的返回值必须检查：前台是**更高权限**窗口时（UIPI）会被静默丢弃，
+        //   以前不看返回值 ⇒ 明明没点上也报"已单击"，是最坏的一种假成功。
+        var down = MouseInjector.Left(true);
         System.Threading.Thread.Sleep(40);
-        MouseInjector.Left(false);
+        var up = MouseInjector.Left(false);
+        if (!down || !up)
+            return $"找到图标 ({cx},{cy})，但**点击被系统拒绝**（前台窗口权限更高）。" +
+                   "请让目标程序与本源程序（或目标程序）以相同权限运行。";
+
         var scaleNote = Math.Abs(sx - 1.0) < 0.01 ? "" : $"，缩放 {sx:F2}×";
         return $"已在 ({cx},{cy}) 单击（相似度 {score:F2}{scaleNote}）。";
     }

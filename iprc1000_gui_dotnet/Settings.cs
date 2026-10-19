@@ -92,6 +92,11 @@ internal static class Settings
         get => _data.ClickProcess;
         set { _data.ClickProcess = value; Save(); }
     }
+    public static string ClickTitle
+    {
+        get => _data.ClickTitle;
+        set { _data.ClickTitle = value; Save(); }
+    }
     public static int ClickRelX
     {
         get => _data.ClickRelX;
@@ -161,6 +166,8 @@ internal static class Settings
         /// <summary>采集时光标相对**目标窗口左上角**的位置；多处同形图标时用它挑对的那个</summary>
         /// <summary>采集时目标窗口所属进程名（类名通用的场景靠它确认是同一个程序）</summary>
         public string ClickProcess { get; set; } = "";
+        /// <summary>采集时目标窗口的标题（同进程多窗口时用于精确匹配）</summary>
+        public string ClickTitle { get; set; } = "";
         public int ClickRelX { get; set; }
         public int ClickRelY { get; set; }
 
