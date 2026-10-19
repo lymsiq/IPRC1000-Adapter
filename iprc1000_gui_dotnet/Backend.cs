@@ -1270,7 +1270,32 @@ internal sealed class Backend : IDisposable
             _deviceRecheckRequested = true;
             return;
         }
+        // ★★★ 2026-10-19（真机"按住语音键、还没说话就自动弹起"）：
+        //   `RemotePresent()` 查的是 HID 里有没有 `VID_0A5C` 节点，但**按住语音键流音频时**，
+        //   系统会临时挂起/重建这个 HID 节点（我们早已观测到：遥控器休眠时 HID 里根本没有该节点）。
+        //   于是 DBT_DEVNODES_CHANGED 一到、RemotePresent()=false ⇒ 立刻 ClearHeld
+        //   ⇒ 右 Alt 被放掉 ⇒ 用户以为"按键自己弹起来了"。
+        //
+        //   判据修正：**音频还在流 ⇒ 遥控器肯定活着**，一律不允许当作"已断开"。
+        //   只有"既看不到 HID 节点、又没有音频"才认为真断开。
+        try
+        {
+            var st0 = ReadBridgeStats();
+            if (st0 != null)
+            {
+                long silent = -1;
+                try { silent = st0["silentMs"]?.GetValue<long>() ?? -1; } catch { }
+                if (silent >= 0 && silent < 5000)
+                {
+                    _deviceRecheckRequested = true;   // 只复查驱动，不动按住状态
+                    return;
+                }
+            }
+        }
+        catch { }
+
         var n = _filter?.ClearHeld("遥控器已断开（设备移除）") ?? 0;
+        if (n > 0) EtwKeySource.AppendLog($"DEV  设备节点变化且 5 秒内无音频 ⇒ 判定遥控器已断开，释放 {n} 个按住键");
         if (n > 0)
         {
             UnlockCount++;
