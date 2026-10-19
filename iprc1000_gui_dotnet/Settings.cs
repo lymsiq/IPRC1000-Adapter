@@ -113,6 +113,21 @@ internal static class Settings
         get => _data.ClickLastOk;
         set { _data.ClickLastOk = value; Save(); }
     }
+    /// <summary>
+    /// 一次性写入"上次命中点"（只落盘一次）。
+    ///
+    /// ★ 2026-10-19：原来 `ClickLastX/Y/Ok` 三个 setter 各调一次 `Save()` ——
+    ///   **每点一次截图就写 3 次盘**（原子写 = tmp + Replace + .bak）。
+    ///   长期高频点击时是纯浪费，改为合并成一次。
+    /// </summary>
+    public static void SetClickLast(int x, int y)
+    {
+        _data.ClickLastX = x;
+        _data.ClickLastY = y;
+        _data.ClickLastOk = true;
+        Save();
+    }
+
     public static int ClickLastX
     {
         get => _data.ClickLastX;

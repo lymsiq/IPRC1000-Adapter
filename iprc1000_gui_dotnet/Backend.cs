@@ -386,7 +386,13 @@ internal sealed class Backend : IDisposable
         {
             while (!_disposed)
             {
-                try { RefreshProbes(true); } catch { }
+                // ★ 2026-10-19：原来这里每 8 秒 `RefreshProbes(true)` —— 会**强制**重新枚举
+                //   注册表 + 声卡端点（CableState/RemoteDiag），长期运行的固定开销。
+                //   面板读的是同一个缓存（ProbeTtlSec=20），强制刷新纯属多余。
+                //   现在：只有"设备变更过"才强制；其它时候尊重 20 秒 TTL。
+                var force = _deviceRecheckRequested;
+                _deviceRecheckRequested = false;
+                try { RefreshProbes(force); } catch { }
                 try { RecheckDeviceDriver(); } catch { }
                 for (var i = 0; i < 80 && !_disposed; i++)     // 8 秒一轮
                 {

@@ -253,7 +253,8 @@ internal static class TemplateClick
                 {
                     score = sc0; mx = x0; my = y0;
                     roiX = px; roiY = py;          // 让后面的坐标换算用同一个原点
-                    Safe.Note($"CLICK still-there 命中（相似度 {sc0:F2}，省掉整段搜索）");
+                    if (LogSwitch.Enabled)
+                        Safe.Note($"CLICK still-there 命中（相似度 {sc0:F2}，省掉整段搜索）");
                 }
             }
         }
@@ -297,7 +298,8 @@ internal static class TemplateClick
             {
                 score = cf; mx = cfx; my = cfy;
                 roiX = 0; roiY = 0; sx = 1.0; sy = 1.0;   // 已经是窗口绝对坐标
-                Safe.Note($"CLICK 粗搜命中（相似度 {cf:F2}）—— 目标换了位置（换了模型？）");
+                if (LogSwitch.Enabled)
+                    Safe.Note($"CLICK 粗搜命中（相似度 {cf:F2}）—— 目标换了位置（换了模型？）");
             }
             else if (cf > score) { score = cf; }
         }
@@ -335,9 +337,7 @@ internal static class TemplateClick
                    "请让目标程序与本源程序（或目标程序）以相同权限运行。";
 
         // 记住命中点（窗口内坐标）—— 下次先做 still-there 预检
-        Settings.ClickLastX = cx - r.L;
-        Settings.ClickLastY = cy - r.T;
-        Settings.ClickLastOk = true;
+        Settings.SetClickLast(cx - r.L, cy - r.T);   // 只落盘一次（原来 3 次）
 
         var scaleNote = Math.Abs(sx - 1.0) < 0.01 ? "" : $"，缩放 {sx:F2}×";
         var tail = "";
