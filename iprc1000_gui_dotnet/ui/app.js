@@ -631,8 +631,13 @@ function renderEnv(s) {
     kvItem('最近收到音频', silentTxt, silentCls) +
     kvItem('会话 / 空档', `${b.sessions || 0} / ${b.gaps || 0}` +
                         ((b.maxGapMs || 0) > 0 ? `（最长 ${b.maxGapMs} ms）` : '')) +
-    kvItem('丢失帧数', (b.seqLost || 0), (b.seqLost || 0) > 0 ? 'bad' : 'ok',
-           (b.seqJumps || 0) > 0 ? `序号跳了 ${b.seqJumps} 次` : '') +
+    // ★ 2026-10-19：**跳号 ≠ 丢帧**。遥控器不说话时根本不发帧，序号自然跳过
+    //   （实测 642 帧跳号全部对应静音期，真丢帧 = 0，却被红字报成"丢失"）。
+    //   现在只把"真丢帧"标红；静音跳号用灰字说明。
+    kvItem('丢帧（真丢）', (b.seqLost || 0), (b.seqLost || 0) > 0 ? 'bad' : 'ok',
+           (b.seqJumps || 0) > 0
+             ? `序号跳 ${b.seqJumps} 次：静音期未发送 ${b.seqSilence || 0} 帧（正常）`
+             : '') +
     kvItem('丢帧分类', '组装失败 ' + (b.lostCont || 0)
                         + ' · 长度不认识 ' + (b.oddFrag || 0)
                         + ' · 分片被截断 ' + ((b.truncCont || 0) + (b.truncatedFirst || 0))
@@ -1263,9 +1268,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.28',
+      version: '1.2.29',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.28（构建于 2026-10-19 15:10）',
+      versionLine: 'v1.2.29（构建于 2026-10-19 15:18）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

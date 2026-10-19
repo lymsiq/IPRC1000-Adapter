@@ -184,6 +184,9 @@ struct Stats {
     seq_jumps: u64,
     /// seq 累计跳过的帧数（估计丢失帧数）
     seq_lost: u64,
+    /// 序号跳号里**属于静音期**的那部分（遥控器不说话时根本不发帧 ⇒ 序号自然跳过）。
+    /// 这不是丢失 —— 单独统计，避免面板把"静音"误报成"丢帧"（2026-10-19 真机踩过）。
+    seq_silence: u64,
     /// seq 重复 / 回退次数（重复帧或乱序）
     seq_dup: u64,
     /// 后续分片自身被截断（负载短于 ACL 头声明的长度）的次数
@@ -1054,9 +1057,22 @@ impl Bridge {
                 match (seq.wrapping_sub(prev)) as u64 {
                     1 => {}                       // 正常
                     0 => s.seq_dup += 1,          // 重复帧
-                    n => {                        // 跳号 = 真丢帧
+                    n => {
+                        // ★ 2026-10-19：跳号**不等于**丢帧。
+                        //   遥控器静音时**根本不发帧**，恢复后序号自然跳过 N 帧。
+                        //   判别：跳过 N 帧理论上需要 N×20ms 真实时间；
+                        //     · 实际空档 ≥ 该值（留 150ms 余量）⇒ 静音期未发送，**不是丢**；
+                        //     · 实际空档明显更小 ⇒ 这段时间里本该有的帧真的没了 ⇒ 才算丢。
+                        let gap_ms = self.last_frame_at
+                            .map(|t| t.elapsed().as_millis() as u64)
+                            .unwrap_or(0);
+                        let expected_ms = (n as u64) * 20;
                         s.seq_jumps += 1;
-                        s.seq_lost += n - 1;
+                        if gap_ms + 150 >= expected_ms {
+                            s.seq_silence += n - 1;
+                        } else {
+                            s.seq_lost += n - 1;
+                        }
                     }
                     }
                 }
@@ -1412,7 +1428,7 @@ fn main() {
                         "\"udpPackets\":{},\"udpBytes\":{},\"udpBlocked\":{},",
                         "\"sessions\":{},\"gaps\":{},\"maxGapMs\":{},",
                         "\"lostCont\":{},\"truncatedFirst\":{},\"udpErr\":{},",
-                        "\"seqJumps\":{},\"seqLost\":{},\"seqDup\":{},",
+                        "\"seqJumps\":{},\"seqLost\":{},\"seqSilence\":{},\"seqDup\":{},",
                         "\"truncCont\":{},\"oddFrag\":{},\"hdrOdd\":{},",
                         "\"orphanCont\":{},\"shortPdu\":{},\"sigFrag\":{},",
                         "\"hidReports\":{},\"keyEvents\":{},\"otherEvents\":{},",
@@ -1437,6 +1453,7 @@ fn main() {
                     s.udp_err,
                     s.seq_jumps,
                     s.seq_lost,
+                    s.seq_silence,
                     s.seq_dup,
                     s.trunc_cont,
                     s.odd_frag,
@@ -1453,12 +1470,12 @@ fn main() {
                     if g.in_session { 1 } else { 0 }
                 );
                 let stat_line = format!(
-                    "[STAT] 运行 {}s | 会话 {} 空档 {} 最长 {}ms | 帧 {} 丢帧 {}（seq跳 {} 帧）被截首片 {} \
+                    "[STAT] 运行 {}s | 会话 {} 空档 {} 最长 {}ms | 帧 {} 丢帧 {}（seq跳 {} 帧，其中静音 {} 帧）被截首片 {} \
                      · 截续片 {} · 未识别片 {} · 帧头异常 {} · 孤续片 {} · 怪长帧 {} \
                      | UDP {} 包 失败 {} 缓冲满丢 {} | 距上次音频 {} | 会话中={}",
                     t0.elapsed().as_secs(),
                     s.sessions, s.gaps, s.max_gap_ms,
-                    s.frames, s.lost_cont, s.seq_lost, s.truncated_first,
+                    s.frames, s.lost_cont, s.seq_jumps, s.seq_silence, s.truncated_first,
                     s.trunc_cont, s.odd_frag, s.hdr_odd, s.orphan_cont, s.short_pdu,
                     sent, s.udp_err, blocked,
                     if silent < 0 { "从未".to_string() } else { format!("{silent}ms") },
