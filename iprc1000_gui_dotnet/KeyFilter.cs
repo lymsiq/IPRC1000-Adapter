@@ -499,6 +499,9 @@ internal sealed class KeyFilter : IDisposable
         var n = heldButtons.Count;
         lock (_lastState) _lastState.Clear();
 
+        // ★ 归因必需：谁放掉的、为什么 —— 始终记录（不受诊断日志开关影响）
+        if (n > 0) Safe.Note($"CLEARHELD  {reason}  释放 {n} 个：{string.Join(",", heldButtons.Select(v => Keys.Format(v)))}");
+
         if (n > 0)
         {
             var msg = $"GUARD  清空按住集合  {reason}  释放 {n} 个按键"
@@ -829,6 +832,10 @@ internal sealed class KeyFilter : IDisposable
                 if (_heldButtons.TryGetValue(bid, out var e0))
                     holdMs = (DateTime.UtcNow - e0.at).TotalMilliseconds;
         }
+        // 语音键是核心功能，它的每次按下/抬起都始终留痕（含按住时长），便于事后归因
+        if (bid == "voice")
+            Safe.Note($"VOICE {(pressed ? "DOWN" : "UP")}  来源={src}" + (holdMs >= 0 ? $"  按住 {holdMs:F0} ms" : ""));
+
         EtwKeySource.AppendLog($"APPLY  {bid}  {(pressed ? "DOWN" : "UP")}  来源={src}" +
             $"  映射={Keys.Format(vks)}  组={Keymaps.Current.Name}" +
             (holdMs >= 0 ? $"  按住 {holdMs:F0} ms" : ""));

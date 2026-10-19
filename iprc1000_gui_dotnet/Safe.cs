@@ -72,6 +72,29 @@ internal static class Safe
     public static void Log(string what) => Log(null, what);
 
     /// <summary>
+    /// **始终记录**一条关键事件（不做 60 秒去重）。
+    ///
+    /// 为什么需要：诊断日志默认是**关**的，而"语音键被谁放掉的"这类问题每次都因为
+    /// "用户没开日志"而只能靠猜（2026-10-19 连续两次）。这类**归因必需**的事件
+    /// 量小（每次按键 2 行），直接落到 errors.log，不依赖那个开关。
+    /// </summary>
+    public static void Note(string what)
+    {
+        try
+        {
+            var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}  {what}\n";
+            lock (Gate)
+            {
+                Directory.CreateDirectory(Dir);
+                File.AppendAllText(ErrorFile, line, new UTF8Encoding(false));
+                _lastKey = ""; _repeat = 0;   // 不让 Note 影响去重状态
+            }
+            Cap(ErrorFile);
+        }
+        catch { }
+    }
+
+    /// <summary>
     /// 清理日志：**保留今天的，删除更早的**；并对超过上限的文件做截断。
     /// 启动时调一次，之后由后台线程在**跨天**时调一次（很便宜：一次目录枚举）。
     /// </summary>
