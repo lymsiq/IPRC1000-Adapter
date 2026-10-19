@@ -392,6 +392,8 @@ internal sealed class Backend : IDisposable
                     //   放到 UI 线程（WndProc 会调 OnDeviceMayChanged）会把界面冻住。
                     // 每 ~500ms 检查一次"语音键是否该随音频结束而释放"（结构性改造）
                     if (i % 5 == 0) { try { AudioDrivenVoiceRelease(); } catch { } }
+                    // 每 8 秒一次：跨天就清理旧日志（内部只比较日期，不枚举目录）
+                    if (i == 0) { try { Safe.Housekeeping(); } catch { } }
                     if ((_deviceRecheckRequested && i % 5 == 4) || i % 20 == 19)
                     {
                         _deviceRecheckRequested = false;

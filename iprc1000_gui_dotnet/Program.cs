@@ -250,6 +250,16 @@ internal static class Program
 
         using var form = new MainForm(selftest, outPath);
         MainForm.StartupMark("主窗口构造完成");
+        // 启动时做一次日志治理：只保留当天的日志（用户要求），并对超大文件截断。
+        Safe.Housekeeping(true);
+
+        // ★ 崩溃/未处理异常也要留痕（以前只在界面上"消失"，日志里什么都没有）
+        Application.ThreadException += (_, e) => Safe.Log(e.Exception, "UI 线程未处理异常");
+        AppDomain.CurrentDomain.UnhandledException +=
+            (_, e) => Safe.Log(e.ExceptionObject as Exception, "未处理异常（进程即将退出）");
+        TaskScheduler.UnobservedTaskException +=
+            (_, e) => { Safe.Log(e.Exception, "未观察的任务异常"); e.SetObserved(); };
+
         Application.Run(form);
         GC.KeepAlive(singleInstance);   // 互斥体必须活到进程结束，否则保护会提前失效
     }

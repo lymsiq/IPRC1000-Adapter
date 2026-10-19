@@ -5,6 +5,41 @@
 
 ---
 
+## [1.2.16] - 2026-10-19
+
+### 稳定性：日志治理（**默认只保留当天**）+ 异常留痕 + 配置原子写
+
+按用户明确要求"日志可以关闭、默认只保留当天、定期清除"，以及"先追求速度和稳定性"。
+
+#### 1. 日志治理（`Safe.cs`）
+
+| 规则 | 实现 |
+|---|---|
+| **只保留当天** | 启动时 + 跨天时删除 `LastWriteTime < 今天` 的 `*.log` |
+| 单文件上限 | 20 MB，超过则截断为"尾部 1 MB"（保住现场，不把盘写满） |
+| 诊断日志可关 | `LogSwitch` 默认 **false** ⇒ `key-events/bridge/router/webview/stuck-guard/mouse` 都不写 |
+| **`errors.log`** | 故障记录，**始终写**（体积极小，同样只留当天）|
+
+实测：造一个 2 天前和一个今天的 `zz-*.log` → 启动后**昨天的被删、今天的保留** ✓
+
+#### 2. 异常留痕（针对 97 处空 catch 里最关键的那几个）
+
+- 新增 `Safe.Log(Exception, what)`：**同类消息 60 秒内去重**（只记一条 + 累计次数），避免刷屏；
+- 配置读取失败不再静默：`settings.json` / `keymap.json` 解析失败会写明"本次已用默认值/出厂映射"；
+- 全局兜底：`Application.ThreadException` / `AppDomain.UnhandledException` /
+  `TaskScheduler.UnobservedTaskException` 全部落 `errors.log`（以前崩溃后在日志里什么都没有）。
+
+#### 3. 配置原子写
+
+`settings.json` / `keymap.json` 原来是 `File.WriteAllText` 直写 —— 断电/崩溃会留半截 JSON，
+而解析失败又回落默认值 ⇒ **用户所有设置"自己变回去了"**。
+现在改为 **写 `.tmp` → `File.Replace` → 保留 `.bak`**。
+
+#### 4. 更正一处我的误判
+
+之前评估里说 `bridge-stats.json` 是"覆盖写可能读到半文件"—— 复查代码，桥侧 `write_stats`
+**本来就是 tmp + rename 的原子写**。该条不成立，此处更正。
+
 ## [1.2.15] - 2026-10-19
 
 ### 修：采集改**3 秒倒计时**（原来的交互根本没法用）

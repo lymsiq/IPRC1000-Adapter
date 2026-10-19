@@ -201,7 +201,10 @@ internal static class Keymaps
                 }
             }
         }
-        catch { /* 损坏就用默认 */ }
+        catch (Exception e)
+        {
+            Safe.Log(e, "读取 keymap.json 失败，本次已用出厂默认映射（文件保留，未覆盖）");
+        }
 
         // 首次运行（或旧版迁移）：默认配置组 1 + Codex 编程
         var store = new Store
@@ -242,8 +245,12 @@ internal static class Keymaps
         try
         {
             Directory.CreateDirectory(Dir);
-            System.IO.File.WriteAllText(File_, JsonSerializer.Serialize(s,
-                new JsonSerializerOptions { WriteIndented = true }));
+            // ★ 原子写（同 Settings）：半截文件会让所有按键映射丢失
+            var json = JsonSerializer.Serialize(s, new JsonSerializerOptions { WriteIndented = true });
+            var tmp = File_ + ".tmp";
+            System.IO.File.WriteAllText(tmp, json);
+            if (System.IO.File.Exists(File_)) System.IO.File.Replace(tmp, File_, File_ + ".bak", true);
+            else System.IO.File.Move(tmp, File_);
         }
         catch { }
     }

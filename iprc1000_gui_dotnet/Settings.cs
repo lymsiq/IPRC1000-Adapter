@@ -21,7 +21,11 @@ internal static class Settings
             if (File.Exists(File_))
                 _data = JsonSerializer.Deserialize<SettingsData>(File.ReadAllText(File_)) ?? new();
         }
-        catch { /* 忽略损坏的设置，用默认值 */ }
+        catch (Exception e)
+        {
+            // ★ 配置损坏不能"静默回落默认值"——用户会以为设置自己变了。
+            Safe.Log(e, "读取 settings.json 失败，本次已用默认值（文件保留，未覆盖）");
+        }
 
         // ★ 迁移（只跑一次）：v1.2.14 及更早的 settings.json 里 `startMinimized` 已被写成 false
         //   （因为默认值就是 false，Save 过一次就落盘了）。用户要求"默认进托盘"，
@@ -130,8 +134,14 @@ internal static class Settings
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(File_)!);
-            File.WriteAllText(File_, JsonSerializer.Serialize(_data,
-                new JsonSerializerOptions { WriteIndented = true }));
+            // ★ 原子写：先写 .tmp，再 Replace 覆盖（保留一份 .bak）。
+            //   直接 WriteAllText 遇到断电/崩溃会留下半截 JSON，而解析失败又会静默回落默认值
+            //   ⇒ 用户所有设置"自己变回去了"，且没有任何提示。
+            var json = JsonSerializer.Serialize(_data, new JsonSerializerOptions { WriteIndented = true });
+            var tmp = File_ + ".tmp";
+            File.WriteAllText(tmp, json);
+            if (File.Exists(File_)) File.Replace(tmp, File_, File_ + ".bak", true);
+            else File.Move(tmp, File_);
         }
         catch { }
     }
