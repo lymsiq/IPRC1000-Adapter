@@ -1353,6 +1353,21 @@ internal sealed class Backend : IDisposable
         }
     }
 
+    /// <summary>「截图点击」的试运行：就地执行一次，把结果（相似度/失败原因）回给界面。</summary>
+    public string TestClickIcon()
+    {
+        try
+        {
+            var msg = TemplateClick.TryClick();
+            EtwKeySource.AppendLog($"APPLY  截图点击(测试)  {msg}");
+            return Env.Json(new { ok = true, message = msg });
+        }
+        catch (Exception e)
+        {
+            return Env.Json(new { ok = false, message = "执行异常：" + e.Message });
+        }
+    }
+
     public string InstallWinuhid()
     {
         var (ok, msg) = Env.InstallWinuhid();

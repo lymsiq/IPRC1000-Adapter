@@ -39,7 +39,10 @@ internal static class TemplateClick
     private const double MinScore = 0.72;  // 置信度门槛
     private const int MaxW = 3000, MaxH = 1600; // 窗口尺寸上限（防御异常窗口）
     /// <summary>在采集位置附近多大范围内找（±像素）。大窗口全遍历要几秒，收窄到这块足够快。</summary>
-    private const int SearchRadius = 200;
+    private const int SearchRadius = 120;
+    /// <summary>失败时先试这些缩放比（应对 DPI / 窗口缩放 / 主题字号变化）</summary>
+    private static readonly double[] Rescales = { 0.80, 0.90, 1.10, 1.25 };
+    private const int WideRadius = 300;   // 全缩放都失败后，再放宽一次搜索半径
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr FindWindowW(string cls, string? name);
@@ -151,21 +154,45 @@ internal static class TemplateClick
         if (roiW <= tpl.Width || roiH <= tpl.Height)
             return $"窗口太小或采集位置超出（{w}×{h}），请重新采集。";
 
-        using var roi = shot.Clone(new Rectangle(roiX, roiY, roiW, roiH), shot.PixelFormat);
-        var (score, mx, my) = Match(roi, tpl, Settings.ClickRelX - Settings.ClickTemplateX - roiX,
-                                                  Settings.ClickRelY - Settings.ClickTemplateY - roiY);
+        // 三段式：① 原尺寸、近处快查（~0.1s）；② 换几个尺度（DPI/缩放变化）；
+        //         ③ 仍失败就放宽搜索半径（布局挪动）。三段都失败才放弃。
+        var (score, mx, my, sx, sy, _) = FindBest(shot, tpl, roiX, roiY, roiW, roiH, 1.0);
+        if (score < MinScore)
+        {
+            foreach (var k in Rescales)
+            {
+                var (s2, x2, y2, _, _, _) = FindBest(shot, tpl, roiX, roiY, roiW, roiH, k);
+                if (s2 > score) { score = s2; mx = x2; my = y2; sx = k; sy = k; }
+                if (score >= MinScore) break;
+            }
+        }
+        if (score < MinScore)
+        {
+            // 放宽半径再试一次（只按原尺寸，避免太慢）
+            var wx = Math.Max(0, Settings.ClickRelX - WideRadius);
+            var wy = Math.Max(0, Settings.ClickRelY - WideRadius);
+            var ww = Math.Min(w - wx, WideRadius * 2 + tpl.Width);
+            var wh = Math.Min(h - wy, WideRadius * 2 + tpl.Height);
+            if (ww > tpl.Width && wh > tpl.Height)
+            {
+                var (s3, x3, y3, _, _, _) = FindBest(shot, tpl, wx, wy, ww, wh, 1.0);
+                if (s3 > score) { score = s3; mx = x3; my = y3; roiX = wx; roiY = wy; }
+            }
+        }
         if (score < MinScore)
             return $"没找到图标（最高相似度 {score:F2} < {MinScore:F2}）。界面可能变了，重新采集一次。";
 
         // 命中点 = 模板左上角 + 模板中心
-        var cx = r.L + roiX + mx + Settings.ClickTemplateX;
-        var cy = r.T + roiY + my + Settings.ClickTemplateY;
+        // 用"实际命中的模板"尺寸换算中心（缩放后模板边长会变）
+        var cx = r.L + roiX + mx + (int)Math.Round(Settings.ClickTemplateX * sx);
+        var cy = r.T + roiY + my + (int)Math.Round(Settings.ClickTemplateY * sy);
         SetCursorPos(cx, cy);
         System.Threading.Thread.Sleep(30);
         MouseInjector.Left(true);
         System.Threading.Thread.Sleep(40);
         MouseInjector.Left(false);
-        return $"已在 ({cx},{cy}) 单击（相似度 {score:F2}）。";
+        var scaleNote = Math.Abs(sx - 1.0) < 0.01 ? "" : $"，缩放 {sx:F2}×";
+        return $"已在 ({cx},{cy}) 单击（相似度 {score:F2}{scaleNote}）。";
     }
 
     private static string ProcOf(IntPtr h)
@@ -199,6 +226,41 @@ internal static class TemplateClick
     // ── 灰度归一化互相关（NCC）──
     // 为什么不用 OpenCV：只需要一个 44×44 模板在一个小窗口里找，纯托管实现足够快（~50ms），
     // 少一个几十 MB 的依赖，也不会因为打包漏 DLL 而静默失效。
+    /// <summary>
+    /// 在 <paramref name="roiX/Y/W/H"/> 指定的区域内、按 <paramref name="scale"/> 缩放模板后匹配一次。
+    /// 返回的 (x,y) 是**相对 ROI** 的坐标；(sx,sy) 是该次实际使用的缩放比。
+    /// </summary>
+    private static (double score, int x, int y, double sx, double sy, Bitmap usedTpl)
+        FindBest(Bitmap shot, Bitmap tpl, int roiX, int roiY, int roiW, int roiH, double scale)
+    {
+        Bitmap use = tpl;
+        bool own = false;
+        if (Math.Abs(scale - 1.0) > 0.01)
+        {
+            var nw = Math.Max(8, (int)Math.Round(tpl.Width * scale));
+            var nh = Math.Max(8, (int)Math.Round(tpl.Height * scale));
+            use = new Bitmap(nw, nh, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(use))
+            {
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                g.DrawImage(tpl, new Rectangle(0, 0, nw, nh));
+            }
+            own = true;
+        }
+        if (use.Width > roiW || use.Height > roiH)
+        {
+            if (own) use.Dispose();
+            return (0, 0, 0, scale, scale, tpl);
+        }
+        using var roi = shot.Clone(new Rectangle(roiX, roiY, roiW, roiH), shot.PixelFormat);
+        var expX = Settings.ClickRelX - (int)Math.Round(Settings.ClickTemplateX * scale) - roiX;
+        var expY = Settings.ClickRelY - (int)Math.Round(Settings.ClickTemplateY * scale) - roiY;
+        var (sc, x, y) = Match(roi, use, expX, expY);
+        if (own) use.Dispose();
+        return (sc, x, y, scale, scale, tpl);
+    }
+
     private static (double score, int x, int y) Match(Bitmap big, Bitmap tpl, int expX, int expY)
     {
         var bw = big.Width; var bh = big.Height;

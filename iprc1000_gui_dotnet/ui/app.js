@@ -406,6 +406,18 @@ function buildKeyboard() {
       toast(r.message, 9000);
     };
     mo.appendChild(learn);
+
+    // 「试一下」：不等遥控器，直接执行一次，立刻看到结果（相似度 / 失败原因）
+    const test = document.createElement('button');
+    test.className = 'btn ghost';
+    test.style.marginLeft = '6px';
+    test.textContent = '试一下截图点击';
+    test.onclick = async () => {
+      toast('正在目标窗口里找图标…', 2000);
+      const r = JSON.parse(await B.testClickIcon());
+      toast(r.message, 9000);
+    };
+    mo.appendChild(test);
   }
   mods.dataset.built = '1';
 }
@@ -1175,9 +1187,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.11',
+      version: '1.2.12',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.11（构建于 2026-10-19 05:45）',
+      versionLine: 'v1.2.12（构建于 2026-10-19 07:05）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

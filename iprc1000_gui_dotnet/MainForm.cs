@@ -626,6 +626,7 @@ internal sealed class MainForm : Form
             "setAutoKeepMic" => _backend.SetAutoKeepMic(Arg(0)),
             "checkCaptureDevice" => _backend.CheckCaptureDevice(),
             "learnClickIcon" => _backend.LearnClickIcon(),
+            "testClickIcon" => _backend.TestClickIcon(),
             "installWinuhid" => _backend.InstallWinuhid(),
             "exportWinuhid" => _backend.ExportWinuhid(),
             _ => Env.Json(new { ok = false, message = $"未知方法 {method}" }),
