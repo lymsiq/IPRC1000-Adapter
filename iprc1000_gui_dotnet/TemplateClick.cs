@@ -275,6 +275,19 @@ internal static class TemplateClick
                 if (s3 > score) { score = s3; mx = x3; my = y3; second = sec3; roiX = wx; roiY = wy; }
             }
         }
+        // ★ 第 4 段：全宽粗搜 + 精修（换个模型后 ✨ 会横向漂移，固定搜索窗装不下）
+        if (score < minScore)
+        {
+            var (cf, cfx, cfy) = CoarseFind(shot, tpl, minScore);
+            if (cf >= minScore)
+            {
+                score = cf; mx = cfx; my = cfy;
+                roiX = 0; roiY = 0; sx = 1.0; sy = 1.0;   // 已经是窗口绝对坐标
+                Safe.Note($"CLICK 粗搜命中（相似度 {cf:F2}）—— 目标换了位置（换了模型？）");
+            }
+            else if (cf > score) { score = cf; }
+        }
+
         if (score < minScore)
             return $"没找到图标（最高相似度 {score:F2} < 门槛 {minScore:F2}" +
                    (second > 0 ? $"，次佳 {second:F2}" : "") +
@@ -365,6 +378,67 @@ internal static class TemplateClick
     // 为什么不用 OpenCV：只需要一个 44×44 模板在一个小窗口里找，纯托管实现足够快（~50ms），
     // 少一个几十 MB 的依赖，也不会因为打包漏 DLL 而静默失效。
     /// <summary>
+    /// **全宽粗搜 + 精修**（2026-10-19，为"模型名旁边的 ✨"而加）。
+    ///
+    /// ## 要解决的问题
+    ///
+    /// 那个「增强提示词」✨ 长在**模型名旁边**，而模型名会变（Deepseek / Claude / GPT…），
+    /// 名字长短不同 ⇒ ✨ 的横向位置会**漂几十到几百像素**。只按"采集时的位置 ±120px"去搜，
+    /// 换个模型就搜不到。
+    ///
+    /// ## 做法（金字塔）
+    ///
+    /// 1. 把窗口**下部**(倒数 45% 高度、**全宽**)缩到 **1/2**，模板也缩到 1/2；
+    /// 2. 在这个缩小图上粗扫一遍（宽松门槛 0.55），拿到"大致在哪"；
+    /// 3. 映射回原分辨率，在 ±16px 的小窗口里**全分辨率精修**，用正式门槛判定。
+    ///
+    /// 代价：粗扫约 100~200 ms —— 只在前面所有精搜都失败时才走这一段，
+    /// 属于"换个模型/窗口刚动过"的兜底路径。
+    /// </summary>
+    private static (double score, int x, int y) CoarseFind(Bitmap shot, Bitmap tpl, double minScore)
+    {
+        const double k = 0.5;                       // 降采样倍率
+        var bandTop = Math.Max(0, (int)(shot.Height * 0.55));   // 只看下部 45%
+        var bw = shot.Width;
+        var bh = shot.Height - bandTop;
+        if (bh < tpl.Height * 2 || bw < tpl.Width * 2) return (0, 0, 0);
+
+        using var band = shot.Clone(new Rectangle(0, bandTop, bw, bh), shot.PixelFormat);
+        var sw = Math.Max(8, (int)(bw * k));
+        var sh = Math.Max(8, (int)(bh * k));
+        var tw = Math.Max(8, (int)(tpl.Width * k));
+        var th = Math.Max(8, (int)(tpl.Height * k));
+
+        using var small = new Bitmap(sw, sh, PixelFormat.Format32bppArgb);
+        using var smallTpl = new Bitmap(tw, th, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(small))
+        {
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
+            g.DrawImage(band, new Rectangle(0, 0, sw, sh));
+        }
+        using (var g = Graphics.FromImage(smallTpl))
+        {
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
+            g.DrawImage(tpl, new Rectangle(0, 0, tw, th));
+        }
+
+        var (sc, sx, sy, _) = Match(small, smallTpl, -1, -1);   // expX/Y = -1 ⇒ 不做距离偏置
+        if (sc < 0.55) return (0, 0, 0);
+
+        // 映射回原分辨率，±16px 精修
+        var gx = (int)(sx / k);
+        var gy = (int)(sy / k) + bandTop;
+        var rx = Math.Max(0, gx - 16);
+        var ry = Math.Max(0, gy - 16);
+        var rw = Math.Min(shot.Width - rx, 32 + tpl.Width);
+        var rh = Math.Min(shot.Height - ry, 32 + tpl.Height);
+        if (rw <= tpl.Width || rh <= tpl.Height) return (0, 0, 0);
+
+        var (fine, fx, fy, _, _, _) = FindBest(shot, tpl, rx, ry, rw, rh, 1.0);
+        return fine >= minScore ? (fine, rx + fx, ry + fy) : (fine, 0, 0);
+    }
+
+    /// <summary>
     /// 在 <paramref name="roiX/Y/W/H"/> 指定的区域内、按 <paramref name="scale"/> 缩放模板后匹配一次。
     /// 返回的 (x,y) 是**相对 ROI** 的坐标；(sx,sy) 是该次实际使用的缩放比。
     /// </summary>
@@ -448,7 +522,8 @@ internal static class TemplateClick
         }
 
         // 消歧：分数接近最高（差 ≤0.02）的候选里，挑离"采集时的位置"最近的那个。
-        if (cands.Count > 1)
+        // ★ expX < 0 是"不偏置"哨兵（粗搜用）—— 否则会被误当成"偏向左上角"。
+        if (cands.Count > 1 && expX >= 0)
         {
             var top = double.NegativeInfinity;
             foreach (var c in cands) if (c.s > top) top = c.s;
