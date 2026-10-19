@@ -19,7 +19,7 @@ internal static class StuckGuard
     /// 语音键宽限期：刚按下时 silentMs 还是上一会话的旧值，不能立刻判死。
     /// ★ 2026-10-18 用户要求再放宽到 **60 秒**实测（配合音频驱动释放 5 秒兜底，不影响卡键自愈）。
     /// </summary>
-    public const double VoiceGraceSec = 60.0;
+    public const double VoiceGraceSec = 600.0;
 
     /// <summary>
     /// 语音键按住期间，音频静默超过这个毫秒数才判 UP 丢了。
@@ -36,10 +36,10 @@ internal static class StuckGuard
     ///     （用户按一下紧急复位即可），也不能"每次都把正常长按砍断" ——
     ///     后者是**核心功能不可用**，前者只是偶发不适。
     /// </summary>
-    public const long VoiceSilentMs = 60_000;
+    public const long VoiceSilentMs = 600_000;
 
     /// <summary>拿不到音频信号时（桥没运行），语音键的绝对兜底超时（秒）。</summary>
-    public const double VoiceNoSignalSec = 120;
+    public const double VoiceNoSignalSec = 600;
 
     /// <summary>普通键（点按类）的绝对超时（秒）。</summary>
     public const double OtherSec = 15;

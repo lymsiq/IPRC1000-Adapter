@@ -17,6 +17,8 @@ internal sealed class CableRouter : IDisposable
     private WasapiOut? _out;
     /// <summary>有界抖动缓冲（替代原来的 BufferedWaveProvider）</summary>
     private JitterBuffer? _jit;
+    /// <summary>输出设备"不在播放"的起始时刻（用于 500ms 宽限，避免抖动导致反复重建）</summary>
+    private DateTime _notPlayingSince = DateTime.MinValue;
 
     // ── 包间隔统计（每段会话一份）──
     // ★ 为什么需要它：某次实测 62 秒丢了 375 帧（12%），但"丢帧分类"全是 0
@@ -217,7 +219,28 @@ internal sealed class CableRouter : IDisposable
     {
         lock (_sinkLock)
         {
-            if (_out != null) return true;
+            // ★★★ 2026-10-19（参考同类项目的"假正常"复盘，对应真机"有图标、电平不动"）：
+            //   原来只判断 `_out != null` —— 对象在就当作健康。
+            //   但**睡眠唤醒 / 设备重枚举 / WASAPI 异常**之后，对象还在、`PlaybackState` 已经
+            //   不是 Playing：这时 `AddSamples` 照样"成功"，而 CABLE Output **一点电平都没有**
+            //   ⇒ 输入法显示麦克风图标但音量指示永远不动。
+            //   判据改为"**真的在播放**"才算健康；不在播放就重建输出。
+            if (_out != null)
+            {
+                if (_out.PlaybackState == NAudio.Wave.PlaybackState.Playing)
+                {
+                    _notPlayingSince = DateTime.MinValue;
+                    return true;
+                }
+                // 给 500ms 宽限：避免瞬时抖动导致反复重建（重建会产生一次断音）
+                if (_notPlayingSince == DateTime.MinValue) _notPlayingSince = DateTime.UtcNow;
+                if ((DateTime.UtcNow - _notPlayingSince).TotalMilliseconds < 500) return true;
+
+                Log($"[AUDIO HEALTH stale] 输出设备状态={_out.PlaybackState}（不是 Playing）—— 重建输出通道");
+                CloseSinkLocked();
+                _out = null;
+                _notPlayingSince = DateTime.MinValue;
+            }
             var dev = FindCable();
             if (dev == null)
             {
