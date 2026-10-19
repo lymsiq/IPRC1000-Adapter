@@ -155,6 +155,7 @@ internal static class TemplateClick
         {
             Settings.ClickRelX = p.X - wr.L;
             Settings.ClickRelY = p.Y - wr.T;
+            Settings.ClickRelBottom = wr.B - p.Y;   // ★ 贴底布局的关键锚点
         }
         return $"已采集 {LearnSize}×{LearnSize} 图标（进程 {procName} / 窗口 `{cls}`）。" +
                "请立刻点「试一下截图点击」验证：相似度 ≥0.90 很好；0.80~0.85 建议把鼠标对准图标更中心处重采。" +
@@ -211,12 +212,23 @@ internal static class TemplateClick
 
         // ★ 只在"采集时的位置"附近找 —— 图标位置基本固定，没必要全窗遍历。
         //   WorkBuddy 那种 1200×800 的窗口，全窗 NCC 要 2~3 秒；±200px 只要 ~0.1 秒。
-        var roiX = Math.Max(0, Settings.ClickRelX - SearchRadius);
-        var roiY = Math.Max(0, Settings.ClickRelY - SearchRadius);
+        // ★★★ 2026-10-19（真机"窗口从全屏变窗口后找不到"）：
+        //   ✨ 是**贴底布局** —— 窗口变矮时它会上移。原来只按"距顶部"推算，
+        //   全屏时存的 1341 在 1248 高的窗口里**直接越界** ⇒ 旧代码在这里 return
+        //   "采集位置超出"，一次都没搜。
+        //   现在：① 有底部锚点就用 `高度 - 距底距离` 重新推算；② 越界只做**夹取**，不放弃。
+        var expectY = Settings.ClickRelBottom > 0
+            ? h - Settings.ClickRelBottom          // 贴底布局：优先按底部锚点
+            : Settings.ClickRelY;
+        var expectX = Settings.ClickRelX;
+        expectX = Math.Clamp(expectX, 0, Math.Max(0, w - 1));
+        expectY = Math.Clamp(expectY, 0, Math.Max(0, h - 1));
+
+        var roiX = Math.Clamp(expectX - SearchRadius, 0, Math.Max(0, w - tpl.Width));
+        var roiY = Math.Clamp(expectY - SearchRadius, 0, Math.Max(0, h - tpl.Height));
         var roiW = Math.Min(w - roiX, SearchRadius * 2 + tpl.Width);
         var roiH = Math.Min(h - roiY, SearchRadius * 2 + tpl.Height);
-        if (roiW <= tpl.Width || roiH <= tpl.Height)
-            return $"窗口太小或采集位置超出（{w}×{h}），请重新采集。";
+        var roiUsable = roiW > tpl.Width && roiH > tpl.Height;
 
         // ★ 0) "still-there" 预检（SikuliX 的做法）：
         //   如果上次命中过，目标通常还在同一个位置 —— 先在那附近 ±24px 做一次**极小范围**
@@ -236,7 +248,7 @@ internal static class TemplateClick
             var ph = Math.Min(h - py, StillThereRadius * 2 + tpl.Height);
             if (pw > tpl.Width && ph > tpl.Height)
             {
-                var (sc0, x0, y0, sec0, _, _) = FindBest(shot, tpl, px, py, pw, ph, 1.0);
+                var (sc0, x0, y0, sec0, _, _) = FindBest(shot, tpl, px, py, pw, ph, 1.0, expectX, expectY);
                 if (sc0 >= minScore)
                 {
                     score = sc0; mx = x0; my = y0;
@@ -250,14 +262,16 @@ internal static class TemplateClick
         //         ③ 仍失败就放宽搜索半径（布局挪动）。三段都失败才放弃。
         if (score < minScore)
         {
-        var (s1, x1, y1, sec1, sx1, sy1) = FindBest(shot, tpl, roiX, roiY, roiW, roiH, 1.0);
+        var (s1, x1, y1, sec1, sx1, sy1) = roiUsable
+            ? FindBest(shot, tpl, roiX, roiY, roiW, roiH, 1.0, expectX, expectY)
+            : (0.0, 0, 0, 0.0, 1.0, 1.0);
         score = s1; mx = x1; my = y1; sx = sx1; sy = sy1; second = sec1;
         }
         if (score < minScore)
         {
             foreach (var k in Rescales)
             {
-                var (s2, x2, y2, sec2, _, _) = FindBest(shot, tpl, roiX, roiY, roiW, roiH, k);
+                var (s2, x2, y2, sec2, _, _) = FindBest(shot, tpl, roiX, roiY, roiW, roiH, k, expectX, expectY);
                 if (s2 > score) { score = s2; mx = x2; my = y2; second = sec2; sx = k; sy = k; }
                 if (score >= MinScore) break;
             }
@@ -265,13 +279,13 @@ internal static class TemplateClick
         if (score < minScore)
         {
             // 放宽半径再试一次（只按原尺寸，避免太慢）
-            var wx = Math.Max(0, Settings.ClickRelX - WideRadius);
-            var wy = Math.Max(0, Settings.ClickRelY - WideRadius);
+            var wx = Math.Clamp(expectX - WideRadius, 0, Math.Max(0, w - tpl.Width));
+            var wy = Math.Clamp(expectY - WideRadius, 0, Math.Max(0, h - tpl.Height));
             var ww = Math.Min(w - wx, WideRadius * 2 + tpl.Width);
             var wh = Math.Min(h - wy, WideRadius * 2 + tpl.Height);
             if (ww > tpl.Width && wh > tpl.Height)
             {
-                var (s3, x3, y3, sec3, _, _) = FindBest(shot, tpl, wx, wy, ww, wh, 1.0);
+                var (s3, x3, y3, sec3, _, _) = FindBest(shot, tpl, wx, wy, ww, wh, 1.0, expectX, expectY);
                 if (s3 > score) { score = s3; mx = x3; my = y3; second = sec3; roiX = wx; roiY = wy; }
             }
         }
@@ -434,7 +448,7 @@ internal static class TemplateClick
         var rh = Math.Min(shot.Height - ry, 32 + tpl.Height);
         if (rw <= tpl.Width || rh <= tpl.Height) return (0, 0, 0);
 
-        var (fine, fx, fy, _, _, _) = FindBest(shot, tpl, rx, ry, rw, rh, 1.0);
+        var (fine, fx, fy, _, _, _) = FindBest(shot, tpl, rx, ry, rw, rh, 1.0, gx, gy);
         return fine >= minScore ? (fine, rx + fx, ry + fy) : (fine, 0, 0);
     }
 
@@ -443,7 +457,8 @@ internal static class TemplateClick
     /// 返回的 (x,y) 是**相对 ROI** 的坐标；(sx,sy) 是该次实际使用的缩放比。
     /// </summary>
     private static (double score, int x, int y, double second, double sx, double sy)
-        FindBest(Bitmap shot, Bitmap tpl, int roiX, int roiY, int roiW, int roiH, double scale)
+        FindBest(Bitmap shot, Bitmap tpl, int roiX, int roiY, int roiW, int roiH, double scale,
+                 int anchorX, int anchorY)
     {
         Bitmap use = tpl;
         bool own = false;
@@ -466,8 +481,8 @@ internal static class TemplateClick
             return (0, 0, 0, 0, scale, scale);
         }
         using var roi = shot.Clone(new Rectangle(roiX, roiY, roiW, roiH), shot.PixelFormat);
-        var expX = Settings.ClickRelX - (int)Math.Round(Settings.ClickTemplateX * scale) - roiX;
-        var expY = Settings.ClickRelY - (int)Math.Round(Settings.ClickTemplateY * scale) - roiY;
+        var expX = anchorX - (int)Math.Round(Settings.ClickTemplateX * scale) - roiX;
+        var expY = anchorY - (int)Math.Round(Settings.ClickTemplateY * scale) - roiY;
         var (sc, x, y, sec) = Match(roi, use, expX, expY);
         if (own) use.Dispose();
         return (sc, x, y, sec, scale, scale);

@@ -102,6 +102,12 @@ internal static class Settings
         set { _data.ClickMinScore = Math.Clamp(value, 0.5, 0.98); Save(); }
     }
 
+    public static int ClickRelBottom
+    {
+        get => _data.ClickRelBottom;
+        set { _data.ClickRelBottom = value; Save(); }
+    }
+
     public static bool ClickLastOk
     {
         get => _data.ClickLastOk;
@@ -242,6 +248,15 @@ internal static class Settings
         /// </summary>
         public bool ClickReturnToOrigin { get; set; } = true;
         public int ClickRelX { get; set; }
+        /// <summary>
+        /// 图标距**窗口底部**的距离。
+        ///
+        /// ★ 2026-10-19 真机：输入框（以及模型名旁的 ✨）是**贴底布局** ——
+        ///   WorkBuddy 从全屏变成窗口时高度从 ~1440 掉到 1248，✨ 实际**上移了约 192px**，
+        ///   而只记"距顶部 1341"的话，这个值直接超出窗口高度 ⇒ 判"采集位置超出" ⇒ 一次都不搜。
+        ///   所以同时记底部距离：缩放后用 `height - ClickRelBottom` 重新推算。
+        /// </summary>
+        public int ClickRelBottom { get; set; }
         public int ClickRelY { get; set; }
 
         /// <summary>
