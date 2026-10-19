@@ -39,6 +39,8 @@ internal sealed class MainForm : Form
     private readonly Backend _backend = new();
     private readonly KeyFilter _filter;
     private readonly NotifyIcon _tray;
+    /// <summary>是否已经提示过"收进托盘"（每轮启动只提示一次）</summary>
+    private bool _trayHintShown;
     private bool _reallyExit;
     private readonly bool _selftest;
     private string? _selftestOut;
@@ -61,6 +63,9 @@ internal sealed class MainForm : Form
     {
         try
         {
+            // 注：想给这个 named event 加 DACL（让普通权限的第二实例也能唤出管理员实例），
+            // 但 `EventWaitHandle(…, EventWaitHandleSecurity)` 需要额外的 System.Threading.AccessControl 包，
+            // 而"再启动一次"失败时 Program 已经会提示"请到托盘双击打开" —— 够用，故不引入新依赖。
             _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowWindowEvent);
             _showThread = new Thread(() =>
             {
@@ -809,13 +814,49 @@ internal sealed class MainForm : Form
         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
         Show();
         Activate();
+
+        // ★ 越界保护（2026-10-19 真机："窗口找不到了"）：
+        //   最小化窗口的 rect 是 (-32000,-32000)；换显示器、拔掉副屏、分辨率变小之后，
+        //   保存的位置也可能落在**任何屏幕之外** —— 这时"恢复成功"但用户什么都看不见。
+        //   判据：与虚拟桌面无交集、或尺寸异常 ⇒ 挪回主屏中央。
+        try
+        {
+            var vs = SystemInformation.VirtualScreen;
+            if (!vs.IntersectsWith(Bounds) || Bounds.Width < 200 || Bounds.Height < 150)
+            {
+                var wa = Screen.PrimaryScreen?.WorkingArea ?? vs;
+                var w = Math.Min(1200, Math.Max(640, wa.Width - 80));
+                var h = Math.Min(800, Math.Max(480, wa.Height - 80));
+                Bounds = new Rectangle(wa.Left + (wa.Width - w) / 2,
+                                       wa.Top + (wa.Height - h) / 2, w, h);
+                EtwKeySource.AppendLog($"DEV  窗口位置越界 ⇒ 已移回主屏中央（{Bounds}）");
+            }
+        }
+        catch { }
     }
 
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
         // 最小化 → 收进托盘（任务栏不再占位）
-        if (WindowState == FormWindowState.Minimized) Hide();
+        if (WindowState == FormWindowState.Minimized)
+        {
+            Hide();
+            // ★ 2026-10-19：真机出现过"关掉窗口后找不到程序了"。
+            //   收进托盘时给一次气泡提示（每轮启动只提示一次，不烦人）。
+            if (!_trayHintShown)
+            {
+                _trayHintShown = true;
+                try
+                {
+                    _tray.Visible = true;
+                    _tray.ShowBalloonTip(4000, "已收进托盘",
+                        "程序还在运行。要打开面板：双击右下角托盘里的这个图标。",
+                        ToolTipIcon.Info);
+                }
+                catch { }
+            }
+        }
     }
 
     protected override void OnVisibleChanged(EventArgs e)
