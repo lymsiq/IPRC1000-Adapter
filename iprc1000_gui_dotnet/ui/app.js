@@ -141,9 +141,9 @@ function renderOverview(s) {
   $('#v-perm').nextElementSibling.textContent = !protectedOk
     ? `按键来源=ETW，但设备仍是键盘（驱动未换）且钩子未装 → 遥控器按键会直接打进窗口` +
       (ks0.guard ? `　【${ks0.guard}】` : '')
-    : (hookMode
-        ? `已拦截 ${sw.swallowed} 次 · 放行 ${sw.passed} 次 · 注入${a && s.inject ? '已开' : '已关'}`
-        : `零字符输出 · 按键走 BthPort ETW · 无需拦截` );
+    // 2026-10-20：钩子已彻底移除（Start 里只走 ETW），hookMode 恒为 false，
+    // 原来那条"已拦截 N 次 / 放行 M 次"的分支**永远不会执行**，且计数恒为 0（假仪表）→ 删掉。
+    : `零字符输出 · 按键走 BthPort ETW · 无需拦截`;
 
   $('#opKey').textContent = d.lastKey || '—';
   $('#opState').textContent = d.lastState || '—';
@@ -1183,12 +1183,15 @@ function bindUI() {
     toast(r.message, 9000);
   };
   // 手动把默认录音设备设为 CABLE Output（不再自动抢）
-  const sm = $('#btnSetMic');
-  if (sm) sm.onclick = async () => {
+  const setMic = async () => {
     const r = JSON.parse(await B.setDefaultMic());
     toast(r.message, 8000);
     await refresh();
   };
+  // 两个面板各有一个同名动作（环境自检 / 虚拟声卡），id 必须不同，各自绑定
+  ['#btnSetMic', '#btnSetMicCable'].forEach(sel => {
+    const el = $(sel); if (el) el.onclick = setMic;
+  });
   // ── 屏幕键盘弹窗：保存 / 不执行 / 取消 ──
   const curKey = () => ((state && state.keys && state.keys.items) || []).find(x => x.id === selectedKey);
   const comboVks = () => {
@@ -1302,9 +1305,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.61',
+      version: '1.2.62',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.61（构建于 2026-10-20 13:50）',
+      versionLine: 'v1.2.62（构建于 2026-10-20 14:00）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

@@ -38,11 +38,6 @@ namespace Iprc1000Adapter;
 internal static class TemplateClick
 {
     private const int LearnSize = 44;      // 采集边长
-    /// <summary>
-    /// 门槛**默认值**（唯一来源是 `Settings.ClickMinScore`，这里只作为它的兜底常量）。
-    /// 运行时的判定一律用 `Settings.ClickMinScore` —— 本类内部**不得**再出现独立的门槛常量。
-    /// </summary>
-    private const double DefaultMinScore = 0.75;
     private const int MaxW = 3000, MaxH = 1600; // 窗口尺寸上限（防御异常窗口）
     /// <summary>在采集位置附近多大范围内找（±像素）。大窗口全遍历要几秒，收窄到这块足够快。</summary>
     private const int SearchRadius = 120;

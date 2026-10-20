@@ -18,9 +18,6 @@ namespace Iprc1000Adapter;
 internal sealed class KeyFilter : IDisposable
 {
     // ── 键盘钩子 ──
-    private const int WH_KEYBOARD_LL = 13;
-    private const int WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101, WM_SYSKEYDOWN = 0x0104, WM_SYSKEYUP = 0x0105;
-    private const uint LLKHF_INJECTED_MASK = 0x10 | 0x02;
 
     // ── Raw Input ──
     private const int WM_INPUT = 0x00FF;
@@ -61,11 +58,6 @@ internal sealed class KeyFilter : IDisposable
     [StructLayout(LayoutKind.Sequential)]
     private struct RAWINPUT { public RAWINPUTHEADER header; public RAWKEYBOARD keyboard; }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct KBDLLHOOKSTRUCT { public uint vkCode, scanCode, flags, time; public IntPtr dwExtraInfo; }
-
-    private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
-    private delegate IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool RegisterRawInputDevices(RAWINPUTDEVICE[] pRawInputDevices, uint uiNumDevices, uint cbSize);
@@ -74,21 +66,8 @@ internal sealed class KeyFilter : IDisposable
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern uint GetRawInputDeviceInfoW(IntPtr hDevice, uint uiCommand, IntPtr pData, ref uint pcbSize);
     [DllImport("user32.dll", SetLastError = true)]
-    private static extern IntPtr SetWindowsHookExW(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
-    [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(IntPtr hhk);
-    [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern IntPtr GetMessageW(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
-    [DllImport("user32.dll")] private static extern bool TranslateMessage(ref MSG lpMsg);
-    [DllImport("user32.dll")] private static extern IntPtr DispatchMessageW(ref MSG lpMsg);
-    [DllImport("user32.dll")] private static extern bool PostThreadMessageW(uint idThread, uint msg, IntPtr wParam, IntPtr lParam);
-    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetModuleHandleW(string? name);
-    [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MSG { public IntPtr hwnd; public uint message; public IntPtr wParam, lParam; public uint time; public int pt_x, pt_y; }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public IntPtr dwExtraInfo; }
@@ -133,13 +112,11 @@ internal sealed class KeyFilter : IDisposable
     // 句柄 → 是不是遥控器。**只存一个 bool，不存别的设备的任何信息**
     // （2026-10-18 用户明确要求：别人的键盘鼠标不要留痕）。
     private readonly Dictionary<ulong, bool> _deviceCache = new();
-    private IntPtr _hook = IntPtr.Zero;
-    private HookProc? _proc;                 // 必须保活
-    private uint _threadId;
     private volatile bool _running;
     private IntPtr _hwnd;
 
-    private long _swallowed, _passed;
+    // 2026-10-20：`_swallowed/_passed` 原本只在已删除的低级钩子里自增 ⇒ 恒为 0，
+    // 而界面却拿它显示"已拦截/放行"（假仪表）。一并删除。
     private readonly Dictionary<ushort, bool> _lastState = new();   // 去重：按住的自动重复只处理第一次
     private DateTime _lastRawInputAt = DateTime.MinValue;
 
@@ -285,7 +262,7 @@ internal sealed class KeyFilter : IDisposable
     /// <summary>捕获到的 VK（0 = 还没有）</summary>
     public int CapturedVk { get; private set; }
     /// <summary>捕获成功时触发</summary>
-    public event Action<int>? OnCaptured;
+    // 2026-10-20：`OnCaptured` 从未被触发、也从未有人订阅 → 已删除（审查发现的死事件）。
     /// <summary>遥控器按键按下/抬起回调 (buttonId, pressed)</summary>
     public event Action<string, bool>? OnButton;
     /// <summary>任意按键回调（用于「当前操作」显示）</summary>
@@ -309,8 +286,7 @@ internal sealed class KeyFilter : IDisposable
     /// <summary>最近一次失败原因（Raw Input 注册 / 装钩子）</summary>
     public string? LastError { get; private set; }
 
-    public long Swallowed => Interlocked.Read(ref _swallowed);
-    public long Passed => Interlocked.Read(ref _passed);
+    // 2026-10-20：`Swallowed` / `Passed` 随计数器一起删除。
     public bool Running => _running;
     public bool DeviceSeen { get; private set; }
 
@@ -608,99 +584,8 @@ internal sealed class KeyFilter : IDisposable
         _watchdog?.Dispose();
         _watchdog = null;
         ClearHeld("程序停止");              // 关键：退出前一定要把注入的键放掉，避免修饰键卡死
-        if (_threadId != 0) PostThreadMessageW(_threadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
     }
 
-    private void HookThread()
-    {
-        _threadId = GetCurrentThreadId();
-        _hook = SetWindowsHookExW(WH_KEYBOARD_LL, _proc!, GetModuleHandleW(null), 0);
-        if (_hook == IntPtr.Zero)
-        {
-            LastError = $"SetWindowsHookExW 失败，err={Marshal.GetLastWin32Error()}";
-            _running = false;
-            return;
-        }
-        while (_running && GetMessageW(out var msg, IntPtr.Zero, 0, 0) > 0)
-        {
-            TranslateMessage(ref msg);
-            DispatchMessageW(ref msg);
-        }
-        if (_hook != IntPtr.Zero) { UnhookWindowsHookEx(_hook); _hook = IntPtr.Zero; }
-    }
-
-    // ── 钩子：吞掉遥控器当前按住的键（含系统自动重复） ──
-
-    private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
-    {
-        if (nCode == 0)
-        {
-            var m = (uint)wParam.ToInt64();
-            if (m is WM_KEYDOWN or WM_KEYUP or WM_SYSKEYDOWN or WM_SYSKEYUP)
-            {
-                var kb = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
-                var injected = (kb.flags & LLKHF_INJECTED_MASK) != 0;
-                if (!injected)
-                {
-                    var vk = (ushort)kb.vkCode;
-                    var isDown = m is WM_KEYDOWN or WM_SYSKEYDOWN;
-                    bool held;
-                    lock (_heldLock)
-                    {
-                        held = _held.Contains(vk)
-                               // 幽灵键位：遥控器刚有动作的一小段窗口内也吞掉
-                               || (vk == SpuriousVk && DateTime.UtcNow < _spuriousUntil);
-
-                        // ★★ 关键：**在钩子里就武装幽灵窗口**。
-                        //    不能只靠 Raw Input —— WM_INPUT 是队列消息，UI 线程一忙就会晚几十毫秒，
-                        //    而幽灵报告只晚 1~2 ms，等 Raw Input 武装完 i 早漏出去了（实测踩到）。
-                        //    这里只要看到"遥控器用到的键位"就立刻武装，与 Raw Input 时序无关。
-                        if (isDown && RemoteVks.Contains(vk))
-                            _spuriousUntil = DateTime.UtcNow.AddMilliseconds(SpuriousArmMs);
-                    }
-                    // ★★★ 只吞「按下」，**抬起事件一律放行** ★★★
-                    //
-                    // 这是「一直输出 m」的真正根因：遥控器的 UP 若被吞掉，Windows 就永远
-                    // 收不到那次释放，会把该键锁在「按下」状态，之后键盘类驱动按约 31 Hz
-                    // 持续合成重复 —— 于是就算遥控器早已松手，m 仍会不停往外冒。
-                    // （此前我们把 UP 也吞了，导致这个 bug；DOWN 才需要吞，UP 放行反而
-                    //   正好把系统状态清干净，且单独的 UP 不会产生任何字符。）
-                    if (held && isDown)
-                    {
-                        Interlocked.Increment(ref _swallowed);
-                        // 只记"意外"的：遥控器键集之外的 VK 被吞掉
-                        if (!RemoteVks.Contains(vk))
-                        {
-                            lock (_loggedSwallow)
-                            {
-                                if (_loggedSwallow.Add(vk))
-                                    HookLog($"SWALLOW vk=0x{vk:X2} scan=0x{kb.scanCode:X2} (不在遥控器键集内)");
-                            }
-                        }
-                        return 1;
-                    }
-                    // 放行：**记录 vk/scan/是否遥控器键/武装剩余** —— 漏出去的到底是哪个键，一眼可见
-                    HookLog($"PASS vk=0x{vk:X2} scan=0x{kb.scanCode:X2} down={isDown} " +
-                            $"远程键={RemoteVks.Contains(vk)} 幽灵武装剩={(int)(_spuriousUntil - DateTime.UtcNow).TotalMilliseconds}ms " +
-                            $"held={_held.Count}");
-                    if (vk == SpuriousVk) SpuriousLeaked++;
-
-                    // 「按一下绑定」：捕获这次物理按键（并吞掉，避免打出一个字符）
-                    if (CaptureNext && isDown && vk != 0)
-                    {
-                        CaptureNext = false;
-                        CapturedVk = vk;
-                        Interlocked.Increment(ref _swallowed);
-                        try { OnCaptured?.Invoke(vk); } catch { }
-                        return 1;
-                    }
-
-                    Interlocked.Increment(ref _passed);
-                }
-            }
-        }
-        return CallNextHookEx(_hook, nCode, wParam, lParam);
-    }
 
     // ── Raw Input：识别设备 + 维护 held 集合 + 触发映射 ──
 
@@ -1441,6 +1326,5 @@ internal sealed class KeyFilter : IDisposable
     {
         try { ReleaseAllInjected(); } catch { }
         Stop();
-        _proc = null;
     }
 }

@@ -807,8 +807,7 @@ internal sealed class Backend : IDisposable
             {
                 ["running"] = _filter?.Running ?? false,
                 ["deviceSeen"] = _filter?.DeviceSeen ?? false,
-                ["swallowed"] = _filter?.Swallowed ?? 0,
-                ["passed"] = _filter?.Passed ?? 0,
+                // 2026-10-20：`swallowed`/`passed` 恒为 0（钩子已删）→ 不再上报
                 ["error"] = _filter?.LastError,
                 ["sinceLastInputMs"] = _filter?.SinceLastInputMs ?? -1,
                 ["spuriousLeaked"] = _filter?.SpuriousLeaked ?? 0,
