@@ -173,6 +173,42 @@ internal static class Env
         catch (Exception e) { return (false, $"调用失败：{e.Message}"); }
     }
 
+    /// <summary>
+    /// 已知的**反作弊 / 反篡改**常驻进程（进程名不含 .exe，按小写比）。
+    ///
+    /// 用途只有一个：**如实提示风险**，不改变任何行为。
+    /// 本程序用 **WinUHid 虚拟 HID + SendInput** 注入输入 —— 内核级反作弊
+    /// （尤其 Vanguard）会把这类虚拟输入设备判为违规，**可能封号**。
+    /// 与其让用户在游戏里试，不如启动时就告诉他。
+    /// </summary>
+    private static readonly (string proc, string name)[] AntiCheats =
+    {
+        ("vgc",        "Vanguard（Valorant）"),
+        ("vgtray",     "Vanguard（Valorant）"),
+        ("easyanticheat", "Easy Anti-Cheat"),
+        ("beservice",  "BattlEye"),
+        ("beclient",   "BattlEye"),
+        ("gameguard",  "nProtect GameGuard"),
+        ("xigncode",   "XignCode3"),
+        ("ace-guard",  "ACE 反作弊（腾讯）"),
+        ("tenprotect", "TP 反作弊（腾讯）"),
+        ("sguard",     "TP 反作弊（腾讯）"),
+    };
+
+    /// <summary>检测到的反作弊名称；没有则 null。开销：一次进程名查找。</summary>
+    public static string? DetectAntiCheat()
+    {
+        foreach (var (proc, name) in AntiCheats)
+        {
+            try
+            {
+                if (System.Diagnostics.Process.GetProcessesByName(proc).Length > 0) return name;
+            }
+            catch { }
+        }
+        return null;
+    }
+
     public static bool IsAdmin()
     {
         try

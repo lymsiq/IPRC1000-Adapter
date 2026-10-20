@@ -80,14 +80,62 @@ internal static class Safe
     /// </summary>
     public static void Note(string what)
     {
+        // ★★★ 2026-10-20（第四轮审查·资源/延迟）：
+        //   `Note` 跑在**按键线程**（ETW 回调/注入路径）上，原来是**同步写盘** ——
+        //   慢盘/杀软扫描时一次 AppendAllText 可能几十毫秒，直接把按键延迟顶上去。
+        //   改成**入队 + 后台落盘**（与桥的 log_async 同一思路）：热路径只做一次入队（~百纳秒）。
         try
         {
-            var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}  {what}\n";
+            EnsureWriter();
+            _q.Enqueue($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}  {what}");
+            if (_q.Count > 4000) _q.TryDequeue(out _);      // 极端的洪水保护
+        }
+        catch { }
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentQueue<string> _q = new();
+    private static int _writerStarted;
+
+    /// <summary>后台落盘线程：每 200ms 或攒够 64 条就刷一次。首次 Note 时惰性启动。</summary>
+    private static void EnsureWriter()
+    {
+        if (Interlocked.Exchange(ref _writerStarted, 1) != 0) return;
+        Task.Factory.StartNew(() =>
+        {
+            var sb = new System.Text.StringBuilder();
+            while (true)
+            {
+                try
+                {
+                    Thread.Sleep(200);
+                    sb.Clear();
+                    var n = 0;
+                    while (n < 512 && _q.TryDequeue(out var line)) { sb.Append(line).Append('\n'); n++; }
+                    if (n == 0) continue;
+                    lock (Gate)
+                    {
+                        Directory.CreateDirectory(Dir);
+                        File.AppendAllText(ErrorFile, sb.ToString(), new UTF8Encoding(false));
+                    }
+                    Cap(ErrorFile);
+                }
+                catch { }
+            }
+        }, TaskCreationOptions.LongRunning);
+    }
+
+    /// <summary>把队列里剩下的立刻写完（崩溃/退出前调用）。</summary>
+    public static void FlushNotes()
+    {
+        try
+        {
+            var sb = new System.Text.StringBuilder();
+            while (_q.TryDequeue(out var line)) sb.Append(line).Append('\n');
+            if (sb.Length == 0) return;
             lock (Gate)
             {
                 Directory.CreateDirectory(Dir);
-                File.AppendAllText(ErrorFile, line, new UTF8Encoding(false));
-                _lastKey = ""; _repeat = 0;   // 不让 Note 影响去重状态
+                File.AppendAllText(ErrorFile, sb.ToString(), new UTF8Encoding(false));
             }
             Cap(ErrorFile);
         }

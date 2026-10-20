@@ -404,6 +404,12 @@ internal sealed class Backend : IDisposable
                     if (i % 5 == 0) { try { AudioDrivenVoiceRelease(); } catch { } }
                     // 每 8 秒一次：跨天就清理旧日志（内部只比较日期，不枚举目录）
                     if (i == 0) { try { Safe.Housekeeping(); } catch { } }
+                    // 每 32 秒一次：检测反作弊进程（只用于界面提示，不改变注入行为）
+                    if (i == 0 && Environment.TickCount64 - _antiCheatAt > 32000)
+                    {
+                        _antiCheatAt = Environment.TickCount64;
+                        try { _antiCheat = Env.DetectAntiCheat(); } catch { }
+                    }
                     if ((_deviceRecheckRequested && i % 5 == 4) || i % 20 == 19)
                     {
                         _deviceRecheckRequested = false;
@@ -595,6 +601,9 @@ internal sealed class Backend : IDisposable
 
     private string? _micDefaultName;
     private DateTime _lastMicFix = DateTime.MinValue;
+    /// <summary>检测到的反作弊名称（仅用于界面提示）；每 32 秒刷新一次</summary>
+    private string? _antiCheat;
+    private long _antiCheatAt;
 
     /// <summary>漂移检测 + 自动恢复（每轮探针跑一次）</summary>
     private void WatchDefaultMic()
@@ -756,6 +765,7 @@ internal sealed class Backend : IDisposable
                 // ★ 面板上要显示的是**语音键**的判据（音频静默阈值），不是 Raw Input 的静默超时
                 ["voiceSilentMs"] = StuckGuard.VoiceSilentMs,
                 ["voiceAudioRelease"] = Settings.VoiceAudioRelease,
+                ["antiCheat"] = _antiCheat,
                 ["clickMinScore"] = Settings.ClickMinScore,
                 ["clickSearchScope"] = Settings.ClickSearchScope,
                 ["clickReturnToOrigin"] = Settings.ClickReturnToOrigin,

@@ -145,6 +145,17 @@ function renderOverview(s) {
     // 原来那条"已拦截 N 次 / 放行 M 次"的分支**永远不会执行**，且计数恒为 0（假仪表）→ 删掉。
     : `零字符输出 · 按键走 BthPort ETW · 无需拦截`;
 
+  // 反作弊提示（只提示、不改变行为）：本程序用虚拟 HID + SendInput 注入输入
+  const ac = $('#acWarn');
+  if (ac) {
+    ac.innerHTML = s.antiCheat
+      ? `检测到 <b>${s.antiCheat}</b> 正在运行。<br>` +
+        `本程序用<b>虚拟 HID 键盘</b>注入按键 —— 内核级反作弊可能把它判为违规，` +
+        `<b>存在封号风险</b>。建议不要在带反作弊的联机游戏里使用；` +
+        `只做语音输入时也请避免在游戏进行中按住语音键。`
+      : '';
+  }
+
   $('#opKey').textContent = d.lastKey || '—';
   $('#opState').textContent = d.lastState || '—';
 
@@ -1305,9 +1316,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.66',
+      version: '1.2.67',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.66（构建于 2026-10-20 14:42）',
+      versionLine: 'v1.2.67（构建于 2026-10-20 14:55）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

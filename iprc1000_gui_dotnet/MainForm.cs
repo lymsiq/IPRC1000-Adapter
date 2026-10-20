@@ -130,7 +130,12 @@ internal sealed class MainForm : Form
         var trayMenu = new ContextMenuStrip();
         trayMenu.Items.Add("显示主窗口", null, (_, _) => RestoreFromTray());
         trayMenu.Items.Add("-");
-        trayMenu.Items.Add("退出", null, (_, _) => { _reallyExit = true; Application.Exit(); });
+        trayMenu.Items.Add("退出", null, (_, _) =>
+        {
+            _reallyExit = true;
+            try { Safe.FlushNotes(); } catch { }   // 异步日志：退出前补写最后一段
+            Application.Exit();
+        });
         _tray.ContextMenuStrip = trayMenu;
         // 双击 = 打开并**直接切到设置页**（用户要求）；单击 = 只打开
         _tray.DoubleClick += (_, _) => RestoreFromTray(showSettings: true);

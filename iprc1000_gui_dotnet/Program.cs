@@ -256,7 +256,12 @@ internal static class Program
         // ★ 崩溃/未处理异常也要留痕（以前只在界面上"消失"，日志里什么都没有）
         Application.ThreadException += (_, e) => Safe.Log(e.Exception, "UI 线程未处理异常");
         AppDomain.CurrentDomain.UnhandledException +=
-            (_, e) => Safe.Log(e.ExceptionObject as Exception, "未处理异常（进程即将退出）");
+            (_, e) =>
+            {
+                Safe.Log(e.ExceptionObject as Exception, "未处理异常（进程即将退出）");
+                try { Safe.FlushNotes(); } catch { }
+            };
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => { try { Safe.FlushNotes(); } catch { } };
         TaskScheduler.UnobservedTaskException +=
             (_, e) => { Safe.Log(e.Exception, "未观察的任务异常"); e.SetObserved(); };
 
