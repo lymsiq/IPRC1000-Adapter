@@ -634,6 +634,7 @@ internal sealed class MainForm : Form
             "testClickIcon" => _backend.TestClickIcon(),
             "testTone" => _backend.PlayTestTone(),
             "setClickMinScore" => _backend.SetClickMinScore(Arg(0)),
+            "setClickSearchScope" => _backend.SetClickSearchScope(Arg(0)),
             "setClickReturnOrigin" => _backend.SetClickReturnOrigin(Arg(0)),
             "installWinuhid" => _backend.InstallWinuhid(),
             "exportWinuhid" => _backend.ExportWinuhid(),

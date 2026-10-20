@@ -32,7 +32,10 @@ except Exception:
 
 # 仓库根目录。默认是本地路径；CI 里用环境变量覆盖：
 #   IPRC1000_ROOT=${{ github.workspace }} python tools/package.py
-ROOT = os.environ.get("IPRC1000_ROOT") or r"F:\vibe"
+# ★ 2026-10-20：原来写死 `F://vibe` —— 换机器/换盘符就废。
+# 现在默认 = **本脚本所在仓库根**（tools/package.py 的上一级），仍可用 IPRC1000_ROOT 覆盖。
+ROOT = (os.environ.get("IPRC1000_ROOT")
+        or os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PUB = os.path.join(ROOT, "iprc1000_gui_dotnet", "publish")
 
 

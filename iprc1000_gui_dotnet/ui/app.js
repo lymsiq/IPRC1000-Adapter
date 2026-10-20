@@ -447,8 +447,25 @@ function buildKeyboard() {
       thIn.value = String(r.score || thIn.value);
     };
     th.appendChild(thIn);
-    th.appendChild(document.createTextNode('（默认 0.75；「试一下」看分数再定）'));
+    th.appendChild(document.createTextNode('「试一下」看分数再定'));
     mo.appendChild(th);
+
+    // 搜索范围：局部 → 窗口下部 → 整窗（先精搜再放宽，这里只改放宽到多大）
+    const sc = document.createElement('label');
+    sc.style.cssText = 'display:inline-flex;align-items:center;gap:6px;margin-left:12px;font-size:12.5px;color:#556';
+    sc.appendChild(document.createTextNode('搜索范围'));
+    const sel = document.createElement('select');
+    sel.style.cssText = 'padding:2px 4px';
+    [['0', '只搜附近（最快）'], ['1', '窗口下部（默认）'], ['2', '整个窗口（最稳）']].forEach(([v, t]) => {
+      const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o);
+    });
+    sel.value = String((state && state.clickSearchScope) ?? 1);
+    sel.onchange = async () => {
+      const r = JSON.parse(await B.setClickSearchScope(sel.value));
+      toast(r.message, 6000);
+    };
+    sc.appendChild(sel);
+    mo.appendChild(sc);
 
     // 「点完回到原位再点一下」：默认开。点目标按钮会让焦点落到按钮上，
     // 之后 OK→Enter 就发不出去（真机现象）；点回原位能把焦点还给输入框。
@@ -1285,9 +1302,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.60',
+      version: '1.2.61',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.60（构建于 2026-10-19 16:45）',
+      versionLine: 'v1.2.61（构建于 2026-10-20 13:50）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

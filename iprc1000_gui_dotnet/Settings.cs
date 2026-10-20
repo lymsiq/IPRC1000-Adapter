@@ -96,6 +96,12 @@ internal static class Settings
         get => _data.ClickProcess;
         set { _data.ClickProcess = value; Save(); }
     }
+    public static int ClickSearchScope
+    {
+        get => _data.ClickSearchScope is >= 0 and <= 2 ? _data.ClickSearchScope : 1;
+        set { _data.ClickSearchScope = Math.Clamp(value, 0, 2); Save(); }
+    }
+
     public static double ClickMinScore
     {
         get => _data.ClickMinScore is >= 0.5 and <= 0.98 ? _data.ClickMinScore : 0.75;
@@ -246,6 +252,15 @@ internal static class Settings
         /// 有"唯一性校验"兜底：分数不高但**明显领先次佳**时才接受，避免误点。
         /// </summary>
         public double ClickMinScore { get; set; } = 0.75;
+
+        /// <summary>
+        /// 截图点击的**搜索范围**：
+        ///   0 = 只搜"采集位置附近"（最快，但窗口缩放/换模型后可能找不到）
+        ///   1 = 失败后再搜**窗口下部条带**（默认；输入框/模型栏所在区域）
+        ///   2 = 失败后再搜**整个窗口**（最慢但最稳，约多花 100~300 ms）
+        /// 「先精搜、再放宽」这个顺序不变，这里改的只是**放宽到多大**。
+        /// </summary>
+        public int ClickSearchScope { get; set; } = 1;
 
         /// <summary>上次命中点（窗口内坐标）—— SikuliX 的 "still-there" 预检用，省掉整段搜索</summary>
         public bool ClickLastOk { get; set; }

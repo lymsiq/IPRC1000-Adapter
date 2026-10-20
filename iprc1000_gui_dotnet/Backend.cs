@@ -757,6 +757,7 @@ internal sealed class Backend : IDisposable
                 ["voiceSilentMs"] = StuckGuard.VoiceSilentMs,
                 ["voiceAudioRelease"] = Settings.VoiceAudioRelease,
                 ["clickMinScore"] = Settings.ClickMinScore,
+                ["clickSearchScope"] = Settings.ClickSearchScope,
                 ["clickReturnToOrigin"] = Settings.ClickReturnToOrigin,
                 ["voiceGraceSec"] = (long)StuckGuard.VoiceGraceSec,
             },
@@ -1419,6 +1420,16 @@ internal sealed class Backend : IDisposable
         {
             return Env.Json(new { ok = false, message = "采集失败：" + e.Message });
         }
+    }
+
+    /// <summary>设置截图点击的搜索范围（0=只局部 / 1=窗口下部 / 2=整个窗口）。</summary>
+    public string SetClickSearchScope(string v)
+    {
+        if (!int.TryParse(v, out var n) || n < 0 || n > 2)
+            return Env.Json(new { ok = false, message = "搜索范围只能是 0/1/2" });
+        Settings.ClickSearchScope = n;
+        var name = n switch { 0 => "只搜采集位置附近", 2 => "失败后再搜整个窗口", _ => "失败后再搜窗口下部" };
+        return Env.Json(new { ok = true, scope = Settings.ClickSearchScope, message = "搜索范围：" + name });
     }
 
     /// <summary>设置截图点击的相似度门槛（0.50~0.98）。</summary>

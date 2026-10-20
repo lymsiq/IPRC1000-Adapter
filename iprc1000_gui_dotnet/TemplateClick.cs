@@ -31,19 +31,18 @@ namespace Iprc1000Adapter;
 ///
 /// - 目标窗口必须可见（不能完全被其他窗口挡住，因为用的是屏幕截取）；
 /// - 主题/缩放变化会让模板失效 —— 重新采集一次即可；
-/// - 匹配阈值 **0.80**（SikuliX 默认 0.7，但其文档说"要防误点应 >0.85"）；
-///   低于它就不点 —— 宁可不动，也不要在错误位置乱点。
+/// - 匹配阈值**可配置**（默认 **0.75**，见 `Settings.ClickMinScore`；SikuliX 默认 0.7，
+///   其文档说"要防误点应 >0.85"）。低于阈值就不点 —— 宁可不动，也不要在错误位置乱点；
+/// - 搜索范围**可配置**（`Settings.ClickSearchScope`：局部 / 窗口下部 / 全窗）。
 /// </summary>
 internal static class TemplateClick
 {
     private const int LearnSize = 44;      // 采集边长
     /// <summary>
-    /// 置信度门槛。**0.72 → 0.80**（2026-10-19 参考 SikuliX 的经验）：
-    /// SikuliX 默认 0.7，但其文档明确"要防误点应取 **>0.85**，0.7 会带来假阳性"。
-    /// 我们宁可"不点"也不能"点错"，所以取 0.80 作为下限；
-    /// 面板/采集提示里继续以 0.85 作为"建议重采"的界线。
+    /// 门槛**默认值**（唯一来源是 `Settings.ClickMinScore`，这里只作为它的兜底常量）。
+    /// 运行时的判定一律用 `Settings.ClickMinScore` —— 本类内部**不得**再出现独立的门槛常量。
     /// </summary>
-    private const double MinScore = 0.80;
+    private const double DefaultMinScore = 0.75;
     private const int MaxW = 3000, MaxH = 1600; // 窗口尺寸上限（防御异常窗口）
     /// <summary>在采集位置附近多大范围内找（±像素）。大窗口全遍历要几秒，收窄到这块足够快。</summary>
     private const int SearchRadius = 120;
@@ -248,7 +247,7 @@ internal static class TemplateClick
             var ph = Math.Min(h - py, StillThereRadius * 2 + tpl.Height);
             if (pw > tpl.Width && ph > tpl.Height)
             {
-                var (sc0, x0, y0, sec0, _, _) = FindBest(shot, tpl, px, py, pw, ph, 1.0, expectX, expectY);
+                var (sc0, x0, y0, sec0, _, _) = FindBest(shot, tpl, px, py, pw, ph, 1.0, expectX, expectY, minScore);
                 if (sc0 >= minScore)
                 {
                     score = sc0; mx = x0; my = y0;
@@ -264,7 +263,7 @@ internal static class TemplateClick
         if (score < minScore)
         {
         var (s1, x1, y1, sec1, sx1, sy1) = roiUsable
-            ? FindBest(shot, tpl, roiX, roiY, roiW, roiH, 1.0, expectX, expectY)
+            ? FindBest(shot, tpl, roiX, roiY, roiW, roiH, 1.0, expectX, expectY, minScore)
             : (0.0, 0, 0, 0.0, 1.0, 1.0);
         score = s1; mx = x1; my = y1; sx = sx1; sy = sy1; second = sec1;
         }
@@ -272,9 +271,9 @@ internal static class TemplateClick
         {
             foreach (var k in Rescales)
             {
-                var (s2, x2, y2, sec2, _, _) = FindBest(shot, tpl, roiX, roiY, roiW, roiH, k, expectX, expectY);
+                var (s2, x2, y2, sec2, _, _) = FindBest(shot, tpl, roiX, roiY, roiW, roiH, k, expectX, expectY, minScore);
                 if (s2 > score) { score = s2; mx = x2; my = y2; second = sec2; sx = k; sy = k; }
-                if (score >= MinScore) break;
+                if (score >= minScore) break;   // ★ 与判定同源（原来写死 MinScore=0.80，门槛调到 0.9 时会提前停）
             }
         }
         if (score < minScore)
@@ -286,14 +285,18 @@ internal static class TemplateClick
             var wh = Math.Min(h - wy, WideRadius * 2 + tpl.Height);
             if (ww > tpl.Width && wh > tpl.Height)
             {
-                var (s3, x3, y3, sec3, _, _) = FindBest(shot, tpl, wx, wy, ww, wh, 1.0, expectX, expectY);
+                var (s3, x3, y3, sec3, _, _) = FindBest(shot, tpl, wx, wy, ww, wh, 1.0, expectX, expectY, minScore);
                 if (s3 > score) { score = s3; mx = x3; my = y3; second = sec3; roiX = wx; roiY = wy; }
             }
         }
         // ★ 第 4 段：全宽粗搜 + 精修（换个模型后 ✨ 会横向漂移，固定搜索窗装不下）
         if (score < minScore)
         {
-            var (cf, cfx, cfy) = CoarseFind(shot, tpl, minScore);
+            // 搜索范围由设置决定：0=不做粗搜（只信局部），1=窗口下部，2=整窗
+        var scope = Settings.ClickSearchScope;
+        var (cf, cfx, cfy) = scope == 0
+            ? (0.0, 0, 0)
+            : CoarseFind(shot, tpl, minScore, scope == 2 ? 0.0 : 0.55);
             if (cf >= minScore)
             {
                 score = cf; mx = cfx; my = cfy;
@@ -409,10 +412,11 @@ internal static class TemplateClick
     /// 代价：粗扫约 100~200 ms —— 只在前面所有精搜都失败时才走这一段，
     /// 属于"换个模型/窗口刚动过"的兜底路径。
     /// </summary>
-    private static (double score, int x, int y) CoarseFind(Bitmap shot, Bitmap tpl, double minScore)
+    private static (double score, int x, int y) CoarseFind(
+        Bitmap shot, Bitmap tpl, double minScore, double bandTopRatio)
     {
         const double k = 0.5;                       // 降采样倍率
-        var bandTop = Math.Max(0, (int)(shot.Height * 0.55));   // 只看下部 45%
+        var bandTop = Math.Max(0, (int)(shot.Height * bandTopRatio));   // 0.55 = 只看下部 45%；0 = 全窗
         var bw = shot.Width;
         var bh = shot.Height - bandTop;
         if (bh < tpl.Height * 2 || bw < tpl.Width * 2) return (0, 0, 0);
@@ -436,7 +440,7 @@ internal static class TemplateClick
             g.DrawImage(tpl, new Rectangle(0, 0, tw, th));
         }
 
-        var (sc, sx, sy, _) = Match(small, smallTpl, -1, -1);   // expX/Y = -1 ⇒ 不做距离偏置
+        var (sc, sx, sy, _) = Match(small, smallTpl, -1, -1, 0.55);   // 粗扫放宽   // expX/Y = -1 ⇒ 不做距离偏置
         if (sc < 0.55) return (0, 0, 0);
 
         // 映射回原分辨率，±16px 精修
@@ -448,7 +452,7 @@ internal static class TemplateClick
         var rh = Math.Min(shot.Height - ry, 32 + tpl.Height);
         if (rw <= tpl.Width || rh <= tpl.Height) return (0, 0, 0);
 
-        var (fine, fx, fy, _, _, _) = FindBest(shot, tpl, rx, ry, rw, rh, 1.0, gx, gy);
+        var (fine, fx, fy, _, _, _) = FindBest(shot, tpl, rx, ry, rw, rh, 1.0, gx, gy, minScore);
         return fine >= minScore ? (fine, rx + fx, ry + fy) : (fine, 0, 0);
     }
 
@@ -458,7 +462,7 @@ internal static class TemplateClick
     /// </summary>
     private static (double score, int x, int y, double second, double sx, double sy)
         FindBest(Bitmap shot, Bitmap tpl, int roiX, int roiY, int roiW, int roiH, double scale,
-                 int anchorX, int anchorY)
+                 int anchorX, int anchorY, double minScore)
     {
         Bitmap use = tpl;
         bool own = false;
@@ -483,12 +487,13 @@ internal static class TemplateClick
         using var roi = shot.Clone(new Rectangle(roiX, roiY, roiW, roiH), shot.PixelFormat);
         var expX = anchorX - (int)Math.Round(Settings.ClickTemplateX * scale) - roiX;
         var expY = anchorY - (int)Math.Round(Settings.ClickTemplateY * scale) - roiY;
-        var (sc, x, y, sec) = Match(roi, use, expX, expY);
+        var (sc, x, y, sec) = Match(roi, use, expX, expY, minScore);
         if (own) use.Dispose();
         return (sc, x, y, sec, scale, scale);
     }
 
-    private static (double score, int x, int y, double second) Match(Bitmap big, Bitmap tpl, int expX, int expY)
+    private static (double score, int x, int y, double second) Match(
+        Bitmap big, Bitmap tpl, int expX, int expY, double minScore)
     {
         var bw = big.Width; var bh = big.Height;
         var tw = tpl.Width; var th = tpl.Height;
@@ -532,7 +537,7 @@ internal static class TemplateClick
                 var ncc = (cross - n * mean * tm) / Math.Sqrt(varB * tv);
                 if (ncc > best) { second = best; best = ncc; bx = x; by = y; }
                 else if (ncc > second && (Math.Abs(x - bx) > 8 || Math.Abs(y - by) > 8)) second = ncc;
-                if (ncc >= MinScore && cands.Count < 400) cands.Add((ncc, x, y));
+                if (ncc >= minScore && cands.Count < 400) cands.Add((ncc, x, y));
             }
         }
 
