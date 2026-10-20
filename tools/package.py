@@ -621,9 +621,17 @@ def publish_fresh(out=None, self_contained=False, compressed=False):
     exe = os.path.join(out, "IPRC1000 Adapter.exe")
     print(f"  ✓ {exe}  {os.path.getsize(exe):,} 字节  "
           f"{datetime.datetime.fromtimestamp(os.path.getmtime(exe)):%H:%M:%S}")
+    # ★ 2026-10-20：`dotnet publish` 有时**不带** ui\icon.ico（bin 里有、publish 里没有），
+    #   而托盘图标会因此退回系统通用图标（用户看到的"两个小窗口"）。这里显式补一份。
+    src_ico = os.path.join(ROOT, "iprc1000_gui_dotnet", "ui", "icon.ico")
+    uip_early = os.path.join(out, "ui")
+    if os.path.exists(src_ico):
+        os.makedirs(uip_early, exist_ok=True)
+        shutil.copy2(src_ico, os.path.join(uip_early, "icon.ico"))
+
     # 立刻自检 ui 是否真的复制过来了（这是坑 ② 的哨兵）
     uip = os.path.join(out, "ui")
-    need = ["app.js", "index.html", "style.css", "remote.png"]
+    need = ["app.js", "index.html", "style.css", "remote.png", "icon.ico"]
     miss = [n for n in need if not os.path.exists(os.path.join(uip, n))]
     if miss:
         print(f"  ✗ publish\\ui 缺少 {miss} —— 增量复制又被跳过了")

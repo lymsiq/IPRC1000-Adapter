@@ -101,8 +101,24 @@ internal sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Color.FromArgb(0xEA, 0xF2, 0xFD);   // 与页面底色一致，避免白屏闪烁
 
+        // ★ 2026-10-20（用户指出"托盘图标和程序图标不统一"）：
+        //   exe 里有图标（<ApplicationIcon>），但 **icon.ico 没被打进发布目录**
+        //   ⇒ `FindAsset` 返回 null ⇒ 托盘退回 `SystemIcons.Application`（通用"两个小窗口"）。
+        //   所以这里补一条**不依赖外部文件**的兜底：直接从 exe 资源里取图标。
         var ico = Env.FindAsset("icon.ico");
-        if (ico != null) Icon = new Icon(ico);
+        if (ico != null)
+        {
+            Icon = new Icon(ico);
+        }
+        else
+        {
+            try
+            {
+                var fromExe = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                if (fromExe != null) Icon = fromExe;
+            }
+            catch { }
+        }
 
         // ── 系统托盘：关闭窗口 = 最小化到托盘，右键菜单可真正退出 ──
         _tray = new NotifyIcon
