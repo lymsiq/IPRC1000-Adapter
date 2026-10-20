@@ -311,8 +311,28 @@ internal sealed class KeyFilter : IDisposable
     // ── 语音键"抖动对"去抖（2026-10-19 全键抓包后确认）──
     //   实测报文：DOWN → UP(3/18/34 ms) → 41~163 ms 后真正的 DOWN
     //   ⇒ 输入法见到那个假 UP 就判"说完了"，表现为"还没说话就弹出已识别"。
-    private int _voiceDebounceToken;      // 每次 UP/DOWN 递增，用于取消挂起的释放
-    private int _voicePendingRelease;     // 1 = 有一个挂起的（延迟）释放
+    // ★★ 2026-10-20（第三遍按键检查·受控实验）：抖动对**不只出现在语音键**。
+    //   用 UDP 复现 `DOWN → UP(5ms) → DOWN(41ms)` 实测：
+    //     语音键 → INJECT 1 次（已去抖）
+    //     OK 键 → INJECT **2 次** ⇒ 映射成 Enter 就会**发两次**
+    //   所以去抖改为**全键生效**；状态按 bid 独立（否则两个键会互相取消挂起的释放）。
+    /// <summary>
+    /// 抖动对的判据：按住短于它才算"可能是假松开"。
+    ///
+    /// **取值依据（2026-10-20 重新核对抓包）**：
+    /// · 真实抖动对：`DOWN → UP(3ms) → 41ms 后 DOWN` ← **3ms 是物理上按不出来的**，必是固件抖动；
+    /// · 34ms 那一例后面隔了 **163ms** 才重按 —— 那是用户有意的"短按 + 长按"两次，**不是抖动**。
+    /// ⇒ 阈值取 **25ms**：覆盖 3/18ms 的假松开，又不误伤 34ms 以上的真短按。
+    /// </summary>
+    private const double DebounceMs = 25;
+    /// <summary>
+    /// 挂起多久没再按下，才确认是真松开。实测抖动对的重按间隔 **41ms**，
+    /// 取 **120ms**（≈3 倍余量），同时保证真轻点最多只延后 120ms 松开。
+    /// </summary>
+    private const int DebounceWindowMs = 120;
+    private readonly Dictionary<string, int> _upToken = new();
+    private readonly HashSet<string> _upPending = new();
+    private readonly object _upLock = new();
 
     // 每个键上次"系统侧缺失"的补发时间（500ms 内不重复补，避免刷屏）
     private readonly Dictionary<int, DateTime> _lastReinject = new();
@@ -762,17 +782,27 @@ internal sealed class KeyFilter : IDisposable
         //   处理：**超短 UP 不立即释放**，挂起 100 ms；
         //   · 期间来了 DOWN ⇒ 判为抖动对，**完全不发 UP**（当作同一次按住，豆包毫无感知）；
         //   · 100 ms 内没有 DOWN ⇒ 说明是真的轻点，这时才释放（最多延迟 100 ms）。
-        if (bid == "voice" && !pressed && src == "etw" && holdMs >= 0 && holdMs < 80)
+        if (!pressed && src == "etw" && holdMs >= 0 && holdMs < DebounceMs)
         {
-            var tok = Interlocked.Increment(ref _voiceDebounceToken);
-            Volatile.Write(ref _voicePendingRelease, 1);
-            Safe.Note($"VOICE UP 去抖挂起（按住 {holdMs:F0} ms < 80ms，疑似抖动对）");
+            int tok;
+            lock (_upLock)
+            {
+                _upToken.TryGetValue(bid, out var prev);
+                tok = prev + 1;
+                _upToken[bid] = tok;
+                _upPending.Add(bid);
+            }
+            if (bid == "voice")
+                Safe.Note($"VOICE UP 去抖挂起（按住 {holdMs:F0} ms < {DebounceMs}ms，疑似抖动对）");
             _ = System.Threading.Tasks.Task.Run(async () =>
             {
-                await System.Threading.Tasks.Task.Delay(100);
-                if (Volatile.Read(ref _voiceDebounceToken) != tok) return;   // 期间按下了 ⇒ 已合并
-                Volatile.Write(ref _voicePendingRelease, 0);
-                try { ForceReleaseButton("voice", "去抖 100ms 后仍无按下 ⇒ 确认松开"); } catch { }
+                await System.Threading.Tasks.Task.Delay(DebounceWindowMs);
+                lock (_upLock)
+                {
+                    if (!_upToken.TryGetValue(bid, out var cur) || cur != tok) return;   // 期间又按下了
+                    _upPending.Remove(bid);
+                }
+                try { ForceReleaseButton(bid, $"去抖 {DebounceWindowMs}ms 后仍无按下 ⇒ 确认松开"); } catch { }
             });
             return;
         }
@@ -794,20 +824,23 @@ internal sealed class KeyFilter : IDisposable
             // ★ 语音键按下 → 先预热音频链路（把 CABLE Input 提前打开），再注入按键。
             //   顺序很重要：开声卡要 100~300 ms，而音频随后就到 —— 要先开声卡再注入，
             //   否则那段时间的音频会被丢掉，表现为"按住后立刻说的第一个字识别不出来"。
-            if (bid == "voice")
+            // 抖动对：刚才那次"松开"是假的 ⇒ 取消挂起的释放，保持按住（对外只看到一次连续按住）
             {
-                // 抖动对：刚才那次"松开"是假的 ⇒ 取消挂起的释放，保持按住（豆包只看到一次连续按住）
-                if (Volatile.Read(ref _voicePendingRelease) == 1)
+                bool merged;
+                lock (_upLock)
                 {
-                    Interlocked.Increment(ref _voiceDebounceToken);
-                    Volatile.Write(ref _voicePendingRelease, 0);
-                    Safe.Note("VOICE DOWN 命中抖动对 → 已合并为同一次按住（不发 UP）");
+                    merged = _upPending.Remove(bid);
+                    if (merged) _upToken[bid] = (_upToken.TryGetValue(bid, out var t) ? t : 0) + 1;
+                }
+                if (merged)
+                {
+                    if (bid == "voice") Safe.Note("VOICE DOWN 命中抖动对 → 已合并为同一次按住（不发 UP）");
                     lock (_heldLock) _heldButtons[bid] = (vks, DateTime.UtcNow);
                     InjectSet(ComputeIntended());
                     return;
                 }
-                try { VoiceKeyDown?.Invoke(); } catch { }
             }
+            if (bid == "voice") { try { VoiceKeyDown?.Invoke(); } catch { } }
 
             bool dup; double dupAgeMs = 0;
             lock (_heldLock)
