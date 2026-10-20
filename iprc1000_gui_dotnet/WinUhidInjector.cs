@@ -52,7 +52,6 @@ internal static class WinUhidInjector
     private static extern IntPtr LoadLibraryW(string path);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr GetProcAddress(IntPtr module, string name);
-    [DllImport("kernel32.dll")] private static extern bool FreeLibrary(IntPtr module);
     [DllImport("kernel32.dll")] private static extern IntPtr GetModuleHandleW(string? name);
 
     private static IntPtr _module = IntPtr.Zero;

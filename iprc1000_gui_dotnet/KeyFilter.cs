@@ -80,7 +80,6 @@ internal sealed class KeyFilter : IDisposable
     }
 
     private const uint INPUT_KEYBOARD = 1, KEYEVENTF_KEYUP = 0x0002, KEYEVENTF_EXTENDEDKEY = 0x0001;
-    private const uint WM_QUIT = 0x0012;
 
     // ─────────────────────────────────────────
 
@@ -130,7 +129,6 @@ internal sealed class KeyFilter : IDisposable
     /// 修法：**只要看到遥控器任何按键，就把幽灵键位一并武装一小段时间**（幽灵报告只会在
     /// 这之后极短时间内出现），这样它的 DOWN 也会被吞掉。窗口很短，对真实键盘影响可忽略。
     /// </summary>
-    private const ushort SpuriousVk = 0x49;
 
     /// <summary>
     /// 幽灵键位的"武装窗口"时长。实测幽灵报告只比真实按键**晚 1~2 ms**，
@@ -142,25 +140,9 @@ internal sealed class KeyFilter : IDisposable
     private const int SpuriousArmMs = 40;
     private DateTime _spuriousUntil = DateTime.MinValue;
 
-    /// <summary>遥控器按键用到的 VK 集合（用于"这一下是不是遥控器的键"判断）</summary>
-    private static readonly HashSet<ushort> RemoteVks =
-        new(Keys.VkToButtonId.Keys.Select(v => (ushort)v));
-
     /// <summary>被放行出去的幽灵键次数（应当恒为 0；不为 0 就说明还在漏 i）</summary>
     public long SpuriousLeaked { get; private set; }
 
-    /// <summary>钩子级诊断日志（写进同一个 key-events.log，前缀 HOOK ）</summary>
-    private int _hookLogBudget = 1500;
-    private readonly HashSet<ushort> _loggedSwallow = new();
-
-    private void HookLog(string s)
-    {
-        if (_hookLogBudget-- <= 0) return;
-        EtwKeySource.AppendLog("HOOK " + s);
-    }
-
-    /// <summary>供界面清空诊断日志</summary>
-    public static void ResetHookLogBudget() { }
     /// <summary>
     /// 当前**虚拟键盘整份报告**里按着的键 = 所有「按住中」按钮的键并集。
     ///
