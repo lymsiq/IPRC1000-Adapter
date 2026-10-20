@@ -70,6 +70,14 @@ internal static class Keymaps
 
     private static Store _s = Load();
 
+    /// <summary>
+    /// 全局锁（2026-10-20 审查发现）：`_s` 由 **UI 线程** 改（Set/切组/增删组），
+    /// 而 **ETW 按键线程**同时在 `Get()` 里读 `Dictionary` —— Dictionary 非线程安全，
+    /// 并发"读 + 新增键"可能抛异常或读到半截状态，而且这条路径在按键热路径上。
+    /// 加一把锁：热路径上无争用时开销约 20ns，可以忽略。
+    /// </summary>
+    private static readonly object Gate = new();
+
     // ─────────── 读写 ───────────
     private static Store Load()
     {
@@ -267,11 +275,44 @@ internal static class Keymaps
 
     public static int ActiveIndex => _s.Active;
     public static IReadOnlyList<Group> Groups => _s.Groups;
-    public static Group Current => _s.Groups[_s.Active];
+    /// <summary>
+    /// 当前配置组。
+    /// ★ 2026-10-20：原实现 `_s.Groups[_s.Active]` **没有边界检查** —— 一旦 `Active`
+    ///   非法（手改 keymap.json / 删组竞态），**每次按键都会抛** ArgumentOutOfRange，
+    ///   而调用点（Get/Set）没有兜底 ⇒ 按键全失效。现在夹取到合法范围。
+    /// </summary>
+    public static Group Current
+    {
+        get
+        {
+            lock (Gate)
+            {
+                var g = _s.Groups;
+                if (g.Count == 0) return DefaultGroup();          // 理论上不会，但绝不返回 null
+                var i = _s.Active;
+                if (i < 0 || i >= g.Count) i = 0;
+                return g[i];
+            }
+        }
+    }
+
+    /// <summary>
+    /// 兜底组：配置组列表异常为空时使用（**绝不返回 null**，也绝不让热路径抛异常）。
+    /// 只在 `Load` 失败/文件被清空时才可能走到。
+    /// </summary>
+    private static Group DefaultGroup() => new()
+    {
+        Name = "默认配置组 1",
+        Kind = "plain",
+        Map = Defaults.Plain()
+    };
 
     /// <summary>取某个按键在当前配置组里的映射</summary>
     public static int[] Get(string id)
-        => Current.Map.TryGetValue(id, out var v) ? v : Array.Empty<int>();
+    {
+        lock (Gate)
+            return Current.Map.TryGetValue(id, out var v) ? v : Array.Empty<int>();
+    }
 
     /// <summary>取指定组的映射（自检用：不切换当前组、不写盘）</summary>
     public static Dictionary<string, int[]> MapOf(int idx)
@@ -280,16 +321,25 @@ internal static class Keymaps
     /// <summary>设置某个按键在当前配置组里的映射（空数组 = 不执行）</summary>
     public static void Set(string id, int[] vks)
     {
-        if (vks.Length == 0) Current.Map[id] = Array.Empty<int>();
-        else Current.Map[id] = vks;
-        Save();
+        lock (Gate)
+        {
+            if (vks.Length == 0) Current.Map[id] = Array.Empty<int>();
+            else Current.Map[id] = vks;
+        }
+        Save();     // ★ 写盘放在锁外：磁盘写不该阻塞按键热路径
     }
 
     // ─────────── 配置组操作 ───────────
     /// <summary>切到下一组（**方块键固定做这个**），循环</summary>
     public static string NextGroup()
     {
-        _s.Active = (_s.Active + 1) % _s.Groups.Count;
+        // ★ 2026-10-20：`% _s.Groups.Count` 在 Count==0 时会除零。正常路径有默认组兜底，
+        //   但既然 `Current` 已加兜底组，这里也一并守住（方块键是高频操作，不能抛）。
+        lock (Gate)
+        {
+            if (_s.Groups.Count == 0) return "默认配置组 1";
+            _s.Active = (_s.Active + 1) % _s.Groups.Count;
+        }
         Save();
         return _s.Groups[_s.Active].Name;
     }
