@@ -36,6 +36,16 @@ internal static class Settings
             _data.SchemaVersion = 1;
             Save();
         }
+
+        // ★★ 2026-10-23（自检发现）：`AutoKeepDefaultMic` 的**代码默认值**在 1.2.25 改成了 false，
+        //   但**已存在的 settings.json 里键还在（= true）** ⇒ 老用户依然会被"自动改回默认麦克风"，
+        //   与"不做自动改、只提示"的设计**相违**。这里做一次性迁移。
+        if (_data.SchemaVersion < 2)
+        {
+            _data.AutoKeepDefaultMic = false;
+            _data.SchemaVersion = 2;
+            Save();
+        }
     }
 
     public static bool AutoRun

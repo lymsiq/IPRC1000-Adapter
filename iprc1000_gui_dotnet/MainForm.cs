@@ -129,6 +129,18 @@ internal sealed class MainForm : Form
         };
         var trayMenu = new ContextMenuStrip();
         trayMenu.Items.Add("显示主窗口", null, (_, _) => RestoreFromTray());
+        // ★ 2026-10-23：`forceUnlock`（紧急释放卡住的键）**后端一直有、界面从来没入口** ——
+        //   卡键时用户只能重启程序。接到托盘是最轻的补救（不必开面板）。
+        trayMenu.Items.Add("紧急释放卡住的按键", null, (_, _) =>
+        {
+            try
+            {
+                var r = System.Text.Json.JsonDocument.Parse(_backend.ForceUnlock());
+                var msg = r.RootElement.TryGetProperty("message", out var m) ? m.GetString() : null;
+                _tray.ShowBalloonTip(3000, "IPRC1000", msg ?? "已执行", ToolTipIcon.Info);
+            }
+            catch { }
+        });
         trayMenu.Items.Add("-");
         trayMenu.Items.Add("退出", null, (_, _) =>
         {

@@ -38,7 +38,12 @@ namespace Iprc1000Adapter;
 internal static class TemplateClick
 {
     private const int LearnSize = 44;      // 采集边长
-    private const int MaxW = 3000, MaxH = 1600; // 窗口尺寸上限（防御异常窗口）
+    // ★★ 2026-10-23（第五轮自检）：原来写死 3000×1600 —— **4K 屏上窗口最大化(3840×2160)会被判"尺寸异常"
+    //   直接拒绝**，而 2560×1440 刚好在限内，所以一直没暴露。
+    //   现在：宽高放宽到 8192，改用**总像素**防异常（>24MP 才算离屏/异常窗口），
+    //   搜索成本由 CoarseFind 的自适应降采样保证（见那里的 k）。
+    private const int MaxW = 8192, MaxH = 8192;
+    private const long MaxPixels = 24_000_000;   // ≈ 5K×4.6K，够覆盖多屏拼接
     /// <summary>在采集位置附近多大范围内找（±像素）。大窗口全遍历要几秒，收窄到这块足够快。</summary>
     private const int SearchRadius = 120;
     /// <summary>失败时先试这些缩放比（应对 DPI / 窗口缩放 / 主题字号变化）</summary>
@@ -193,7 +198,7 @@ internal static class TemplateClick
         GetWindowRect(hwnd, out var r);
         var w = r.R - r.L;
         var h = r.B - r.T;
-        if (w <= 0 || h <= 0 || w > MaxW || h > MaxH)
+        if (w <= 0 || h <= 0 || w > MaxW || h > MaxH || (long)w * h > MaxPixels)
             return $"目标窗口尺寸异常（{w}×{h}），跳过。";
 
         using var tpl = FromBase64(b64);
@@ -410,7 +415,10 @@ internal static class TemplateClick
     private static (double score, int x, int y) CoarseFind(
         Bitmap shot, Bitmap tpl, double minScore, double bandTopRatio)
     {
-        const double k = 0.5;                       // 降采样倍率
+        // ★ 2026-10-23：降采样比例**自适应** —— 目标窗口越宽，k 越小。
+        //   原来固定 0.5：4K 窗口下部一条带 = 1920×540，粗扫要 1~2 秒（点一下卡住）。
+        //   现在按"缩放后宽度 ≈600px"反推 k（下限 0.12），4K 与 1080p 的粗搜成本基本一致。
+        var k = Math.Clamp(600.0 / Math.Max(1, shot.Width), 0.12, 0.5);
         var bandTop = Math.Max(0, (int)(shot.Height * bandTopRatio));   // 0.55 = 只看下部 45%；0 = 全窗
         var bw = shot.Width;
         var bh = shot.Height - bandTop;
