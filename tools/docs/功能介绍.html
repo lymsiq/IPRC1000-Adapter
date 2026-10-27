@@ -42,8 +42,8 @@
   .steps>li::before{content:counter(s);position:absolute;left:-13px;top:0;width:26px;height:26px;
        border-radius:50%;background:var(--accent);color:#fff;text-align:center;line-height:26px;
        font-size:13px;font-weight:700}
-  .steps>li b{display:block;margin-bottom:2px}
-  .steps>li span{color:var(--sub);font-size:13.8px}
+  .steps>li>b{display:block;margin-bottom:2px}   /* 只作用于步骤标题；行内 <b> 不受影响 */
+  .steps>li>span{color:var(--sub);font-size:13.8px}
   .pair{background:#fff8e8;border:1px solid #f0dfb8;border-radius:10px;padding:16px 18px}
   .pair b{color:var(--warn)}
   .keys{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 2px}
@@ -105,12 +105,15 @@
   <tr><td class="k">方块 ■</td><td><b>切换配置组</b></td><td class="k">账号</td><td><b>截图点击</b>（点采集过的图标）</td></tr>
 </table>
 
-<h2>三、三步开始用</h2>
+<h2>三、四步开始用</h2>
 <ol class="steps">
-  <li><b>安装</b><span>双击安装包 → 点「是」→ 装完可让它自动做环境部署（会装虚拟键盘驱动、虚拟声卡）。</span></li>
+  <li><b>安装本软件</b><span>双击安装包 → 点「是」→ 装完可让它自动做环境部署（会装虚拟键盘驱动、虚拟声卡）。</span></li>
   <li><b>配对遥控器</b><span>按住遥控器 <span class="key">下</span><span class="plus">+</span><span class="key">LAST</span> 让它进入<b>蓝牙搜索模式</b>，
     然后在 Windows「设置 → 蓝牙和其他设备 → 添加设备」里选 <code>IPRC1000</code>。</span></li>
-  <li><b>试一下</b><span>打开输入法，把光标放进任意输入框，<b>按住语音键</b>说话，松开看文字是否出现。</span></li>
+  <li><b>准备语音输入法</b>（很多人漏这一步）<span>本软件<b>不含</b>语音识别。你需要自己装一个支持
+    「按住说话」的语音输入法（豆包输入法 / 千问输入法 / 微信输入法等），设成默认，并把它的
+    语音快捷键设为 <b>右 Alt（按住）</b>。详见下面第五节。</span></li>
+  <li><b>试一下</b><span>把光标放进任意输入框，<b>按住语音键</b>说话，松开看文字是否出现。</span></li>
 </ol>
 
 <h2>四、蓝牙搜索模式（重新配对）</h2>
@@ -121,7 +124,36 @@
   <p><b>小提示：</b>平时遥控器会休眠省电，按任意键即可唤醒；系统里显示「已配对 · 休眠中」是正常现象。</p>
 </div>
 
-<h2>五、常见问题</h2>
+<h2>五、语音输入的前提（第一次必须做）</h2>
+<p><b>本软件不做语音识别。</b>它只做两件事：① 按住语音键时，向系统发送「按住右 Alt」；
+② 把遥控器收到的声音送进虚拟声卡 <code>CABLE Input</code>。
+识别文字是<b>输入法</b>的工作 —— 所以必须先有一个支持「按住说话」的语音输入法。</p>
+
+<h3>1. 装一个语音输入法</h3>
+<p>豆包输入法、千问输入法、微信输入法等，任选其一，<b>设为默认输入法</b>。
+它们通常都有「长按说话 / 按住说话」模式，把触发键设为 <b>右 Alt</b> 即可与遥控器对上。</p>
+
+<h3>2. 麦克风要选 <code>CABLE Output</code></h3>
+<p>遥控器的声音是经虚拟声卡转给输入法的，所以输入法必须去听 <code>CABLE Output</code>，否则它听到的是电脑麦克风（听不到遥控器）。</p>
+<table>
+  <tr><th>输入法的设置方式</th><th>你要做的事</th></tr>
+  <tr><td>跟随「系统默认麦克风」</td><td>在软件「环境设置」里点<b>「设为默认麦克风」</b>（或「一键完成全部」），把系统默认录音设备设成 <code>CABLE Output</code> 即可。</td></tr>
+  <tr><td>输入法<b>自己指定</b>麦克风（不跟随系统）</td><td>进输入法的「语音 / 听写 / 音频」设置，把麦克风手动选为
+      <code>CABLE Output (VB-Audio Virtual Cable)</code>。</td></tr>
+</table>
+
+<h3>3. 用这条顺序验证（30 秒）</h3>
+<ol class="steps" style="margin-top:10px">
+  <li><b>按住语音键</b><span>输入法应出现「正在聆听 / 说话中」之类的提示 → 说明<b>按键</b>这条路通了。</span></li>
+  <li><b>看软件面板「最近收到音频」</b><span>说话时应始终 <b>&lt; 1 秒</b>（绿色）→ 说明<b>音频</b>这条路通了。</span></li>
+  <li><b>松手看是否出字</b><span>出字 = 整条链路通了；不出字但前两步都正常 = 问题在输入法（多半是麦克风选错）。</span></li>
+</ol>
+<div class="pair">
+  <p><b>最容易错的一点：</b>「按住有反应、也有电平，但就是不出字」—— 九成是输入法听的<b>不是</b> <code>CABLE Output</code>。
+     去输入法设置里改麦克风，比反复重装软件有效。</p>
+</div>
+
+<h2>六、常见问题</h2>
 <dl class="faq">
   <dt>按住语音键，屏幕上冒出一串 <code>m</code>？</dt>
   <dd>这是「遥控器被系统当成了键盘」。打开软件 → 环境设置 → 看顶部那行状态：
@@ -135,6 +167,14 @@
   <dt>语音键按住没反应，但其他键正常？</dt>
   <dd>多半是虚拟键盘驱动没装好。环境设置里看「虚拟键盘驱动」是否<b>已就绪</b>；没有就点「安装虚拟键盘驱动」。</dd>
 
+  <dt>按住有反应、面板也有音频，但就是不出字？</dt>
+  <dd>几乎都是<b>输入法的麦克风选错了</b>：它听的是电脑麦克风，而不是 <code>CABLE Output</code>。
+      去输入法设置里把麦克风改成 <code>CABLE Output (VB-Audio Virtual Cable)</code>（见第五节）。</dd>
+
+  <dt>还没有语音输入法？</dt>
+  <dd>本软件不含识别引擎。请先装豆包 / 千问 / 微信等任一支持「按住说话」的输入法并设为默认，
+      再把它的语音快捷键设为 <b>右 Alt</b>。</dd>
+
   <dt>说话后输入法没识别？</dt>
   <dd>确认输入法自己设成了「按住说话」，且输入框里光标在闪。软件这边只负责把「按住右 Alt」发出去，识别由输入法完成。</dd>
 
@@ -142,7 +182,7 @@
   <dd>可以：<code>安装包.exe --dir D:\IPRC1000</code>。也可以直接用免安装版 zip，解压到哪里都能跑。</dd>
 </dl>
 
-<h2>六、适用范围与注意</h2>
+<h2>七、适用范围与注意</h2>
 <table>
   <tr><th>场景</th><th>说明</th></tr>
   <tr><td>办公 / 输入法 / 写作</td><td>✓ 主要用途</td></tr>
