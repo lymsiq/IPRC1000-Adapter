@@ -316,7 +316,8 @@ SRC_REQUIRED = [
     ("注入按整份报告下发", "iprc1000_gui_dotnet/KeyFilter.cs", "_injectedSet"),
     ("孤儿键回收器存在", "iprc1000_gui_dotnet/KeyFilter.cs", "ReapOrphanKeys"),
     ("孤儿键回收以系统状态为准", "iprc1000_gui_dotnet/KeyFilter.cs", "GetAsyncKeyState"),
-    ("启动兜底清残留修饰键", "iprc1000_gui_dotnet/KeyFilter.cs", "ClearStaleModifiersOnStart"),
+    # 2026-10-27：函数已扩展为"清所有可注入键"，改名后同步（旧名会误报）
+    ("启动兜底清残留键", "iprc1000_gui_dotnet/KeyFilter.cs", "ClearStaleKeysOnStart"),
     ("多键同时按住回归自检", "iprc1000_gui_dotnet/KeyFilter.cs", "InjectMultiKeyTest"),
     ("多键自检有 CLI 入口", "iprc1000_gui_dotnet/Program.cs", "--inject-multikey-test"),
     ("虚拟 HID 创建失败会自愈重试", "iprc1000_gui_dotnet/WinUhidInjector.cs", "ScheduleBackgroundRetry"),

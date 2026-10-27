@@ -97,10 +97,30 @@ internal sealed class Backend : IDisposable
     }
 
     /// <summary>统一的 usage 事件入口（ETW 与 HID 直读两条路共用）</summary>
+    private int _firstKeyRecheck;      // 0 = 还没做过"首键复查驱动"
+
     private void OnUsage(byte usage, bool down)
     {
         // 幽灵报告（0x0C）不当"当前操作"显示，免得盖住真实按键
         if (usage == 0x0C) return;
+
+        // ★★ 2026-10-27（真机"换机器后按键随机打出字母"）：
+        //   `RemoteStillKeyboard()` 读的是注册表 —— 遥控器**在休眠/还没配对**时注册表里
+        //   没有它的条目，函数会返回 false ⇒ 启动时误判"已是非键盘"，于是**不再切驱动**。
+        //   等用户真正按下第一个键，才会暴露"它其实还是键盘"（字符已经漏进窗口了）。
+        //   这里在**收到第一个按键**时再复查一次，把误判窗口缩到最短。
+        if (down && Interlocked.Exchange(ref _firstKeyRecheck, 1) == 0)
+        {
+            try
+            {
+                if (Env.RemoteStillKeyboard())
+                {
+                    _deviceRecheckRequested = true;   // 探针线程 ≤500ms 内复查并尝试切驱动
+                    DeviceLog("DEV  首键到达：遥控器仍是键盘（启动时可能在休眠）→ 已请求立即复查驱动");
+                }
+            }
+            catch { }
+        }
         LastKey = EtwKeySource.UsageToButton.TryGetValue(usage, out var n)
             ? Keys.LabelOf(n) : $"0x{usage:X2}";
         LastKeyAt = DateTime.UtcNow;
@@ -536,7 +556,8 @@ internal sealed class Backend : IDisposable
         if (!Env.IsAdmin())
         {
             _driverBackoffUntil = now.AddMinutes(10);
-            DeviceLog("★ 遥控器退回键盘，但没有管理员权限、无法自动切回（请以管理员身份运行）");
+            _driverNote = "遥控器仍是键盘，但当前没有管理员权限 —— 无法自动切驱动（按键会漏成字符）";
+            DeviceLog("★ 遥控器仍是键盘，但没有管理员权限、无法自动切回（请以管理员身份运行）");
             return;
         }
 
@@ -553,9 +574,11 @@ internal sealed class Backend : IDisposable
         else
         {
             _driverBackoffUntil = now.AddMinutes(10);
-            _driverNote = "遥控器退回键盘且自动切换未生效，已启用钩子拦截兜底。";
-            DeviceLog($"★ 重连后自动切驱动未生效（{msg}）—— 10 分钟内不再重试；" +
-                      "当前由钩子模式兜底拦截（不会漏 m）");
+            _driverNote = "遥控器仍是键盘且自动切换未生效 —— 按键会漏成字符，请手动「切换设备驱动」。";
+            // ★ 2026-10-27：原来这里写"已启用钩子拦截兜底（不会漏 m）" ——
+            //   钩子在 v1.2.63 就删了，这话是**假的**，会让人误以为受保护。
+            DeviceLog($"★ 遥控器仍是键盘且自动切驱动未生效（{msg}）—— 10 分钟内不再重试；" +
+                      "**当前没有任何拦截，按键会漏成字符**，请在环境设置里手动切换设备驱动");
         }
     }
 

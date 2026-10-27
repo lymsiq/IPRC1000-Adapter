@@ -139,7 +139,7 @@ function renderOverview(s) {
     : '⚠ 未受保护：m 会漏进应用';
   // 概览卡片副标题：按模式给不同信息（ETW 模式下「已拦截/放行」没有意义）
   $('#v-perm').nextElementSibling.textContent = !protectedOk
-    ? `按键来源=ETW，但设备仍是键盘（驱动未换）且钩子未装 → 遥控器按键会直接打进窗口` +
+    ? `遥控器仍被系统当作<b>键盘</b>（驱动未切换）→ 按键会直接打进窗口（随机冒出字母）` +
       (ks0.guard ? `　【${ks0.guard}】` : '')
     // 2026-10-20：钩子已彻底移除（Start 里只走 ETW），hookMode 恒为 false，
     // 原来那条"已拦截 N 次 / 放行 M 次"的分支**永远不会执行**，且计数恒为 0（假仪表）→ 删掉。
@@ -1363,7 +1363,7 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.76',
+      version: '1.2.77',
       buildStamp: '2026-10-16 09:50',
       versionLine: 'v1.2.69（构建于 2026-10-26 14:45）',
       device: {
