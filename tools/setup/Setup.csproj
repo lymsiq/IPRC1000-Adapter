@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 引导安装程序：目标 .NET Framework 4.8（Win10 1903+ / Win11 自带，用户端零依赖）
+       · 单文件：把免运行时版（含 .NET 8）整包作为资源嵌进来
+       · 管理员清单：装到 Program Files + 建快捷方式 + 跑部署脚本 -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>IPRC1000_Setup</AssemblyName>
+    <ApplicationIcon>..\..\iprc1000_gui_dotnet\ui\icon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>AnyCPU</Platforms>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Version>1.2.79</Version>
+    <Company>Voice VibeCoding</Company>
+    <Product>IPRC1000 遥控器适配器 安装程序</Product>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 载荷：免运行时版整包（构建前由 tools/build_setup.py 复制到这里） -->
+    <EmbeddedResource Include="payload.zip">
+      <LogicalName>payload.zip</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+</Project>

@@ -964,6 +964,21 @@ if __name__ == "__main__":
     full_tgt = build(pub=FULL_PUB, target=FULL_PKG, variant="full")
     verify(zp=FULL_ZP, title="免运行时版", self_contained=True, source_checks=False)
 
+    # ── 单文件安装包（IPRC1000_Setup_v<版本>.exe）──
+    #    载荷 = 刚打好的免运行时版（含 .NET 8）；引导程序本身用 net48（Win10/11 自带）。
+    #    失败只警告、不阻断 —— 安装包是加分项，zip 包才是主线。
+    print()
+    try:
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "build_setup.py")],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        for line in (r.stdout or "").splitlines()[-4:]:
+            if line.strip():
+                print(line)
+        if r.returncode != 0:
+            print("  ⚠ 安装包构建失败（不影响上面的 zip 包）")
+    except Exception as e:
+        print(f"  ⚠ 安装包构建没跑成：{e}")
+
     print(f"\n主包目录：{tgt}\n主包压缩包：{ZP}")
     print(f"免运行时版目录：{full_tgt}\n免运行时版压缩包：{FULL_ZP}")
 
