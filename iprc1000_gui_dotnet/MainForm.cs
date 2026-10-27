@@ -167,7 +167,6 @@ internal sealed class MainForm : Form
         }
 
         _filter = new KeyFilter();
-        _filter.OnAnyKey += vk => _backend.NoteKey(vk);
         _filter.OnButton += (bid, pressed) => _backend.NoteButton(bid, pressed);
         _backend.AttachFilter(_filter);
 
@@ -642,10 +641,9 @@ internal sealed class MainForm : Form
             "openUrl" => _backend.OpenUrl(Arg(0)),
             "setInject" => _backend.SetInject(Arg(0)),
             "testInject" => _backend.TestInject(),
-            "clearKeys" => _backend.ClearKeys(),
+            // forceUnlock=托盘"紧急释放"；releaseAllKeys=面板"释放全部注入键"（语义不同，都保留）
             "forceUnlock" => _backend.ForceUnlock(),
             "releaseAllKeys" => _backend.ReleaseAllKeys(),
-            "setKeySource" => _backend.SetKeySource(Arg(0)),
             "runSetup" => _backend.RunSetup(),
             "setDeviceDriver" => _backend.SetDeviceDriver(Arg(0)),
             // 鼠标模式（2026-10-16）：方块键切模式；参数与状态见 Backend.Mouse
@@ -655,8 +653,6 @@ internal sealed class MainForm : Form
             "mouseCalibrate" => _backend.CalibrateMouse(),
             "setAutoStart" => _backend.SetAutoStart(Arg(0)),
             "clearKeyLog" => _backend.ClearKeyLog(),
-            "beginBind" => _backend.BeginBind(Arg(0)),
-            "cancelBind" => _backend.CancelBind(),
             "setAutoRun" => _backend.SetAutoRun(Arg(0)),
             "setStartMinimized" => _backend.SetStartMinimized(Arg(0)),
             "setLog" => _backend.SetLog(Arg(0)),
@@ -799,7 +795,6 @@ internal sealed class MainForm : Form
 
     // ── Raw Input（WM_INPUT）+ 拦截器生命周期 ──
 
-    private const int WM_INPUT = 0x00FF;
 
     private const int WM_DEVICECHANGE = 0x0219;
     private const int DBT_DEVICEREMOVECOMPLETE = 0x0004;
@@ -807,11 +802,9 @@ internal sealed class MainForm : Form
 
     protected override void WndProc(ref Message m)
     {
-        if (m.Msg == WM_INPUT)
-        {
-            try { _filter.HandleRawInput(m.LParam); } catch { /* 不打断消息循环 */ }
-        }
-        else if (m.Msg == WM_DEVICECHANGE)
+        // 2026-10-27：`WM_INPUT` 分支删除 —— Raw Input 从未注册（RegisterRawInputDevices 从未调用），
+        //   这条分支永远收不到消息；按键只走 ETW。
+        if (m.Msg == WM_DEVICECHANGE)
         {
             // 设备插拔事件（蓝牙断开/拔电池都会来）→ 若遥控器已不在，立即解锁卡住的键
             var ev = m.WParam.ToInt32() & 0xFFFF;

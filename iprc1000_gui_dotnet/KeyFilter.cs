@@ -20,11 +20,6 @@ internal sealed class KeyFilter : IDisposable
     // ── 键盘钩子 ──
 
     // ── Raw Input ──
-    private const int WM_INPUT = 0x00FF;
-    private const uint RID_INPUT = 0x10000003, RIDI_DEVICENAME = 0x20000007;
-    private const uint RIM_TYPEKEYBOARD = 1;
-    private const uint RIDEV_INPUTSINK = 0x00000100;
-    private const ushort RI_KEY_BREAK = 0x01;
 
     /// <summary>
     /// Raw Input 收到的报文数（**自进程启动累计**）。
@@ -36,7 +31,7 @@ internal sealed class KeyFilter : IDisposable
     /// 所以这个计数器不参与任何逻辑，只用来**证伪那句断言**：
     /// 设备非键盘状态下按几下遥控器，这里涨了 ⇒ 直读可用；一直是 0 ⇒ 断言成立。
     /// </summary>
-    public static long RawMessages { get; private set; }
+    // `RawMessages` 只统计 WM_INPUT 次数，随 Raw Input 删除。
 
     /// <summary>
     /// 上面那个计数里，**确实来自遥控器**的条数（过了 `IsIprc1000` 设备过滤之后的）。
@@ -46,25 +41,11 @@ internal sealed class KeyFilter : IDisposable
     /// </summary>
     public static long RawOurs { get; private set; }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct RAWINPUTDEVICE { public ushort usUsagePage, usUsage; public uint dwFlags; public IntPtr hwndTarget; }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct RAWINPUTHEADER { public uint dwType, dwSize; public IntPtr hDevice, wParam; }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct RAWKEYBOARD { public ushort MakeCode, Flags, Reserved, VKey, Message; public uint ExtraInformation; }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct RAWINPUT { public RAWINPUTHEADER header; public RAWKEYBOARD keyboard; }
 
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool RegisterRawInputDevices(RAWINPUTDEVICE[] pRawInputDevices, uint uiNumDevices, uint cbSize);
-    [DllImport("user32.dll")]
-    private static extern uint GetRawInputData(IntPtr hRawInput, uint uiCommand, IntPtr pData, ref uint pcbSize, uint cbSizeHeader);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern uint GetRawInputDeviceInfoW(IntPtr hDevice, uint uiCommand, IntPtr pData, ref uint pcbSize);
+
+
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
@@ -83,7 +64,8 @@ internal sealed class KeyFilter : IDisposable
 
     // ─────────────────────────────────────────
 
-    private readonly HashSet<ushort> _held = new();
+    // 2026-10-27：`_held`（Raw Input 的按键集合）随整条 Raw Input 路径一起删除。
+    //   注意：热路径用的是 `_heldButtons`（注入的按钮状态），两者不是一回事。
     private readonly object _heldLock = new();
 
     // ── 卡键看门狗 v2 ──────────────────────────────────────────────────────────
@@ -110,7 +92,7 @@ internal sealed class KeyFilter : IDisposable
     public Func<long?>? AudioSilenceMs { get; set; }
     // 句柄 → 是不是遥控器。**只存一个 bool，不存别的设备的任何信息**
     // （2026-10-18 用户明确要求：别人的键盘鼠标不要留痕）。
-    private readonly Dictionary<ulong, bool> _deviceCache = new();
+    // `_deviceCache`（句柄→是否遥控器）只服务 Raw Input 路径，已删除。
     private volatile bool _running;
     private IntPtr _hwnd;
 
@@ -137,11 +119,10 @@ internal sealed class KeyFilter : IDisposable
     ///   · 误伤窗口极小（只有在"刚敲过遥控器用到的某个字母键"后 40 ms 内又敲 `i` 才会被吞，
     ///     而人手连续两键间隔通常 80~200 ms，几乎不会踩到）
     /// </summary>
-    private const int SpuriousArmMs = 40;
-    private DateTime _spuriousUntil = DateTime.MinValue;
+    // 幽灵键位"武装窗口"随 Raw Input / 钩子路径一起删除（ETW 侧由桥的 ghost 过滤负责）。
 
     /// <summary>被放行出去的幽灵键次数（应当恒为 0；不为 0 就说明还在漏 i）</summary>
-    public long SpuriousLeaked { get; private set; }
+    // `SpuriousLeaked` 从未被递增、也无人消费，删除。
 
     /// <summary>
     /// 当前**虚拟键盘整份报告**里按着的键 = 所有「按住中」按钮的键并集。
@@ -240,7 +221,8 @@ internal sealed class KeyFilter : IDisposable
 
     // ── 「按一下绑定」：捕获下一次真实按键 ──
     /// <summary>是否正在等待捕获下一次按键</summary>
-    public bool CaptureNext { get; set; }
+    // 2026-10-27：`CaptureNext` / `CapturedVk` 是"按一下键来绑定"用的，但**从没有任何代码读取它们**
+    //   （绑定走的是屏幕键盘 → saveKey）⇒ 连同后端 BeginBind/CancelBind 一起删除。
     /// <summary>捕获到的 VK（0 = 还没有）</summary>
     public int CapturedVk { get; private set; }
     /// <summary>捕获成功时触发</summary>
@@ -248,7 +230,8 @@ internal sealed class KeyFilter : IDisposable
     /// <summary>遥控器按键按下/抬起回调 (buttonId, pressed)</summary>
     public event Action<string, bool>? OnButton;
     /// <summary>任意按键回调（用于「当前操作」显示）</summary>
-    public event Action<ushort>? OnAnyKey;
+    // 2026-10-27：`OnAnyKey` 删除 —— 它只在已删的 Raw Input 路径里触发；
+    //   "最近按键"由 ETW 路径（Backend 里 UsageToButton）维护，不依赖它。
 
     /// <summary>
     /// **语音键按下**时的回调（在注入按键之前触发）—— 用来预热音频链路。
@@ -384,17 +367,9 @@ internal sealed class KeyFilter : IDisposable
         try
         {
             CheckHeldHealth();
-            bool empty;
-            lock (_heldLock) empty = _held.Count == 0;
-            // ★★ 这里原来写的是 `if (empty) return;` —— 而 ETW 模式下 _held **永远是空的**
-            //    （它只在 Raw Input 路径维护），于是下面那句 WatchdogV2() **一次都没跑过**，
-            //    v2 看门狗等于没装。（集成测试当初直接调 WatchdogV2 绕过了这道门，所以没发现。）
-            //    改成：v1 判据不成立时**照旧往下走**，绝不提前 return。
-            if (!empty && (DateTime.UtcNow - _lastRawInputAt).TotalMilliseconds >= HoldTimeoutMs)
-            {
-                var n = ClearHeld("遥控器静默超时（可能已休眠/断连，最后的 UP 丢了）");
-                LastError = $"已自动释放 {n} 个卡住的按键（遥控器静默超时）";
-            }
+            // ★ 2026-10-27：删掉 v1（"遥控器静默超时"）—— 它依赖 Raw Input 的 `_held` 集合，
+            //   而 ETW 是唯一来源后 `_held` **永远是空的** ⇒ 这个分支一次都不会命中（纯死代码）。
+            //   真正的卡键防线是下面的 v2（盯"注入了还没放开"）与 v3（以系统状态为准）。
         }
         catch { }
 
@@ -515,12 +490,6 @@ internal sealed class KeyFilter : IDisposable
             _heldButtons.Clear();
         }
 
-        ushort[] cleared;
-        lock (_heldLock)
-        {
-            cleared = _held.ToArray();
-            _held.Clear();
-        }
         // ★ 2026-10-18 修：原来这里用 `cleared.Length`（**Raw Input 的 _held**）当"释放了几个键"，
         //   而 ETW 模式下 _held 恒为空 ⇒ n 永远是 0 ⇒ **明明放掉了注入的键，却既不记日志、
         //   也不更新 LastCleared**。真机表现就是"按语音键后右 Alt 过了好几秒才自己弹起，
@@ -549,10 +518,6 @@ internal sealed class KeyFilter : IDisposable
         // ★ 给系统补发这些键的 KEYUP。
         //   遥控器丢 UP 时，Windows 会一直认为该键「按住」（表现为真实键盘对应字母打不出来、
         //   修饰键卡住会让整个键盘行为异常）。补一次 UP 就能把系统侧状态清干净。
-        foreach (var vk in cleared)
-        {
-            try { Send(new[] { (int)vk }, true); } catch { }
-        }
         // 释放可能卡住的注入键（否则修饰键卡住会让整个键盘行为异常）
         // ★ 登记表已清空 → 整份报告重算出来就是空集 → 下发全零报告。
         if (_injectedSet.Length > 0 || _viaVirtualHid)
@@ -589,98 +554,10 @@ internal sealed class KeyFilter : IDisposable
     }
 
 
-    // ── Raw Input：识别设备 + 维护 held 集合 + 触发映射 ──
+        // 2026-10-27：`HandleRawInput` 整块删除 —— WM_INPUT 从未被注册
+    //   （`RegisterRawInputDevices` 从未调用），整条路径不可达；ETW 是唯一按键来源。
 
-    public void HandleRawInput(IntPtr lParam)
-    {
-        // ★ 放在所有提前 return 之前：这条路径**只要被调用就计数**，
-        //   用来验证"设备非键盘时 WM_INPUT 到底来不来"（见 RawMessages 的说明）。
-        RawMessages++;
-
-        uint size = 0;
-        GetRawInputData(lParam, RID_INPUT, IntPtr.Zero, ref size, (uint)Marshal.SizeOf<RAWINPUTHEADER>());
-        if (size == 0 || size > 1024) return;
-        var buf = Marshal.AllocHGlobal((int)size);
-        try
-        {
-            if (GetRawInputData(lParam, RID_INPUT, buf, ref size, (uint)Marshal.SizeOf<RAWINPUTHEADER>()) == uint.MaxValue) return;
-            var raw = Marshal.PtrToStructure<RAWINPUT>(buf);
-            if (raw.header.dwType != RIM_TYPEKEYBOARD) return;
-
-            // 设备过滤：device_handle → 接口路径（结果缓存）
-            if (!_deviceCache.TryGetValue((ulong)raw.header.hDevice, out var ours))
-            {
-                ours = DeviceName(raw.header.hDevice) is { } n && IsIprc1000(n);
-                _deviceCache[(ulong)raw.header.hDevice] = ours;
-            }
-            // ★ 不是遥控器 ⇒ **立刻返回**。这里在所有按键读取之前，
-            //   所以物理键盘/鼠标的按键内容**既不会被读取、也不会被记录**（只记个数）。
-            if (!ours) return;
-            RawOurs++;
-            DeviceSeen = true;
-            _lastRawInputAt = DateTime.UtcNow;
-
-            // ★★ 关键修复（2026-10-18）：ETW 模式下**绝不能再从 Raw Input 处理一次按键**。
-            //
-            //   背景：`Start()` 在 ETW 模式下确实提前 return 不注册 Raw Input，
-            //   但 `SetSourceMode()` 切到 ETW 时**没有把注册撤掉**（注册是进程级的，
-            //   `Stop()` 只停线程）。于是启动时（键盘模式）注册的那份一直活着，
-            //   本函数也一直在跑 —— 每次按键会被 **ETW 和 Raw Input 各处理一遍**。
-            //   （重复 DOWN 对"整份报告"模型多半无感，但对"切换配置组"这类**动作键**
-            //     就是切两次 = 看起来没反应。）
-            //
-            //   这里只计数、不处理：既修掉重复，又保住"能不能直读"的测量。
-            if (KeySourceIsEtw) return;
-
-            var vk = raw.keyboard.VKey;
-            if (vk is 0 or 0xFF) return;
-            var pressed = (raw.keyboard.Flags & RI_KEY_BREAK) == 0;
-
-            lock (_heldLock)
-            {
-                if (pressed) _held.Add(vk); else _held.Remove(vk);
-                // 遥控器有动作 → 顺手武装幽灵键位（0x0C → VK 0x49 'i'）
-                _spuriousUntil = DateTime.UtcNow.AddMilliseconds(SpuriousArmMs);
-            }
-            OnAnyKey?.Invoke(vk);
-
-            if (!Keys.VkToButtonId.TryGetValue(vk, out var bid)) return;
-
-            // 去重：系统自动重复会一直产生 DOWN，只处理第一次
-            lock (_lastState)
-            {
-                var changed = !_lastState.TryGetValue(vk, out var prev) || prev != pressed;
-                _lastState[vk] = pressed;
-                if (!changed) return;
-            }
-
-            ApplyButton(bid, pressed);
-        }
-        finally { Marshal.FreeHGlobal(buf); }
-    }
-
-    private static string? DeviceName(IntPtr hDevice)
-    {
-        uint size = 0;
-        GetRawInputDeviceInfoW(hDevice, RIDI_DEVICENAME, IntPtr.Zero, ref size);
-        if (size == 0) return null;
-        var buf = Marshal.AllocHGlobal((int)size * 2);
-        try
-        {
-            if (GetRawInputDeviceInfoW(hDevice, RIDI_DEVICENAME, buf, ref size) == uint.MaxValue) return null;
-            return Marshal.PtrToStringUni(buf);
-        }
-        finally { Marshal.FreeHGlobal(buf); }
-    }
-
-
-    private static bool IsIprc1000(string path)
-    {
-        var p = path.ToLowerInvariant();
-        return p.Contains("0a5c") && p.Contains("8502");
-    }
-
-    /// <summary>
+            /// <summary>
     /// 处理一次按键事件（**Raw Input 与 ETW 两条来源共用**）：通知订阅者 + 按映射注入快捷键。
     /// </summary>
     public void ApplyButton(string bid, bool pressed, string src = "rawinput")

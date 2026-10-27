@@ -163,22 +163,7 @@ internal sealed class Backend : IDisposable
             : "设备已不是键盘 ✓ 按键走 BthPort ETW（不装钩子、不吞键、无卡键风险）";
     }
 
-    public string SetKeySource(string? mode)
-    {
-        var m = (mode ?? "hook").ToLowerInvariant();
-        _keySource = m is "etw" ? m : "hook";
-        _keySourceGuard = null;
-        _filter?.SetSourceMode(_keySource != "hook");
-        AutoSelectKeySource();
-        var desc = _keySource switch
-        {
-            "etw" => "按键来源已切到 ETW（设备为非键盘时使用）。",
-            _ => "按键来源已切回内核钩子（Raw Input + WH_KEYBOARD_LL 拦截）。",
-        };
-        return Env.Json(new { ok = true, message = desc });
-    }
-
-    public void NoteKey(int vk)
+        public void NoteKey(int vk)
     {
         LastVk = vk;
         LastKey = Keys.VkToButton.TryGetValue(vk, out var n) ? n : Keys.VkLabel(vk);
@@ -752,7 +737,6 @@ internal sealed class Backend : IDisposable
             // 发布版默认不写日志（LogSwitch 默认 false）—— 界面据此隐藏"按键日志"与"清空日志"
             ["logEnabled"] = LogSwitch.Enabled,
             // 非键盘设备下 Raw Input 到底收不收得到报文 —— 用来判断能不能把按键延迟从 5 ms 降到 ~1 ms
-            ["rawMessages"] = KeyFilter.RawMessages,
             // 过滤后（只算遥控器）的条数 —— 这个 > 0 才说明 Raw Input 直读真的可用
             ["rawOurs"] = KeyFilter.RawOurs,
             ["winuhid"] = JsonSerializer.SerializeToNode(WinUhidInjector.Status()),
@@ -770,14 +754,6 @@ internal sealed class Backend : IDisposable
                 ["clickSearchScope"] = Settings.ClickSearchScope,
                 ["clickReturnToOrigin"] = Settings.ClickReturnToOrigin,
                 ["voiceGraceSec"] = (long)StuckGuard.VoiceGraceSec,
-            },
-            ["bind"] = new JsonObject
-            {
-                ["active"] = _bindBid != null,
-                ["bid"] = _bindBid,
-                ["capturedVk"] = _filter?.CapturedVk ?? 0,
-                ["capturedName"] = _filter is { CapturedVk: > 0 }
-                    ? Keys.VkLabel(_filter.CapturedVk) : "",
             },
             ["autoRun"] = IsAutoRun(),
             ["startMinimized"] = Settings.StartMinimized,
@@ -820,7 +796,6 @@ internal sealed class Backend : IDisposable
                 // 2026-10-20：`swallowed`/`passed` 恒为 0（钩子已删）→ 不再上报
                 ["error"] = _filter?.LastError,
                 ["sinceLastInputMs"] = _filter?.SinceLastInputMs ?? -1,
-                ["spuriousLeaked"] = _filter?.SpuriousLeaked ?? 0,
                 ["lastCleared"] = _filter?.LastCleared,
                 ["lastButton"] = LastButton,
                 ["pressed"] = LastButtonPressed,
@@ -1146,15 +1121,7 @@ internal sealed class Backend : IDisposable
     /// <summary>真的按一次右 Alt 并读回状态，验证注入链路</summary>
     public string TestInject() => KeyFilter.InjectSelfTest();
     /// <summary>清空卡住的按键状态（释放 held 集合 + 放掉注入键）</summary>
-    public string ClearKeys()
-    {
-        var n = _filter?.ClearHeld("手动清空") ?? 0;
-        return Env.Json(new { ok = true, message = n > 0
-            ? $"已清空 {n} 个卡住的按键，并释放了注入的快捷键。"
-            : "当前没有卡住的按键。" });
-    }
-
-    /// <summary>环境自检清单（安装/就绪向导用）</summary>
+        /// <summary>环境自检清单（安装/就绪向导用）</summary>
     private JsonObject SetupStatus()
     {
         // 「按键受保护」= 要么设备已不是键盘，要么钩子正在拦截（两者都不会漏 m / 漏键）
@@ -1253,7 +1220,6 @@ internal sealed class Backend : IDisposable
         return Env.Json(new { ok, message = msg + extra });
     }
 
-    private string? _bindBid;
     private string? _groupToast;
     private DateTime _groupToastAt = DateTime.MinValue;
     private DateTime _lastDevCheck = DateTime.MinValue;
@@ -1322,31 +1288,8 @@ internal sealed class Backend : IDisposable
     }
 
     /// <summary>开始「按一下绑定」：下一次真实按键的 VK 会被捕获（并吞掉，不会打出一个字符）</summary>
-    public string BeginBind(string? bid)
-    {
-        if (_filter == null) return Env.Json(new { ok = false, message = "按键过滤器未就绪。" });
-        _bindBid = bid;
-        _filter.CaptureNext = true;
-        return Env.Json(new { ok = true, message = "请在键盘上按一下要绑定的按键（Esc 可取消）。" });
-    }
-
-    /// <summary>捕获到按键：直接写进该键的映射（单键）</summary>
-    public void OnBindCaptured(int vk)
-    {
-        var bid = _bindBid;
-        if (bid == null || vk <= 0) return;
-        if (Keys.Table.Any(x => x.Id == bid)) Keymaps.Set(bid, new[] { vk });
-        _bindBid = null;
-    }
-
-    public string CancelBind()
-    {
-        if (_filter != null) _filter.CaptureNext = false;
-        _bindBid = null;
-        return Env.Json(new { ok = true, message = "已取消绑定。" });
-    }
-
-    /// <summary>开机自启（写入 HKCU\...\Run）</summary>
+        /// <summary>捕获到按键：直接写进该键的映射（单键）</summary>
+            /// <summary>开机自启（写入 HKCU\...\Run）</summary>
     public string SetAutoRun(string? on)
     {
         var want = on is "true" or "1" or "True";
