@@ -1124,11 +1124,72 @@ internal sealed class KeyFilter : IDisposable
     /// 刚启动这一刻用户不会正按着修饰键；每次动作都写 stuck-guard.log，事后可查。
     /// 想关掉：设 `IPRC1000_NO_START_CLEAN=1`。
     /// </summary>
-    public static string? ClearStaleModifiersOnStart()
+    /// <summary>
+    /// 系统当前认为"被按住"的键（只扫我们可能注入的那批）。
+    /// 用途：面板诊断用 —— 卡键时一眼看出是哪个键没放开，
+    /// 而不是只能描述"打字一直重复"。
+    /// </summary>
+    public static string HeldKeysNow()
+    {
+        var held = new List<int>();
+        try
+        {
+            foreach (var vk in StartupCleanVks().Distinct())
+                if ((GetAsyncKeyState(vk) & 0x8000) != 0) held.Add(vk);
+        }
+        catch { }
+        return held.Count == 0 ? "" :
+            string.Join(" ", held.Select(v => $"{Keys.VkLabel(v)}(0x{v:X2})"));
+    }
+
+    /// <summary>
+    /// 启动清理要检查的 VK 全集。
+    ///
+    /// ★ 不能只用 `Keys.VkToButtonId`（那是**遥控器按钮**的键，映射目标可以是别的键），
+    ///   也不能只列修饰键 —— 实测：只列 "遥控器键 + 修饰键" 时，一个卡住的 F24 完全查不到。
+    ///   这里直接给**我们可能注入过的全部键**：字母/数字/F1-F24/导航/编辑/媒体/修饰。
+    ///   约 120 个，一次 GetAsyncKeyState 循环是微秒级，启动时做一次无感。
+    /// </summary>
+    private static IEnumerable<int> StartupCleanVks()
+    {
+        foreach (var vk in new[] { 0x10, 0x11, 0x12, 0x5B, 0x5C, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5 })
+            yield return vk;                                  // 修饰键
+        for (var vk = 0x30; vk <= 0x39; vk++) yield return vk; // 0-9
+        for (var vk = 0x41; vk <= 0x5A; vk++) yield return vk; // A-Z
+        for (var vk = 0x70; vk <= 0x87; vk++) yield return vk; // F1-F24
+        foreach (var vk in new[]
+                 {
+                     0x08, 0x09, 0x0D, 0x1B, 0x20,             // 退格/Tab/回车/Esc/空格
+                     0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, // PgUp/PgDn/End/Home/方向
+                     0x2C, 0x2D, 0x2E, 0x2F, 0x90, 0x91,       // PrtSc/Ins/Del/Help/NumLock/ScrLk
+                     0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, // 浏览器键
+                     0xAE, 0xAF, 0xB0, 0xB1, 0xB2, 0xB3,       // 音量/媒体
+                 })
+            yield return vk;
+        foreach (var vk in Keys.VkToButtonId.Keys)
+            if (vk > 0) yield return vk;                      // 遥控器自身用到的键（兜底）
+    }
+
+    /// <summary>
+    /// 启动兜底：把上一次实例被强杀时残留在系统里的**按键**补发 KEYUP。
+    ///
+    /// ★★ 2026-10-27 真机反馈"换台机器还是卡键"：
+    ///   原实现只检查 **11 个修饰键**（Alt/Ctrl/Shift/Win），
+    ///   而遥控器能映射的普通键（字母 / F 键 / 媒体键 / 方向键）**一个都不在名单里** ——
+    ///   上一个实例若在按住这类键时被 taskkill /崩溃，重启后系统仍认为它按着，
+    ///   表现为"一直在重复输入 / 菜单自己滚动"，且**重启程序清不掉**（只能重启系统）。
+    ///   现在改为：**所有遥控器可映射的 VK + 全部修饰键**。
+    ///
+    /// 副作用评估：启动瞬间若用户**正用手按着**其中某个键，会被这一次 KEYUP 打断 ——
+    ///   与原来修饰键的行为一致，且只发生在启动那一下，可接受。
+    ///   需要排查时可用环境变量 `IPRC1000_NO_START_CLEAN=1` 关掉。
+    /// </summary>
+    public static string? ClearStaleKeysOnStart()
     {
         if (Environment.GetEnvironmentVariable("IPRC1000_NO_START_CLEAN") == "1") return null;
+
         var stuck = new List<int>();
-        foreach (var vk in new[] { 0xA5, 0xA4, 0x12, 0xA3, 0xA2, 0x11, 0xA1, 0xA0, 0x10, 0x5B, 0x5C })
+        foreach (var vk in StartupCleanVks().Distinct())
             if ((GetAsyncKeyState(vk) & 0x8000) != 0) stuck.Add(vk);
         if (stuck.Count == 0) return null;
 
@@ -1136,9 +1197,11 @@ internal sealed class KeyFilter : IDisposable
         {
             try { Send(new[] { vk }, true); } catch { }
         }
-        var names = string.Join(" ", stuck.Select(v => $"0x{v:X2}"));
-        var msg = $"GUARD  启动兜底  系统里残留着按下的修饰键 → 补发 KEYUP  键={names}" +
+        var names = string.Join(" ", stuck.Select(v => $"{Keys.VkLabel(v)}(0x{v:X2})"));
+        var msg = $"GUARD  启动兜底  系统里残留着按下的键 → 补发 KEYUP  共 {stuck.Count} 个：{names}" +
                   "（多为上一次实例被强杀留下的）";
+        // 这条用 Safe.Note 记一份：即使诊断日志关着，也能在 errors.log 里看到
+        try { Safe.Note($"GUARD 启动兜底 释放残留按键 {stuck.Count} 个：{names}"); } catch { }
         EtwKeySource.AppendLog(msg);
         GuardLog(msg);
         return names;

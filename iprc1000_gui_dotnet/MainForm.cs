@@ -216,8 +216,20 @@ internal sealed class MainForm : Form
             //     我们的全零报告清不掉它 —— 只能补 SendInput 的 KEYUP）
             try
             {
-                var stale = KeyFilter.ClearStaleModifiersOnStart();
-                if (stale != null) StartupMark($"启动兜底：清掉了残留的修饰键 {stale}");
+                var stale = KeyFilter.ClearStaleKeysOnStart();
+                if (stale != null)
+                {
+                    StartupMark($"启动兜底：清掉了残留的按键 {stale}");
+                    // 让用户知道"上次卡住的键已经解开了"——否则他只会觉得"这次又卡了"
+                    try
+                    {
+                        _tray.Visible = true;
+                        _tray.ShowBalloonTip(5000, "已释放上次残留的按键",
+                            $"检测到系统里还有按下的键（{stale}），已自动释放。\n" +
+                            "通常是上次程序被强制结束时留下的。", ToolTipIcon.Info);
+                    }
+                    catch { }
+                }
             }
             catch { }
             // ⚠ InitWebView 是 async void 语义：**必须自己 try/catch**，

@@ -720,7 +720,11 @@ function renderEnv(s) {
                + ` · 补静音 ${rt.jitter.underruns || 0} 次`
                + ` · 丢最旧 ${rt.jitter.droppedBytes || 0} 字节`
              : '') +
-    kvItem('管理员权限', a ? '已具备' : '缺失', a ? 'ok' : 'bad');
+    kvItem('管理员权限', a ? '已具备' : '缺失', a ? 'ok' : 'bad') +
+    // 卡键排查：系统当前认为按着的键（空 = 正常）
+    (s.heldNow
+      ? kvItem('⚠ 系统认为按住', s.heldNow, 'bad', '若这里出现键名而你没按它 → 就是卡键')
+      : '');
   // 「按键链路静默失效」探针：只在桥"收到报告却解析不出按键"时才有内容。
   // 判据在 KeyPathWatch 里（空闲不报 —— 这条今天已经踩过两次坑）。
   $('#keyPathNote').textContent = b.keyPathHint || '';
@@ -1359,7 +1363,7 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.75',
+      version: '1.2.76',
       buildStamp: '2026-10-16 09:50',
       versionLine: 'v1.2.69（构建于 2026-10-26 14:45）',
       device: {

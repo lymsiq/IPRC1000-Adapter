@@ -292,6 +292,11 @@ SRC_REQUIRED = [
     # 2026-10-27：加了 `_e2e`（端到端测试模式）例外 —— 断言改为盯住核心判据
     # `!Settings.StartMinimized`（托起时不建界面），而不是整行字面量，
     # 这样以后再加开关不会误报，但**删掉这条判据**仍会失败。
+    # 2026-10-27：启动清卡键**必须覆盖所有可注入键**，不能只清修饰键
+    #   （真机"换机器还是卡键"的根因：普通键/F 键卡住后重启也清不掉）
+    ("启动清理覆盖全部可注入键", "iprc1000_gui_dotnet/KeyFilter.cs", "private static IEnumerable<int> StartupCleanVks()"),
+    ("启动清理含 F 键区间", "iprc1000_gui_dotnet/KeyFilter.cs", "for (var vk = 0x70; vk <= 0x87; vk++)"),
+    ("启动清理含字母区间", "iprc1000_gui_dotnet/KeyFilter.cs", "for (var vk = 0x41; vk <= 0x5A; vk++)"),
     ("WebView2 按需创建（托盘启动不建）", "iprc1000_gui_dotnet/MainForm.cs", "if (!Settings.StartMinimized || _selftest"),
     ("托盘启动不建界面（判定存在）", "iprc1000_gui_dotnet/MainForm.cs", "if (Settings.StartMinimized && !_e2e)"),
     # ★ v1.2.9 延迟优化：起播/声卡缓冲都降过，且自适应必须存在（否则降不下去只能手工调）
