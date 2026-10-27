@@ -111,6 +111,7 @@ CHECKS = [
     # ★ v1.1.1 启动引导：缺 .NET 桌面运行时时自动装。
     #   顶层与 tools/ 两处都要有 —— 快捷方式指向它，用户也习惯"解压后一眼看到"。
     ("启动引导在顶层",      "启动.cmd", "准备运行时"),
+    ("换机部署入口",        "部署.cmd", "一键部署.ps1"),
     ("启动引导在 tools 里", "tools/启动.cmd", "准备运行时"),
     ("运行时准备脚本",      "tools/准备运行时.ps1", "[switch]$Quiet"),
     # 快捷方式必须仍指向「启动.cmd」——若退回直接指 exe，缺 .NET 的机器就只剩英文提示
@@ -125,6 +126,7 @@ CHECKS = [
 ENCODING = [
     # (期望编码, 包内路径, 该编码下必须仍然正确的中文关键字)
     ("gbk", "启动.cmd",                   "准备运行时"),
+    ("gbk", "部署.cmd",                   "一键部署.ps1"),
     ("gbk", "创建桌面快捷方式.cmd",        "快捷方式"),
     ("gbk", "tools/启动.cmd",             "准备运行时"),
     ("gbk", "tools/创建桌面快捷方式.cmd",  "快捷方式"),
@@ -676,7 +678,7 @@ def build(pub=None, target=None, variant="main"):
     # ★ 启动引导也放到包**顶层**：桌面快捷方式直接指向它，而用户最自然的动作是
     #   "解压后一眼看到它"，埋在 tools/ 里容易被忽略。两处都放，成本只有几 KB。
     #   （「启动.cmd」自己会先试同目录、再试 ..\，所以两种位置都能跑）
-    for n in ("创建桌面快捷方式.cmd", "启动.cmd"):
+    for n in ("创建桌面快捷方式.cmd", "启动.cmd", "部署.cmd"):
         p = os.path.join(ROOT, "tools", n)
         if os.path.exists(p):
             shutil.copy2(p, os.path.join(target, n))
