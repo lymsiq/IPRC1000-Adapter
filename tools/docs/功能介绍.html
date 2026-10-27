@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>IPRC1000 遥控器适配器 · 功能介绍</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --ink:#1c2430; --sub:#5b6878; --line:#e3e8ef; --bg:#f7f9fc;
+    --card:#fff; --accent:#2f6feb; --ok:#1a9d5a; --warn:#c2790a;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:15px/1.7 "Microsoft YaHei UI","PingFang SC",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:900px;margin:0 auto;padding:40px 22px 64px}
+  header{border-bottom:2px solid var(--ink);padding-bottom:18px;margin-bottom:8px}
+  h1{font-size:27px;margin:0 0 6px;letter-spacing:.5px}
+  .lead{color:var(--sub);font-size:15px;margin:0}
+  .tagline{margin-top:14px;padding:12px 16px;background:#eef4ff;border-left:4px solid var(--accent);
+           border-radius:0 6px 6px 0;font-size:14.5px}
+  h2{font-size:19px;margin:34px 0 14px;padding-left:10px;border-left:4px solid var(--accent)}
+  h3{font-size:15.5px;margin:22px 0 8px}
+  p{margin:8px 0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+  .card b{display:block;font-size:15px;margin-bottom:4px}
+  .card span{color:var(--sub);font-size:13.5px;line-height:1.65}
+  .num{display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:6px;
+       background:var(--accent);color:#fff;font-size:12.5px;font-weight:700;margin-right:7px}
+  table{width:100%;border-collapse:collapse;background:var(--card);font-size:14px;margin-top:6px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#f0f3f8;font-weight:600;white-space:nowrap}
+  td.k{white-space:nowrap;font-weight:600}
+  code{background:#eef1f6;border-radius:4px;padding:1px 6px;font-size:13px;
+       font-family:Consolas,"Cascadia Mono",monospace}
+  .steps{counter-reset:s;list-style:none;padding:0;margin:0}
+  .steps>li{counter-increment:s;position:relative;padding:0 0 16px 42px;border-left:2px dashed var(--line);margin-left:12px}
+  .steps>li:last-child{border-left-color:transparent}
+  .steps>li::before{content:counter(s);position:absolute;left:-13px;top:0;width:26px;height:26px;
+       border-radius:50%;background:var(--accent);color:#fff;text-align:center;line-height:26px;
+       font-size:13px;font-weight:700}
+  .steps>li b{display:block;margin-bottom:2px}
+  .steps>li span{color:var(--sub);font-size:13.8px}
+  .pair{background:#fff8e8;border:1px solid #f0dfb8;border-radius:10px;padding:16px 18px}
+  .pair b{color:var(--warn)}
+  .keys{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 2px}
+  .key{background:#fff;border:1px solid #cfd8e3;border-radius:6px;padding:3px 9px;font-size:13px;
+       font-family:Consolas,monospace}
+  .plus{color:var(--sub);padding:3px 2px}
+  .faq dt{font-weight:600;margin-top:14px}
+  .faq dd{margin:4px 0 0;color:var(--sub);font-size:14px}
+  footer{margin-top:44px;padding-top:16px;border-top:1px solid var(--line);color:var(--sub);font-size:12.8px}
+  .badge{display:inline-block;background:#eafaf0;color:var(--ok);border-radius:20px;
+         padding:1px 10px;font-size:12.5px;margin-left:6px}
+  @media print{
+    body{background:#fff}
+    .card,.pair{break-inside:avoid}
+    h2{break-after:avoid}
+    .wrap{padding:0}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>IPRC1000 遥控器适配器</h1>
+  <p class="lead">把一支蓝牙语音遥控器，变成电脑上的「语音输入 + 快捷键 + 无线鼠标」。</p>
+  <div class="tagline">
+    <b>一句话：</b>按住遥控器上的语音键说话，文字直接进输入框；其余 20 多个键可以随意改成快捷键、媒体键或鼠标动作。
+  </div>
+</header>
+
+<h2>一、软件能做什么</h2>
+<div class="grid">
+  <div class="card"><b><span class="num">1</span>按住说话（核心）</b>
+    <span>按住语音键 = 按住键盘右键 <code>Alt</code>，松开即结束。豆包、千问、微信输入法等「按住说话」的输入法立刻可用，不用改任何设置。</span></div>
+  <div class="card"><b><span class="num">2</span>全键可改</b>
+    <span>23 个按键全部可以改：单键、组合键（如 <code>Ctrl+V</code>）、媒体键、F1–F12，甚至鼠标左/右键与滚轮。</span></div>
+  <div class="card"><b><span class="num">3</span>多套配置组</b>
+    <span>一台遥控器可存多套按键方案（如「办公」「剪映」「WorkBuddy」），按方块键循环切换，不用重设。</span></div>
+  <div class="card"><b><span class="num">4</span>无线鼠标模式</b>
+    <span>方向键控制光标（越推越快）、确认键=左键、info 键=右键。躺床上操作电脑不必再找鼠标。</span></div>
+  <div class="card"><b><span class="num">5</span>截图点击</b>
+    <span>把鼠标对准屏幕上任意一个图标「采集」一次，之后按一个键就能点它 —— 连软件里没有快捷键的按钮也能点。</span></div>
+  <div class="card"><b><span class="num">6</span>媒体与系统键</b>
+    <span>音量加减、静音、播放/暂停、上一曲/下一曲、切换窗口，直接映射到遥控器上。</span></div>
+</div>
+
+<h2>二、遥控器按键（出厂默认）</h2>
+<p>下表是<b>出厂设置</b>，全部可在软件里改。</p>
+<table>
+  <tr><th>遥控器按键</th><th>默认执行</th><th>遥控器按键</th><th>默认执行</th></tr>
+  <tr><td class="k">语音</td><td><b>按住 = 右 Alt</b>（说话）</td><td class="k">OK</td><td>回车</td></tr>
+  <tr><td class="k">方向键 ×4</td><td>上 / 下 / 左 / 右</td><td class="k">返回</td><td>退格</td></tr>
+  <tr><td class="k">菜单</td><td>右键菜单键</td><td class="k">退出</td><td><code>Alt+F4</code></td></tr>
+  <tr><td class="k">info</td><td><code>Ctrl+Enter</code></td><td class="k">电源</td><td>Esc</td></tr>
+  <tr><td class="k">收藏 ★</td><td><code>Ctrl+C</code>（复制）</td><td class="k">播放/暂停</td><td><code>Ctrl+A</code>（全选）</td></tr>
+  <tr><td class="k">快进</td><td><code>Ctrl+V</code>（粘贴）</td><td class="k">快退</td><td><code>Ctrl+Z</code>（撤销）</td></tr>
+  <tr><td class="k">频道 + / −</td><td><code>Ctrl+]</code> / <code>Ctrl+[</code></td><td class="k">音量 + / −</td><td>PageUp / PageDown</td></tr>
+  <tr><td class="k">静音</td><td>系统静音键</td><td class="k">LAST</td><td><code>Ctrl+Alt+Tab</code>（切换窗口）</td></tr>
+  <tr><td class="k">方块 ■</td><td><b>切换配置组</b></td><td class="k">账号</td><td><b>截图点击</b>（点采集过的图标）</td></tr>
+</table>
+
+<h2>三、三步开始用</h2>
+<ol class="steps">
+  <li><b>安装</b><span>双击安装包 → 点「是」→ 装完可让它自动做环境部署（会装虚拟键盘驱动、虚拟声卡）。</span></li>
+  <li><b>配对遥控器</b><span>按住遥控器 <span class="key">下</span><span class="plus">+</span><span class="key">LAST</span> 让它进入<b>蓝牙搜索模式</b>，
+    然后在 Windows「设置 → 蓝牙和其他设备 → 添加设备」里选 <code>IPRC1000</code>。</span></li>
+  <li><b>试一下</b><span>打开输入法，把光标放进任意输入框，<b>按住语音键</b>说话，松开看文字是否出现。</span></li>
+</ol>
+
+<h2>四、蓝牙搜索模式（重新配对）</h2>
+<div class="pair">
+  <p><b>什么时候需要：</b>换了电脑、遥控器没反应、系统里找不到设备。</p>
+  <p><b>怎么做：</b>同时按住 <span class="key">下</span><span class="plus">+</span><span class="key">LAST</span>，遥控器进入<b>蓝牙搜索模式</b>（此时电脑蓝牙列表才看得到它）；
+     配对成功后遥控器会自动退出搜索模式。</p>
+  <p><b>小提示：</b>平时遥控器会休眠省电，按任意键即可唤醒；系统里显示「已配对 · 休眠中」是正常现象。</p>
+</div>
+
+<h2>五、常见问题</h2>
+<dl class="faq">
+  <dt>按住语音键，屏幕上冒出一串 <code>m</code>？</dt>
+  <dd>这是「遥控器被系统当成了键盘」。打开软件 → 环境设置 → 看顶部那行状态：
+      红色就点下面的「<b>切换设备驱动</b>」（需要管理员）；黄色表示遥控器在休眠，按一下唤醒再看。
+      切换成功后应显示绿色「不会输出任何字符」。</dd>
+
+  <dt>按了键，电脑没反应？</dt>
+  <dd>先看软件「按键映射」页顶部的<span class="badge">最近按键</span>：按遥控器时它跟着变，说明信号到了，问题在映射（可能该键没设置）；
+      不变则说明信号没到（遥控器休眠 / 未配对 / 需要重新进搜索模式）。</dd>
+
+  <dt>语音键按住没反应，但其他键正常？</dt>
+  <dd>多半是虚拟键盘驱动没装好。环境设置里看「虚拟键盘驱动」是否<b>已就绪</b>；没有就点「安装虚拟键盘驱动」。</dd>
+
+  <dt>说话后输入法没识别？</dt>
+  <dd>确认输入法自己设成了「按住说话」，且输入框里光标在闪。软件这边只负责把「按住右 Alt」发出去，识别由输入法完成。</dd>
+
+  <dt>能装到别的盘吗？</dt>
+  <dd>可以：<code>安装包.exe --dir D:\IPRC1000</code>。也可以直接用免安装版 zip，解压到哪里都能跑。</dd>
+</dl>
+
+<h2>六、适用范围与注意</h2>
+<table>
+  <tr><th>场景</th><th>说明</th></tr>
+  <tr><td>办公 / 输入法 / 写作</td><td>✓ 主要用途</td></tr>
+  <tr><td>看视频 / 媒体控制</td><td>✓ 可用</td></tr>
+  <tr><td>设计软件 / 剪辑</td><td>✓ 可把按键映射成快捷键</td></tr>
+  <tr><td><b>带反作弊的联机游戏</b></td><td>✗ <b>不建议</b>。本程序用虚拟键盘注入按键，内核级反作弊可能判为违规</td></tr>
+</table>
+<p style="color:var(--sub);font-size:13.5px">
+  如果一定要在游戏里用：在「环境设置 → 切换设备驱动」里把遥控器<b>还原成普通键盘</b>，此时输入由遥控器自身发出，对反作弊而言就是一把真实键盘（但会出现上面说的 <code>m</code> 问题）。
+</p>
+
+<footer>
+  <p>版本 v1.2.79 · 适用于 Windows 10 / 11（64 位）· 需要一支 IPRC1000 蓝牙语音遥控器</p>
+  <p>下载与更新：<code>github.com/lymsiq/IPRC1000-Adapter/releases</code>　首次部署详见包内《换机部署.md》</p>
+</footer>
+
+</div>
+</body>
+</html>
