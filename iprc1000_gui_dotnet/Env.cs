@@ -121,9 +121,29 @@ internal static class Env
 
     public static string AppDir => AppContext.BaseDirectory;
 
+    /// <summary>
+    /// 搜索资源时的候选根目录。
+    ///
+    /// ★★ 2026-10-27 真机 bug：这里原来只有 `AppDir` / `assets` / `ui` 三个，
+    ///   而 WinUHid 全家桶在 **`assets\winuhid\`** 下面 ——
+    ///   `FindAsset("Run-Install.cmd")` 因此**永远返回 null**，
+    ///   面板「装虚拟键盘」在任何机器上都报"未找到安装脚本"（与换机无关）。
+    ///   现在把 `assets\winuhid` 加进来；以后再加子目录也往这里加。
+    /// </summary>
+    private static readonly string[] AssetRoots =
+    {
+        AppDir,
+        Path.Combine(AppDir, "assets"),
+        Path.Combine(AppDir, "assets", "winuhid"),
+        Path.Combine(AppDir, "ui"),
+    };
+
+    /// <summary>把搜索过的位置拼成一行 —— 找不到时直接告诉用户"我找过哪儿"。</summary>
+    public static string AssetSearchList() => string.Join("；", AssetRoots);
+
     public static string? FindAsset(string name)
     {
-        foreach (var root in new[] { AppDir, Path.Combine(AppDir, "assets"), Path.Combine(AppDir, "ui") })
+        foreach (var root in AssetRoots)
         {
             var p = Path.Combine(root, name);
             if (File.Exists(p)) return p;
@@ -481,7 +501,10 @@ internal static class Env
     public static (bool ok, string msg) InstallWinuhid()
     {
         var cmd = FindAsset("Run-Install.cmd");
-        if (cmd == null) return (false, "未找到 WinUHid 安装脚本 assets/winuhid/Run-Install.cmd。");
+        if (cmd == null)
+            return (false, "未找到 WinUHid 安装脚本 Run-Install.cmd。\n" +
+                           "已在这些位置查找：" + AssetSearchList() + "\n" +
+                           "（若文件确实存在，通常是杀软把它隔离了 —— 见包内《换机部署.md》）");
         try
         {
             Process.Start(new ProcessStartInfo(cmd)
