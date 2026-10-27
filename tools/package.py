@@ -913,6 +913,21 @@ def verify(zp=None, title="主包", self_contained=False, source_checks=True):
         ok_all &= ok
         print(f"  {'✓' if ok else '✗'} {label}")
 
+    # ── 状态字段层级检查（2026-10-27 新增）──
+    #   症状：字段被误加进子对象 ⇒ 界面读 state.xxx 得到 undefined ⇒
+    #   开关点了没用 / 提示不显示 / 输入框永远默认值。编译器与 ui_probe 都发现不了。
+    try:
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "check_state_fields.py")],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        ok = (r.returncode == 0)
+        ok_all &= ok
+        print(f"  {'✓' if ok else '✗'} 状态字段层级（GetState 顶层 vs 界面读取）")
+        if not ok:
+            for line in (r.stdout or "").splitlines()[:8]:
+                print("      " + line)
+    except Exception as e:
+        print(f"  ⚠ 状态字段层级检查没跑成：{e}")
+
     print(f"  ZIP 时间 {datetime.datetime.fromtimestamp(os.path.getmtime(zp)):%Y-%m-%d %H:%M:%S}")
     print(f"  ⇒ {title}：" + ("全部通过，包是新的 ✓" if ok_all else "★ 有检查未通过 ✗"))
     return ok_all

@@ -751,13 +751,19 @@ internal sealed class Backend : IDisposable
                 // ★ 面板上要显示的是**语音键**的判据（音频静默阈值），不是 Raw Input 的静默超时
                 ["voiceSilentMs"] = StuckGuard.VoiceSilentMs,
                 ["voiceAudioRelease"] = Settings.VoiceAudioRelease,
-                ["antiCheat"] = _antiCheat,
-                ["keepEventLog"] = Settings.KeepEventLog,
-                ["clickMinScore"] = Settings.ClickMinScore,
-                ["clickSearchScope"] = Settings.ClickSearchScope,
-                ["clickReturnToOrigin"] = Settings.ClickReturnToOrigin,
                 ["voiceGraceSec"] = (long)StuckGuard.VoiceGraceSec,
             },
+            // ★★ 2026-10-27：这几项原来被我误加到 `stuckGuard` 子对象里，而界面读的是**顶层**
+            //   `state.xxx` ⇒ 全部取到 undefined：
+            //     · keepEventLog → 开关每 2 秒被强制勾回（用户报"点了没反应、一直打钩"）
+            //     · antiCheat    → 反作弊提示永远不显示
+            //     · clickMinScore / clickSearchScope / clickReturnToOrigin → 界面永远显示默认值
+            //   放在这一层（与 autoRun / autoKeepMic 同级）才对。
+            ["antiCheat"] = _antiCheat,
+            ["keepEventLog"] = Settings.KeepEventLog,
+            ["clickMinScore"] = Settings.ClickMinScore,
+            ["clickSearchScope"] = Settings.ClickSearchScope,
+            ["clickReturnToOrigin"] = Settings.ClickReturnToOrigin,
             ["autoRun"] = IsAutoRun(),
             ["startMinimized"] = Settings.StartMinimized,
             ["autoStart"] = AutoStartBridge,
