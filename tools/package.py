@@ -289,7 +289,11 @@ SRC_REQUIRED = [
     ("探针自检入口", "iprc1000_gui_dotnet/Program.cs", "--keypath-test"),
     ("界面显示探针提示", "iprc1000_gui_dotnet/ui/index.html", "keyPathNote"),
     # ★ v1.2.14：WebView2 延迟到"真正需要界面"时再创建（启动到托盘时省 341 ms + 356 MB）
-    ("WebView2 按需创建（托盘启动不建）", "iprc1000_gui_dotnet/MainForm.cs", "if (!Settings.StartMinimized || _selftest)"),
+    # 2026-10-27：加了 `_e2e`（端到端测试模式）例外 —— 断言改为盯住核心判据
+    # `!Settings.StartMinimized`（托起时不建界面），而不是整行字面量，
+    # 这样以后再加开关不会误报，但**删掉这条判据**仍会失败。
+    ("WebView2 按需创建（托盘启动不建）", "iprc1000_gui_dotnet/MainForm.cs", "if (!Settings.StartMinimized || _selftest"),
+    ("托盘启动不建界面（判定存在）", "iprc1000_gui_dotnet/MainForm.cs", "if (Settings.StartMinimized && !_e2e)"),
     # ★ v1.2.9 延迟优化：起播/声卡缓冲都降过，且自适应必须存在（否则降不下去只能手工调）
     ("抖动缓冲起播 24 ms", "iprc1000_gui_dotnet/JitterBuffer.cs", "public int PreRollMs = 24;"),
     ("自适应天花板给上限留余量", "iprc1000_gui_dotnet/JitterBuffer.cs", "CapHeadroomMs"),
