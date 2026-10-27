@@ -22,7 +22,7 @@ namespace IprcSetup
     {
         private const string AppName = "IPRC1000 Adapter";
         private const string DisplayName = "IPRC1000 遥控器适配器";
-        private const string Version = "1.2.79";
+        private const string Version = "1.2.80";
         private const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\IPRC1000Adapter";
 
         [STAThread]
@@ -244,6 +244,6 @@ namespace IprcSetup
     internal static class Program2
     {
         public const string DisplayName = "IPRC1000 遥控器适配器";
-        public const string Version = "1.2.79";
+        public const string Version = "1.2.80";
     }
 }
