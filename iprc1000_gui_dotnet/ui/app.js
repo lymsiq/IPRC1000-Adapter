@@ -816,6 +816,14 @@ function renderEnv(s) {
              : '等待采样',
            (ke.maxLatencyMs || 0) > 200 ? 'bad' : 'ok') +
     kvItem('最近按键', ke.lastButton ? `${ke.lastButton}（usage ${ke.lastUsage}${ke.pressed ? ' 按住' : ''}）` : '—') +
+    // ★ 2026-10-27：「随机冒出字母」的关键判据 —— 遥控器是否发过**不认识的 usage**。
+    //   0x04~0x1D 在 HID 表里正好是字母 a~z：若固件偶尔发这种码，就会被当成字母。
+    //   （我们的注入只注入"认识且已映射"的键，所以未知码本身不会打出字；
+    //     但这个计数 > 0 说明固件在发怪报文，是排查的起点。）
+    (ke.unknownUsage > 0
+      ? kvItem('⚠ 未知报文', `${ke.unknownUsage} 次`, 'warn',
+               '遥控器发过不认识的 usage（0x04~0x1D 对应字母 a~z）—— 这就是"随机字母"的来源')
+      : kvItem('未知报文', '0 次', 'ok')) +
     // 日志只在打开诊断开关时才有意义；默认关就不显示这一格（否则用户会以为"还有日志"）
     (logOn && ks.logPath ? kvItem('按键日志', '已写入 ' + ks.logPath) : '');
   $('#keySrcNote').className = 'note' + (ks.stillKeyboard ? ' warn' : '');
@@ -1363,7 +1371,7 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.77',
+      version: '1.2.78',
       buildStamp: '2026-10-16 09:50',
       versionLine: 'v1.2.69（构建于 2026-10-26 14:45）',
       device: {
