@@ -732,7 +732,10 @@ def build(pub=None, target=None, variant="main"):
         f.write("     → 得到 D:\\IPRC1000_Adapter\\\n")
         f.write("  2) 双击里面的「创建桌面快捷方式.cmd」\n")
         f.write("     → 桌面出现「IPRC1000 遥控器」，已设为「以管理员身份运行」\n")
-        f.write("  3) 首次部署环境：右键「以 PowerShell 运行」tools\\一键部署.ps1\n\n")
+        # ★ 2026-10-27：改为指向双击入口。右键运行**不是管理员**，用户最容易卡在这一步。
+        f.write("  3) 首次部署环境：**双击包里的「部署.cmd」**（会自动请求管理员权限，\n")
+        f.write("     依次：装虚拟键盘驱动 → 切设备驱动 → 装虚拟声卡 → 启动程序）。\n")
+        f.write("     若习惯手动：也可在管理员 PowerShell 里运行 tools\\一键部署.ps1\n\n")
         f.write("【以后都从「启动.cmd」进】\n")
         f.write("  也可以直接双击程序目录里的「启动.cmd」（桌面快捷方式指的就是它）。\n")
         f.write("  它会先确认 .NET 桌面运行时到位：缺了就自动装（优先用包内离线安装器，\n")
