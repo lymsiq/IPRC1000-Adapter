@@ -44,6 +44,8 @@ internal sealed class Backend : IDisposable
 
     public Backend()
     {
+        // ★ 2026-10-27：事件日志总闸跟随设置（默认开）。关掉后 Safe.Note 变成空操作。
+        Safe.NotesEnabled = Settings.KeepEventLog;
         _router.Start();   // 常驻：随时接收语音桥推来的 PCM
     }
 
@@ -750,6 +752,7 @@ internal sealed class Backend : IDisposable
                 ["voiceSilentMs"] = StuckGuard.VoiceSilentMs,
                 ["voiceAudioRelease"] = Settings.VoiceAudioRelease,
                 ["antiCheat"] = _antiCheat,
+                ["keepEventLog"] = Settings.KeepEventLog,
                 ["clickMinScore"] = Settings.ClickMinScore,
                 ["clickSearchScope"] = Settings.ClickSearchScope,
                 ["clickReturnToOrigin"] = Settings.ClickReturnToOrigin,
@@ -1372,6 +1375,16 @@ internal sealed class Backend : IDisposable
         {
             return Env.Json(new { ok = false, message = "采集失败：" + e.Message });
         }
+    }
+
+    /// <summary>事件日志开关（errors.log 的 VOICE/CLEARHELD 等）。关掉 = 完全不写日志。</summary>
+    public string SetKeepEventLog(string? on)
+    {
+        var want = on is "true" or "1" or "True";
+        Settings.KeepEventLog = want;          // setter 里同时改 Safe.NotesEnabled
+        return Env.Json(new { ok = true, keepEventLog = want,
+            message = want ? "已开启事件日志（每天几 KB，出问题能归因）"
+                           : "已关闭事件日志 —— 现在**完全不写任何日志**" });
     }
 
     /// <summary>设置截图点击的搜索范围（0=只局部 / 1=窗口下部 / 2=整个窗口）。</summary>

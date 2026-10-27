@@ -667,22 +667,28 @@ function renderEnv(s) {
     : inSess ? `${(silent / 1000).toFixed(1)} s 前 ← 说话中却断了！`
     : `${(silent / 1000).toFixed(1)} s 前（没在说话）`;
   const silentCls = silent < 0 ? '' : (silent < 1200 ? 'ok' : (inSess ? 'bad' : ''));
+  // ★ 2026-10-27：**分级显示**。正常使用时只需要三格：运行状态 / 最近收到音频 / 真丢帧。
+  //   其余（帧数、样本、空档、丢帧分类、写入包数、抖动缓冲、权限）属于"出问题才看"，
+  //   折进下面的「诊断详情」，避免平时面板被 10 行数字占满。
   $('#bridgeKv').innerHTML =
     kvItem('运行状态', b.zombie ? '僵死（进程在但已停止上报）' : (b.running ? '运行中' : '已停止'),
            b.zombie ? 'bad' : (b.running ? 'ok' : '')) +
-    kvItem('虚拟声卡通道', rt.online ? '已就绪' : (rt.error || '未启动'), rt.online ? 'ok' : 'bad') +
-    kvItem('音频帧', b.frames || 0) +
-    kvItem('16k 样本', (b.samples || 0) + (b.seconds ? `（${b.seconds} s）` : '')) +
     kvItem('最近收到音频', silentTxt, silentCls) +
-    kvItem('会话 / 空档', `${b.sessions || 0} / ${b.gaps || 0}` +
-                        ((b.maxGapMs || 0) > 0 ? `（最长 ${b.maxGapMs} ms）` : '')) +
     // ★ 2026-10-19：**跳号 ≠ 丢帧**。遥控器不说话时根本不发帧，序号自然跳过
     //   （实测 642 帧跳号全部对应静音期，真丢帧 = 0，却被红字报成"丢失"）。
     //   现在只把"真丢帧"标红；静音跳号用灰字说明。
     kvItem('丢帧（真丢）', (b.seqLost || 0), (b.seqLost || 0) > 0 ? 'bad' : 'ok',
            (b.seqJumps || 0) > 0
              ? `序号跳 ${b.seqJumps} 次：静音期未发送 ${b.seqSilence || 0} 帧（正常）`
-             : '') +
+             : '');
+
+  // ── 以下属于"出问题才看"的诊断明细 ──
+  $('#bridgeDiagKv').innerHTML =
+    kvItem('虚拟声卡通道', rt.online ? '已就绪' : (rt.error || '未启动'), rt.online ? 'ok' : 'bad') +
+    kvItem('音频帧', b.frames || 0) +
+    kvItem('16k 样本', (b.samples || 0) + (b.seconds ? `（${b.seconds} s）` : '')) +
+    kvItem('会话 / 空档', `${b.sessions || 0} / ${b.gaps || 0}` +
+                        ((b.maxGapMs || 0) > 0 ? `（最长 ${b.maxGapMs} ms）` : '')) +
     kvItem('丢帧分类', '组装失败 ' + (b.lostCont || 0)
                         + ' · 长度不认识 ' + (b.oddFrag || 0)
                         + ' · 分片被截断 ' + ((b.truncCont || 0) + (b.truncatedFirst || 0))
@@ -755,6 +761,12 @@ function renderEnv(s) {
   if (logT) logT.checked = s.logEnabled === true;
   const logSw = $('#logSwitch');
   if (logSw) logSw.classList.toggle('on', s.logEnabled === true);
+  // 事件日志开关（第二级）的初始态
+  const noteT = $('#noteToggle');
+  if (noteT) noteT.checked = s.keepEventLog !== false;
+  const noteSw = $('#noteSwitch');
+  if (noteSw) noteSw.classList.toggle('on', s.keepEventLog !== false);
+
   const logN = $('#logNote');
   if (logN) logN.textContent = s.logEnabled
     ? '日志已开启：会写 key-events.log / bridge.log / router.log 等，占用少量磁盘与 I/O。排查完建议关闭。'
@@ -1121,6 +1133,19 @@ function bindUI() {
     };
   }
 
+  // 事件日志开关（第二级）：关掉后连 errors.log 都不写
+  const noteTB = $('#noteToggle');
+  if (noteTB && hasBridge) {
+    noteTB.onchange = async () => {
+      const r = JSON.parse(await B.setKeepEventLog(noteTB.checked ? '1' : '0'));
+      noteTB.checked = r.keepEventLog === true;
+      const sw = $('#noteSwitch');
+      if (sw) sw.classList.toggle('on', noteTB.checked);
+      toast(r.message, 5000);
+      refresh();
+    };
+  }
+
   $('#btnTestInject').onclick = async () => {
     const r = JSON.parse(await B.testInject());
     toast(r.ok ? `注入正常：按下时系统读到「${r.name} 按下」，松开后已释放` : '注入异常，请看状态面板', 5000);
@@ -1316,7 +1341,7 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.70',
+      version: '1.2.71',
       buildStamp: '2026-10-16 09:50',
       versionLine: 'v1.2.69（构建于 2026-10-26 14:45）',
       device: {

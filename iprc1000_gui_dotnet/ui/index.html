@@ -295,6 +295,11 @@
         </div>
 
         <div class="kv" id="bridgeKv"></div>
+        <!-- 诊断明细：正常时收起，出问题时才展开看 -->
+        <details class="adv">
+          <summary>诊断详情（帧数 / 缓冲 / 权限）</summary>
+          <div class="kv" id="bridgeDiagKv"></div>
+        </details>
         <div class="note warn" id="keyPathNote"></div>
         <div class="note" id="bridgeNote"></div>
 
@@ -333,6 +338,8 @@
         <div class="switches">
           <!-- 日志总开关：**默认关**。排查问题时打开，会同时打开界面侧与语音桥侧的日志 -->
           <label class="switch" id="logSwitch"><input type="checkbox" id="logToggle">写入诊断日志<i>排查用，默认关闭</i></label>
+          <!-- 第二级：事件日志（每天几 KB）。关掉它 = 完全不写任何日志。 -->
+          <label class="switch" id="noteSwitch"><input type="checkbox" id="noteToggle">记录事件日志<i>按键/释放等归因，每天几 KB；关掉即完全不记录</i></label>
         </div>
         <div class="note" id="logNote"></div>
         <details class="adv">

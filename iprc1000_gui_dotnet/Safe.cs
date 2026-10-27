@@ -78,8 +78,12 @@ internal static class Safe
     /// "用户没开日志"而只能靠猜（2026-10-19 连续两次）。这类**归因必需**的事件
     /// 量小（每次按键 2 行），直接落到 errors.log，不依赖那个开关。
     /// </summary>
+    /// <summary>事件日志总闸（由 Settings.KeepEventLog 控制）。关掉后 Note 变成空操作。</summary>
+    public static volatile bool NotesEnabled = true;
+
     public static void Note(string what)
     {
+        if (!NotesEnabled) return;
         // ★★★ 2026-10-20（第四轮审查·资源/延迟）：
         //   `Note` 跑在**按键线程**（ETW 回调/注入路径）上，原来是**同步写盘** ——
         //   慢盘/杀软扫描时一次 AppendAllText 可能几十毫秒，直接把按键延迟顶上去。

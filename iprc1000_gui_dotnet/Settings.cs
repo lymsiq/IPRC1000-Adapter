@@ -106,6 +106,12 @@ internal static class Settings
         get => _data.ClickProcess;
         set { _data.ClickProcess = value; Save(); }
     }
+    public static bool KeepEventLog
+    {
+        get => _data.KeepEventLog;
+        set { _data.KeepEventLog = value; Save(); Safe.NotesEnabled = value; }
+    }
+
     public static int ClickSearchScope
     {
         get => _data.ClickSearchScope is >= 0 and <= 2 ? _data.ClickSearchScope : 1;
@@ -262,6 +268,16 @@ internal static class Settings
         /// 有"唯一性校验"兜底：分数不高但**明显领先次佳**时才接受，避免误点。
         /// </summary>
         public double ClickMinScore { get; set; } = 0.75;
+
+        /// <summary>
+        /// 是否记录**事件日志**（errors.log 里的 VOICE / CLEARHELD / KEY HEALTH）。
+        ///
+        /// 与「诊断日志」是两级：
+        ///   · 诊断日志（默认关）= key-events.log / bridge.log / webview.log，量大，仅排查用；
+        ///   · 事件日志（本项，默认**开**）= 每天几 KB，是"出问题能归因"的最小集。
+        /// 关掉它 = **完全不写任何日志**（用户明确要求"不做日志记录"时用）。
+        /// </summary>
+        public bool KeepEventLog { get; set; } = true;
 
         /// <summary>
         /// 截图点击的**搜索范围**：

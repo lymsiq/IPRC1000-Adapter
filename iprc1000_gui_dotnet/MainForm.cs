@@ -656,6 +656,7 @@ internal sealed class MainForm : Form
             "setAutoRun" => _backend.SetAutoRun(Arg(0)),
             "setStartMinimized" => _backend.SetStartMinimized(Arg(0)),
             "setLog" => _backend.SetLog(Arg(0)),
+            "setKeepEventLog" => _backend.SetKeepEventLog(Arg(0)),
             "setAutoSwitchDriver" => _backend.SetAutoSwitchDriver(Arg(0)),
             "setAutoKeepMic" => _backend.SetAutoKeepMic(Arg(0)),
             "checkCaptureDevice" => _backend.CheckCaptureDevice(),
