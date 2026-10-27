@@ -248,14 +248,12 @@ SRC_REQUIRED = [
     # ★ v1.2.23：每段会话第一条报文只当基线（修"启动瞬间凭空触发一次按键"）
     ("会话基线（防启动假按键）", "tools/etw_consumer/src/main.rs", "if !self.seeded {"),
     # ★ v1.2.21：ETW 模式下 Raw Input 不许再处理一次（注册没撤掉，会双处理）
-    ("ETW 模式挡住 Raw Input 重复处理", "iprc1000_gui_dotnet/KeyFilter.cs", "if (KeySourceIsEtw) return;"),
-    ("过滤后计数（只算遥控器）", "iprc1000_gui_dotnet/KeyFilter.cs", "RawOurs++;"),
+    # ★ 2026-10-27：随 Raw Input 整条路径删除，原 4 条断言（ETW 挡重复处理 / 过滤后计数 /
+    #   Raw Input 报文计数 / 报文数暴露给界面）已无对应行为，一并移除。
     # ★ v1.2.20：被动标定每帧查虚拟桌面 → 改带缓存（原每帧 4 次 GetSystemMetrics）
     ("每帧查询走缓存", "iprc1000_gui_dotnet/MouseEngine.cs", "VirtualScreenCached()"),
     # ★ v1.2.19：热路径不再拼日志字符串 + Raw Input 直读可行性探针
     ("日志关掉后不拼字符串", "iprc1000_gui_dotnet/EtwKeySource.cs", "if (LogSwitch.Enabled)"),
-    ("Raw Input 报文计数", "iprc1000_gui_dotnet/KeyFilter.cs", "RawMessages++;"),
-    ("报文数暴露给界面", "iprc1000_gui_dotnet/Backend.cs", '["rawMessages"] = KeyFilter.RawMessages'),
     # ★ v1.2.18：按键行右侧快捷键与"名字"同基线（曾低 8px，看着像错位）
     ("右值与名字同基线", "iprc1000_gui_dotnet/ui/style.css", "align-self:flex-start"),
     # ★ v1.2.18：pwr 热点校正（8 倍放大原图确认圆心 (141,38)，原写 (140,47)）
@@ -466,7 +464,6 @@ SRC_REQUIRED = [
     ("从未收帧按超大静默处理", "iprc1000_gui_dotnet/Backend.cs", "long.MaxValue / 4"),
     # v1.0.7 资源 review：
     # ① 看门狗曾经被 `if (empty) return;` 挡住（ETW 模式下 v1 集合恒为空）→ v2 一次都没跑过
-    ("v1 判据不成立不许提前 return", "iprc1000_gui_dotnet/KeyFilter.cs", "if (!empty &&"),
     # ② 窗口藏进托盘后停掉前端 2 秒轮询（跨进程 getState + 三次 DOM 重绘没人看）
     ("托盘时停前端轮询", "iprc1000_gui_dotnet/ui/app.js", "window.setUiVisible"),
     ("可见性变化会通知前端", "iprc1000_gui_dotnet/MainForm.cs", "OnVisibleChanged"),
