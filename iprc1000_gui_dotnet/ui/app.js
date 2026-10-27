@@ -756,11 +756,26 @@ function renderEnv(s) {
   const btnTI = $('#btnTestInject');
   if (btnTI) btnTI.textContent = voiceBind === '未设置' ? '测试注入语音键' : `测试注入 ${voiceBind}`;
   // 只有 ETW 一种来源了：不再有"键盘模式/拦截/漏键"这一套说明
-  setDot('#d-perm2', 'on');
-  $('#injectNote').className = 'note';
-  $('#injectNote').innerHTML =
-    `遥控器已被系统当作<b>普通 HID 设备</b>（非键盘）→ <b>不会输出任何字符</b>，` +
-    `无需拦截，也没有「丢 UP 卡键」风险。按键从 <b>BthPort ETW</b> 读取。`;
+  // ★★ 2026-10-27：原来这段是**写死的绿色文案**，不管设备实际是什么状态都说
+  //   "已被当作非键盘、不会输出任何字符" —— 用户因此误以为没问题，实际 m 一直在漏。
+  //   现在按后端的三态如实显示：Absent（未连接）/ Keyboard（仍是键盘）/ NotKeyboard（已切换）。
+  const rk = s.remoteKb || 'Absent';
+  setDot('#d-perm2', rk === 'NotKeyboard' ? 'on' : (rk === 'Keyboard' ? 'bad' : 'warn'));
+  $('#injectNote').className = 'note' + (rk === 'Keyboard' ? ' warn' : '');
+  if (rk === 'Keyboard') {
+    $('#injectNote').innerHTML =
+      `⚠ 遥控器仍被系统当作 <b>键盘</b> → 按键会直接打出字符（按住语音键就是一串 <b>m</b>）。<br>` +
+      `请在下面点「<b>切换设备驱动</b>」（需要管理员；先把遥控器按醒）。` +
+      `按键仍从 <b>BthPort ETW</b> 读取，但系统这一层拦不住。`;
+  } else if (rk === 'Absent') {
+    $('#injectNote').innerHTML =
+      `遥控器<b>当前未连接</b>（休眠 / 未配对）→ <b>无法判断</b>驱动是否已切换。<br>` +
+      `按一下遥控器任意键唤醒，等 2 秒后这里的判断才作数。`;
+  } else {
+    $('#injectNote').innerHTML =
+      `遥控器已被系统当作<b>普通 HID 设备</b>（非键盘）→ <b>不会输出任何字符</b>，` +
+      `无需拦截，也没有「丢 UP 卡键」风险。按键从 <b>BthPort ETW</b> 读取。`;
+  }
   $('#injectNote').innerHTML +=
     `<br>卡键自动解锁：设备移除<b>即时响应</b> · ` +
     ((s.stuckGuard || {}).voiceAudioRelease
@@ -1371,7 +1386,7 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.78',
+      version: '1.2.79',
       buildStamp: '2026-10-16 09:50',
       versionLine: 'v1.2.69（构建于 2026-10-26 14:45）',
       device: {

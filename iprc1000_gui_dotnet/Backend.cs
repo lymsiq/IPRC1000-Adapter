@@ -783,6 +783,7 @@ internal sealed class Backend : IDisposable
             //     · clickMinScore / clickSearchScope / clickReturnToOrigin → 界面永远显示默认值
             //   放在这一层（与 autoRun / autoKeepMic 同级）才对。
             ["antiCheat"] = _antiCheat,
+            ["remoteKb"] = Env.RemoteKb().ToString(),   // Absent / Keyboard / NotKeyboard
             ["heldNow"] = KeyFilter.HeldKeysNow(),
             ["keepEventLog"] = Settings.KeepEventLog,
             ["clickMinScore"] = Settings.ClickMinScore,

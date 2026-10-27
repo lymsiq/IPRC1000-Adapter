@@ -92,7 +92,85 @@ internal static class Env
         // ② 实例路径里带遥控器 MAC 的也算（有些堆栈会这么拼）
         foreach (var m in PairedRemoteMacs())
             if (lowTop.Contains(m)) return true;
-        return false;
+        // ③ ★ 2026-10-27：换非 Broadcom 蓝牙适配器时 HID 节点的 VID 可能是**适配器厂商**的，
+        //    上面两条都会漏 ⇒ 再按"同一蓝牙设备容器"匹配（见 RemoteHidNodes）。
+        var hwid = RemoteHwidsCache();
+        return hwid.Count > 0 && hwid.Any(h => h.LowTop == lowTop);
+    }
+
+    /// <summary>遥控器的一个 HID 节点（只留判断需要的字段）。</summary>
+    private sealed record RemoteHidNode(string LowTop, string Service, string Hwid);
+
+    private static List<RemoteHidNode>? _remoteNodes;
+    private static DateTime _remoteNodesAt = DateTime.MinValue;
+
+    /// <summary>
+    /// 找出**属于遥控器**的 HID 节点（与蓝牙适配器厂商无关）。
+    ///
+    /// 思路：先用 `PairedRemoteMacs()`（按设备名 IPRC 找 MAC，与适配器无关）定位蓝牙设备，
+    /// 读它的 **ContainerID**，再反查同 ContainerID 的 HID 实例 ——
+    /// 同一个物理设备的各个 HID 集合（键盘/消费者控制…）共享一个容器。
+    /// 拿到的 `Hwid` 是该实例真实的 HardwareID（如 `HID\VID_8087&PID_0022&MI_03&Col01`），
+    /// 用它去调 UpdateDriverForPlugAndPlayDevices 才不会因为写死 VID 而失败。
+    /// </summary>
+    private static List<RemoteHidNode> RemoteHwidsCache()
+    {
+        if (_remoteNodes != null && (DateTime.UtcNow - _remoteNodesAt).TotalSeconds < 5) return _remoteNodes;
+        var nodes = new List<RemoteHidNode>();
+        try
+        {
+            // ① 遥控器蓝牙设备的 ContainerID
+            var wantCid = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var macs = PairedRemoteMacs();
+            foreach (var top in SubKeys(Registry.LocalMachine, @"SYSTEM\CurrentControlSet\Enum\BTHENUM"))
+            {
+                var low = top.ToLowerInvariant();
+                var hit = low.Contains("iprc") || macs.Any(m => low.Contains(m.Replace(":", "")));
+                if (!hit && !macs.Any(m => low.Contains(m))) continue;
+                foreach (var inst in SubKeys(Registry.LocalMachine, $@"SYSTEM\CurrentControlSet\Enum\BTHENUM\{top}"))
+                {
+                    using var k = Registry.LocalMachine.OpenSubKey(
+                        $@"SYSTEM\CurrentControlSet\Enum\BTHENUM\{top}\{inst}", false);
+                    if (k?.GetValue("ContainerID") is string cid && cid.Length > 0) wantCid.Add(cid);
+                }
+            }
+
+            // ② 扫 HID，按 容器 ID / VID_0A5C / 名字 三种信号认领
+            foreach (var top in SubKeys(Registry.LocalMachine, @"SYSTEM\CurrentControlSet\Enum\HID"))
+            {
+                var low = top.ToLowerInvariant();
+                foreach (var inst in SubKeys(Registry.LocalMachine, $@"SYSTEM\CurrentControlSet\Enum\HID\{top}"))
+                {
+                    using var k = Registry.LocalMachine.OpenSubKey(
+                        $@"SYSTEM\CurrentControlSet\Enum\HID\{top}\{inst}", false);
+                    if (k == null) continue;
+                    var svc = k.GetValue("Service") as string ?? "";
+                    var desc = (k.GetValue("DeviceDesc") as string ?? "") + " " +
+                               (k.GetValue("FriendlyName") as string ?? "");
+                    var cid = k.GetValue("ContainerID") as string ?? "";
+
+                    var mine = low.Contains("vid_0a5c")
+                               || (cid.Length > 0 && wantCid.Contains(cid))
+                               || desc.IndexOf(RemoteNameHint, StringComparison.OrdinalIgnoreCase) >= 0
+                               || macs.Any(m => low.Contains(m.Replace(":", "")));
+                    if (!mine) continue;
+
+                    // 取真实 HardwareID：优先键盘集合（UP:0001_U:0006），否则第一条 HID\
+                    var hwid = "";
+                    if (k.GetValue("HardwareID") is string[] hids && hids.Length > 0)
+                        hwid = hids.FirstOrDefault(h =>
+                                   h.Contains("UP:0001_U:0006", StringComparison.OrdinalIgnoreCase))
+                               ?? hids.FirstOrDefault(h => h.StartsWith(@"HID\", StringComparison.OrdinalIgnoreCase))
+                               ?? hids[0];
+                    if (hwid.Length == 0) continue;
+                    nodes.Add(new RemoteHidNode(low, svc.ToLowerInvariant(), hwid));
+                }
+            }
+        }
+        catch { }
+        _remoteNodes = nodes;
+        _remoteNodesAt = DateTime.UtcNow;
+        return nodes;
     }
 
     /// <summary>
@@ -177,7 +255,18 @@ internal static class Env
         if (!File.Exists(inf)) return (false, $"找不到 {inf}");
         try
         {
-            var ok = UpdateDriverForPlugAndPlayDevicesW(IntPtr.Zero, RemoteKeyboardHwid, inf,
+            // ★★ 2026-10-27：原来写死 `HID\VID_0A5C&UP:0001_U:0006` ——
+            //   换非 Broadcom 适配器后这个硬件 ID 根本不存在 ⇒ **切换永远失败**，
+            //   而遥控器仍是键盘 ⇒ 按住语音键就是 31Hz 重复的 m。
+            //   现在用**实际发现的** HardwareID（按容器/名字认领，见 RemoteHwidsCache）。
+            var hwid = RemoteHwidsCache()
+                           .FirstOrDefault(n => n.Hwid.Contains("UP:0001_U:0006",
+                               StringComparison.OrdinalIgnoreCase))?.Hwid
+                       ?? RemoteHwidsCache().FirstOrDefault()?.Hwid
+                       ?? RemoteKeyboardHwid;   // 兜底：老机器（Broadcom）
+            if (hwid == RemoteKeyboardHwid && RemoteHwidsCache().Count == 0)
+                return (false, "没找到遥控器的 HID 节点 —— 遥控器可能未连接/在休眠，请按一下任意键唤醒后重试。");
+            var ok = UpdateDriverForPlugAndPlayDevicesW(IntPtr.Zero, hwid, inf,
                        INSTALLFLAG_FORCE | INSTALLFLAG_NONINTERACTIVE, out var reboot);
             if (!ok)
                 return (false, $"切换失败（Win32 错误 {Marshal.GetLastWin32Error()}）。" +
@@ -428,22 +517,26 @@ internal static class Env
     /// 关键安全判据：按键来源切成 ETW 后钩子就不装了 —— 此时若设备还是键盘，
     /// `m` 会**畅通无阻**地打进前台应用。所以要能检测出来并自动兜底。
     /// </summary>
-    public static bool RemoteStillKeyboard()
+    /// <summary>遥控器键盘绑定状态 —— **三态**，因为"没找到设备"和"已切换"是两回事。</summary>
+    public enum RemoteKbState
     {
-        foreach (var top in SubKeys(Registry.LocalMachine, @"SYSTEM\CurrentControlSet\Enum\HID"))
-        {
-            var low = top.ToLowerInvariant();
-            if (!IsRemoteHid(low)) continue;
-            foreach (var inst in SubKeys(Registry.LocalMachine, $@"SYSTEM\CurrentControlSet\Enum\HID\{top}"))
-            {
-                using var k = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Enum\HID\{top}\{inst}", false);
-                // Service=kbdhid 说明它仍被绑定成键盘
-                if (k?.GetValue("Service") is string svc && svc.Equals("kbdhid", StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
-        }
-        return false;
+        /// <summary>遥控器当前不在系统里（休眠/未连接）——**无法判断**，不能当成"安全"</summary>
+        Absent,
+        /// <summary>仍是键盘 ⇒ 按键会被系统打成字符（m 重复）</summary>
+        Keyboard,
+        /// <summary>已切换成 HID-compliant device ⇒ 零字符输出</summary>
+        NotKeyboard,
     }
+
+    public static RemoteKbState RemoteKb()
+    {
+        var nodes = RemoteHwidsCache();
+        if (nodes.Count == 0) return RemoteKbState.Absent;
+        return nodes.Any(n => n.Service == "kbdhid") ? RemoteKbState.Keyboard : RemoteKbState.NotKeyboard;
+    }
+
+    /// <summary>是否仍是键盘（Absent 时返回 false —— 调用方若需要区分请用 RemoteKb()）。</summary>
+    public static bool RemoteStillKeyboard() => RemoteKb() == RemoteKbState.Keyboard;
 
     /// <summary>遥控器当前是否还在系统里（不论绑的是什么驱动）——用于「断开即解锁」</summary>
     public static bool RemotePresent()
