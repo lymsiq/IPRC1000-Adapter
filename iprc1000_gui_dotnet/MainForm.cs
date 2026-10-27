@@ -43,6 +43,14 @@ internal sealed class MainForm : Form
     private bool _trayHintShown;
     private bool _reallyExit;
     private readonly bool _selftest;
+    /// <summary>
+    /// 端到端测试模式（`IPRC1000_WEBVIEW_DEBUG` 有值即开）。
+    /// 作用：**不启动到托盘**，直接把界面建出来 —— 否则 WebView 不存在，
+    /// Playwright 连不上 CDP，也测不了任何按钮。
+    /// 生产环境默认关闭（环境变量不设就没有任何影响）。
+    /// </summary>
+    private readonly bool _e2e =
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("IPRC1000_WEBVIEW_DEBUG"));
     private string? _selftestOut;
 
     /// <summary>
@@ -159,8 +167,8 @@ internal sealed class MainForm : Form
         // 单实例：第二个实例会 Set 事件要求我们把窗口显示出来
         StartShowWindowListener();
 
-        // 启动时最小化到托盘（默认开）
-        if (Settings.StartMinimized)
+        // 启动时最小化到托盘（默认开）；E2E 测试模式例外，必须把界面建出来
+        if (Settings.StartMinimized && !_e2e)
         {
             WindowState = FormWindowState.Minimized;
             Load += (_, _) => { if (WindowState == FormWindowState.Minimized) Hide(); };
@@ -198,9 +206,10 @@ internal sealed class MainForm : Form
         Load += (_, _) =>
         {
             StartupMark("Load 触发（窗口句柄就绪）");
-            // 句柄此刻已就绪，再装 Raw Input + 键盘钩子
+            // 2026-10-27：这里原来写"装 Raw Input + 键盘钩子" —— 两者都已删除
+            //   （钩子 v1.2.63 移除、Raw Input v1.2.70 移除），日志文案会误导排查。
             _filter.Start(Handle);
-            StartupMark("按键钩子 + RAW INPUT 已装");
+            StartupMark("按键来源已启动（ETW；无钩子、无 Raw Input）");
 
             // ★ 启动兜底：清掉**上一个实例**被强杀时留在系统里的卡住修饰键
             //   （退出路径在 taskkill /F / 崩溃时跑不到，那台虚拟键盘是上一个进程的设备，
@@ -217,7 +226,7 @@ internal sealed class MainForm : Form
             // ★ 只有窗口**真的可见**时才建界面。启动到托盘（StartMinimized，开机自启走这条）
             //   时不建 —— 省 341 ms + 356 MB。露出来时由 OnVisibleChanged 补建。
             //   `_selftest` 例外：自检要读界面，必须建。
-            if (!Settings.StartMinimized || _selftest)
+            if (!Settings.StartMinimized || _selftest || _e2e)
             BeginInvoke(new Action(async () =>
             {
                 try { await EnsureWebViewAsync(); }
@@ -302,7 +311,24 @@ internal sealed class MainForm : Form
         // ★ 用 CreationProperties + 无参 EnsureCoreWebView2Async：
         //   它内部会自行 marshal 到 UI 线程；显式 CreateAsync 后 await 的续体可能落到
         //   线程池，再碰 CoreWebView2 就会抛「只能从 UI 线程访问」。
-        web.CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = dataDir };
+        // ★ 2026-10-27：**仅测试用**的远调试端口。设了 IPRC1000_WEBVIEW_DEBUG=9222
+        //   才启用，默认完全关闭（端口会把页面暴露给本机任意进程，不能常开）。
+        //   用途：Playwright 通过 CDP 连上**真实运行**的界面做点击验证
+        //   （静态探针只测渲染，测不出"点了之后后端有没有真生效"）。
+        var dbgPort = Environment.GetEnvironmentVariable("IPRC1000_WEBVIEW_DEBUG");
+        var dbgArgs = string.IsNullOrWhiteSpace(dbgPort)
+            ? null
+            : $"--remote-debugging-port={dbgPort}";   // 也可用 1 走默认 9222
+        if (dbgArgs != null && dbgPort == "1") dbgArgs = "--remote-debugging-port=9222";
+
+        // ⚠ WebView2 的**环境按 UserDataFolder 缓存**：同一目录复用已有环境时，
+        //   AdditionalBrowserArguments 会被忽略（调试端口因此不生效）。
+        //   所以调试模式换个独立目录，强制新建环境；正常模式路径不变。
+        web.CreationProperties = new CoreWebView2CreationProperties
+        {
+            UserDataFolder = dbgArgs != null ? dataDir + "-e2e" : dataDir,
+            AdditionalBrowserArguments = dbgArgs,
+        };
         await web.EnsureCoreWebView2Async();
         StartupMark("WebView2 环境就绪（Chromium 已起来，这段通常是启动里最大的一块）");
 

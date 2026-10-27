@@ -351,6 +351,45 @@ function paintKb() {
   if (sub) sub.textContent = '当前：' + (txt || '未设置');
 }
 
+// ── 截图点击的全局调参（按键页顶部；原来错误地塞在按键弹窗里）──
+function buildClickTune() {
+  const box = $('#clickTune');
+  if (!box || box.dataset.built) return;
+  box.dataset.built = '1';
+
+  const th = document.createElement('label');
+  th.style.cssText = 'display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:#556';
+  th.appendChild(document.createTextNode('截图点击 · 匹配门槛'));
+  const thIn = document.createElement('input');
+  thIn.id = 'clickMinScore';
+  thIn.type = 'number'; thIn.step = '0.01'; thIn.min = '0.50'; thIn.max = '0.98';
+  thIn.style.cssText = 'width:66px;padding:2px 4px';
+  thIn.onchange = async () => {
+    const r = JSON.parse(await B.setClickMinScore(thIn.value));
+    toast(r.message, 6000);
+    thIn.value = String(r.score || thIn.value);
+  };
+  th.appendChild(thIn);
+  th.appendChild(document.createTextNode('（0.75 起步；「试一下」看实际分数再定）'));
+  box.appendChild(th);
+
+  const sc = document.createElement('label');
+  sc.style.cssText = 'display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:#556;margin-left:4px';
+  sc.appendChild(document.createTextNode('搜索范围'));
+  const sel = document.createElement('select');
+  sel.id = 'clickScope';
+  sel.style.cssText = 'padding:2px 4px';
+  [['0', '只搜附近（最快）'], ['1', '窗口下部（默认）'], ['2', '整个窗口（最稳）']].forEach(([v, t]) => {
+    const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o);
+  });
+  sel.onchange = async () => {
+    const r = JSON.parse(await B.setClickSearchScope(sel.value));
+    toast(r.message, 6000);
+  };
+  sc.appendChild(sel);
+  box.appendChild(sc);
+}
+
 function buildKeyboard() {
   const mods = $('#kbMods'); if (!mods || mods.dataset.built) return;
   KB_MODS.forEach(([label, vk]) => {
@@ -444,39 +483,9 @@ function buildKeyboard() {
     };
     mo.appendChild(test);
 
-    // 匹配门槛：模板质量天生不同（小图标/半透明按钮的分数上不去），所以开放可调。
-    const th = document.createElement('label');
-    th.style.cssText = 'display:inline-flex;align-items:center;gap:5px;margin-left:10px;font-size:12.5px;color:#556';
-    th.appendChild(document.createTextNode('匹配门槛'));
-    const thIn = document.createElement('input');
-    thIn.type = 'number'; thIn.step = '0.01'; thIn.min = '0.50'; thIn.max = '0.98';
-    thIn.style.cssText = 'width:64px;padding:2px 4px';
-    thIn.value = String((state && state.clickMinScore) || 0.75);
-    thIn.onchange = async () => {
-      const r = JSON.parse(await B.setClickMinScore(thIn.value));
-      toast(r.message, 6000);
-      thIn.value = String(r.score || thIn.value);
-    };
-    th.appendChild(thIn);
-    th.appendChild(document.createTextNode('「试一下」看分数再定'));
-    mo.appendChild(th);
-
-    // 搜索范围：局部 → 窗口下部 → 整窗（先精搜再放宽，这里只改放宽到多大）
-    const sc = document.createElement('label');
-    sc.style.cssText = 'display:inline-flex;align-items:center;gap:6px;margin-left:12px;font-size:12.5px;color:#556';
-    sc.appendChild(document.createTextNode('搜索范围'));
-    const sel = document.createElement('select');
-    sel.style.cssText = 'padding:2px 4px';
-    [['0', '只搜附近（最快）'], ['1', '窗口下部（默认）'], ['2', '整个窗口（最稳）']].forEach(([v, t]) => {
-      const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o);
-    });
-    sel.value = String((state && state.clickSearchScope) ?? 1);
-    sel.onchange = async () => {
-      const r = JSON.parse(await B.setClickSearchScope(sel.value));
-      toast(r.message, 6000);
-    };
-    sc.appendChild(sel);
-    mo.appendChild(sc);
+    // 2026-10-27：匹配门槛 / 搜索范围**不放在这个弹窗里** ——
+    //   它们是全局设置，藏在按键弹窗里用户根本找不到（实机 DOM 探针确认过）。
+    //   已移到按键页顶部，见 buildClickTune()。
 
     // 「点完回到原位再点一下」：默认开。点目标按钮会让焦点落到按钮上，
     // 之后 OK→Enter 就发不出去（真机现象）；点回原位能把焦点还给输入框。
@@ -762,6 +771,12 @@ function renderEnv(s) {
   const logSw = $('#logSwitch');
   if (logSw) logSw.classList.toggle('on', s.logEnabled === true);
   // 事件日志开关（第二级）的初始态
+  // 截图点击调参的当前值（不覆盖正在编辑的输入框）
+  const minEl = $('#clickMinScore');
+  if (minEl && document.activeElement !== minEl) minEl.value = String((state && state.clickMinScore) ?? 0.75);
+  const scopeEl = $('#clickScope');
+  if (scopeEl && document.activeElement !== scopeEl) scopeEl.value = String((state && state.clickSearchScope) ?? 1);
+
   const noteT = $('#noteToggle');
   if (noteT) noteT.checked = s.keepEventLog !== false;
   const noteSw = $('#noteSwitch');
@@ -1036,6 +1051,9 @@ function stopMousePad() {
 
 /* ───────── 绑定 ───────── */
 function bindUI() {
+  // 截图点击的全局调参（按键页顶部）——建一次即可，内部有 dataset.built 幂等守卫
+  buildClickTune();
+
   $$('.nav-btn').forEach((b) => (b.onclick = () => goto(b.dataset.page)));
 
   /* ── 鼠标模式页 ── */
@@ -1341,7 +1359,7 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.74',
+      version: '1.2.75',
       buildStamp: '2026-10-16 09:50',
       versionLine: 'v1.2.69（构建于 2026-10-26 14:45）',
       device: {
