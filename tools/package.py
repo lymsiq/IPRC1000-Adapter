@@ -297,6 +297,8 @@ SRC_REQUIRED = [
     ("启动清理覆盖全部可注入键", "iprc1000_gui_dotnet/KeyFilter.cs", "private static IEnumerable<int> StartupCleanVks()"),
     ("启动清理含 F 键区间", "iprc1000_gui_dotnet/KeyFilter.cs", "for (var vk = 0x70; vk <= 0x87; vk++)"),
     ("启动清理含字母区间", "iprc1000_gui_dotnet/KeyFilter.cs", "for (var vk = 0x41; vk <= 0x5A; vk++)"),
+    # 2026-10-27 真机：语音键预设只存后端、不同步弹窗本地状态 ⇒ 用户再点"保存映射"会把旧值写回去
+    ("语音预设同步本地状态", "iprc1000_gui_dotnet/ui/app.js", "kbKeyLabel = NM[vk]"),
     ("WebView2 按需创建（托盘启动不建）", "iprc1000_gui_dotnet/MainForm.cs", "if (!Settings.StartMinimized || _selftest"),
     ("托盘启动不建界面（判定存在）", "iprc1000_gui_dotnet/MainForm.cs", "if (Settings.StartMinimized && !_e2e)"),
     # ★ v1.2.9 延迟优化：起播/声卡缓冲都降过，且自适应必须存在（否则降不下去只能手工调）

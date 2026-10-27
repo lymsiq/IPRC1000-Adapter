@@ -513,9 +513,24 @@ function buildKeyboard() {
         b.style.marginLeft = i === 0 ? '4px' : '6px';
         b.textContent = label;
         b.onclick = async () => {
+          // ★★ 2026-10-27 真机 bug：这里原来**只往后端存**，没同步弹窗的本地状态
+          //   （kbMods / kbKey）⇒「当前: …」仍显示旧值；用户再点「保存映射」时
+          //   comboVks() 拿的是**旧选择**，又把旧值写回去了 —— 表现为"改完自动变回"。
+          //   所以：先把预设写进本地状态并重绘，再落盘。
+          const NM = { 0xA5: 'RightAlt', 0xA4: 'LeftAlt', 0xA3: 'RightCtrl', 0xA2: 'LeftCtrl',
+                       0xA0: 'LeftShift', 0xA1: 'RightShift', 0x5B: 'Win', 0x5C: 'RightWin' };
+          kbMods = new Set();
+          kbKey = null; kbKeyLabel = '';
+          csv.split(',').map(Number).forEach((vk) => {
+            if (vk === 0x11 || vk === 0x12 || vk === 0x10 || vk === 0x5B) kbMods.add(vk);
+            else { kbKey = vk; kbKeyLabel = NM[vk] || ('0x' + vk.toString(16).toUpperCase()); }
+          });
+          paintKb();
+
           const r = JSON.parse(await B.saveKey('voice', csv));
           toast('语音键已设为 ' + label + '：' + r.message, 6000);
           await refresh();
+          paintKb();          // refresh 后窗口还开着时，再刷一次保持显示正确
         };
         vp.appendChild(b);
       });
@@ -1386,7 +1401,7 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.79',
+      version: '1.2.80',
       buildStamp: '2026-10-16 09:50',
       versionLine: 'v1.2.69（构建于 2026-10-26 14:45）',
       device: {
