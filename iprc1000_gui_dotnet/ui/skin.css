@@ -1,0 +1,43 @@
+/* ══ IPRC1000 视觉皮肤（2026-10-28）════════════════════════════════
+   借鉴「丁哥智能语音 Hub」的明亮渐变风格，但**刻意不改任何度量**
+   （padding / margin / line-height / font-size / 高度 全部不动）。
+   原因：实测整份照搬会让每页高度 **+450px（+21%）**，环境页从 2142 → 2592，
+   开关被挤到 2500px 外，既增加滚动也把自动化点击逼到超时。
+   这里只做「颜色 + 圆角 + 阴影 + 180ms 淡入」。 */
+
+/* 1) 页面底色：极浅的冷色渐变（原来是一片纯色） */
+body{
+  background:
+    radial-gradient(1200px 600px at 12% -10%, #eaf4ff 0%, rgba(234,244,255,0) 60%),
+    radial-gradient(900px 500px at 105% 8%, #eef7f2 0%, rgba(238,247,242,0) 62%),
+    linear-gradient(180deg,#f5f9fd 0%, #f8fbfe 100%);
+}
+
+/* 2) 卡片/面板：统一圆角与更柔的投影（尺寸不变，只改观感） */
+.card,.panel{
+  border-radius:15px;
+  box-shadow:0 1px 2px rgba(28,60,100,.05), 0 8px 22px -14px rgba(28,60,100,.28);
+}
+.card:hover{box-shadow:0 1px 2px rgba(28,60,100,.06), 0 12px 26px -14px rgba(28,60,100,.34)}
+
+/* 3) 侧栏：与内容区之间加一层极淡的分隔渐变 */
+.rail{background:linear-gradient(180deg, rgba(255,255,255,.86), rgba(247,251,255,.78))}
+
+/* 4) 导航激活态：淡蓝胶囊 + 左侧细亮条（文字版导航的视觉锚点） */
+.nav-btn.active{
+  background:linear-gradient(180deg, rgba(47,128,237,.13), rgba(47,128,237,.07));
+  box-shadow:inset 0 0 0 1px rgba(47,128,237,.24);
+}
+.nav-btn.active .nav-txt{color:var(--blue);font-weight:600}
+
+/* 5) 页面切换：180ms 淡入 + 轻微上移（Java 端只在切页时加 .page-entering） */
+.page-entering { animation: page-fade .18s cubic-bezier(.2,.7,.3,1) both }
+@keyframes page-fade{
+  from{opacity:.55; transform:translateY(4px)}
+  to{opacity:1; transform:none}
+}
+
+/* 6) 尊重系统「减少动态效果」—— 宁可不动，也不要让人晕 */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation:none !important; transition:none !important}
+}

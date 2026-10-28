@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>IPRC1000 Adapter</title>
 <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="skin.css" />
 </head>
 <body>
 <div class="app">
@@ -24,15 +25,19 @@
     <nav class="nav">
       <button class="nav-btn active" data-page="overview" title="功能总览">
         <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
+        <span class="nav-txt">功能总览</span>
       </button>
       <button class="nav-btn" data-page="keys" title="按键映射">
         <svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="11" rx="2.4" stroke-width="1.7" fill="none"/><path d="M7 10.6h.01M10.3 10.6h.01M13.6 10.6h.01M16.9 10.6h.01M7.6 14.2h8.8" stroke-width="1.9"/></svg>
+        <span class="nav-txt">按键映射</span>
       </button>
       <button class="nav-btn" data-page="env" title="环境设置">
         <svg viewBox="0 0 24 24"><path d="M3 13.5h3l2-5.5 3.2 10L14 11l1.9 2.5H21" stroke-width="1.9" fill="none"/></svg>
+        <span class="nav-txt">环境设置</span>
       </button>
       <button class="nav-btn" data-page="mouse" title="鼠标模式">
         <svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="5" stroke-width="1.7" fill="none"/><path d="M12 7.6v3.9" stroke-width="1.9" fill="none"/></svg>
+        <span class="nav-txt">鼠标模式</span>
       </button>
     </nav>
 
@@ -62,6 +67,36 @@
         <h1>功能总览</h1>
         <p>遥控器与适配功能的实时状态</p>
       </header>
+
+      <!-- ③ 第一次使用：四步清单。全部完成自动收起；点任一步跳到对应页面 -->
+      <details class="journey" id="journey" open>
+        <summary>
+          <span class="journey-h">第一次使用</span>
+          <span class="journey-prog" id="journeyProg">0 / 4 项已确认</span>
+        </summary>
+        <div class="journey-list" id="journeyList">
+          <button type="button" class="jstep" data-go="overview">
+            <b>01</b>
+            <span><i>配对遥控器</i><em>同时按住「下」+「LAST」进入搜索模式，再到系统蓝牙里添加 IPRC1000</em></span>
+            <u class="jdot"></u>
+          </button>
+          <button type="button" class="jstep" data-go="env">
+            <b>02</b>
+            <span><i>语音环境就绪</i><em>虚拟键盘驱动 + 虚拟声卡；缺哪项就在「环境设置」点哪项</em></span>
+            <u class="jdot"></u>
+          </button>
+          <button type="button" class="jstep" data-go="env">
+            <b>03</b>
+            <span><i>默认麦克风设为 CABLE Output</i><em>输入法若跟随系统默认麦克风，这一步必需</em></span>
+            <u class="jdot"></u>
+          </button>
+          <button type="button" class="jstep" data-go="overview">
+            <b>04</b>
+            <span><i>按住语音键试一次</i><em>面板「最近收到音频」保持 1 秒内即为通了</em></span>
+            <u class="jdot"></u>
+          </button>
+        </div>
+      </details>
       <!-- 检测到反作弊时显示（空 note 由 CSS 折叠，不占位） -->
       <div class="note warn" id="acWarn"></div>
 

@@ -38,11 +38,14 @@ body{
   width:16px;height:16px;border-radius:50%;background:var(--blue);color:#fff;
   display:grid;place-items:center;font-size:10.5px;font-weight:700;font-style:normal;
 }
-.nav{margin-top:10px;display:flex;flex-direction:column;gap:5px;width:48px}
+.nav{margin-top:10px;display:flex;flex-direction:column;gap:4px;width:100%}
 .nav-btn{
-  width:52px;height:52px;border:0;border-radius:15px;background:transparent;cursor:pointer;
-  display:grid;place-items:center;color:var(--txt2);transition:.16s;
+  /* 2026-10-28：图标 → **图标 + 文字**（新手不用悬停猜含义） */
+  width:100%;height:44px;border:0;border-radius:13px;background:transparent;cursor:pointer;
+  display:flex;align-items:center;gap:11px;padding:0 12px;
+  color:var(--txt2);transition:.16s;font:inherit;text-align:left;
 }
+.nav-txt{font-size:13.5px;font-weight:500;letter-spacing:.2px;white-space:nowrap}
 .nav-btn svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linejoin:round;stroke-linecap:round}
 .nav-btn svg rect,.nav-btn svg circle{fill:none}
 .nav-btn:hover{background:rgba(47,128,237,.08);color:var(--blue)}
@@ -379,3 +382,27 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
 .seg input{display:none}
 .seg label.on{background:var(--blue-l);color:var(--txt);font-weight:600}
 .hintline{color:var(--txt3);font-size:12px;line-height:1.55;margin:0 0 10px}
+
+/* ── ③ 第一次使用：四步清单（2026-10-28）── */
+.journey{margin:0 0 16px;border:1px solid var(--line);border-radius:14px;background:var(--card);overflow:hidden}
+.journey>summary{display:flex;align-items:center;gap:9px;padding:11px 15px;cursor:pointer;user-select:none;list-style:none}
+.journey>summary::-webkit-details-marker{display:none}
+.journey>summary::before{content:"▸";color:var(--txt3);font-size:11px;transition:.16s}
+.journey[open]>summary::before{transform:rotate(90deg)}
+.journey-h{font-size:14px;font-weight:600;color:var(--txt)}
+.journey-prog{margin-left:auto;font-size:12.5px;color:var(--txt3)}
+.journey-list{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 14px 14px}
+@media(max-width:1000px){.journey-list{grid-template-columns:1fr}}
+.jstep{display:flex;align-items:flex-start;gap:10px;text-align:left;padding:11px 12px;border:1px solid var(--line);
+       border-radius:11px;background:rgba(255,255,255,.62);cursor:pointer;font:inherit;color:inherit;transition:.16s}
+.jstep:hover{border-color:rgba(47,128,237,.38);background:var(--blue-l)}
+.jstep>b{flex:0 0 auto;width:22px;height:22px;border-radius:7px;background:var(--blue-l);color:var(--blue);
+         font-size:11.5px;font-weight:700;display:grid;place-items:center;margin-top:1px}
+.jstep>span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.jstep i{font-style:normal;font-size:13.4px;font-weight:600;color:var(--txt)}
+.jstep em{font-style:normal;font-size:12.2px;line-height:1.5;color:var(--txt3)}
+.jdot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;border:1.5px solid var(--line);margin:6px 0 0 auto}
+.jstep.done{border-color:rgba(34,197,94,.38);background:rgba(240,253,244,.72)}
+.jstep.done>b{background:#dcfce7;color:#15803d}
+.jstep.done .jdot{background:var(--green);border-color:var(--green)}
+.jstep.done i{color:#166534}

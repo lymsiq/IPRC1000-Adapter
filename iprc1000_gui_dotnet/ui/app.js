@@ -82,7 +82,15 @@ function toast(msg, ms = 2600) {
 /* ───────── 页面切换 ───────── */
 function goto(page) {
   $$('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
-  $$('.page').forEach((p) => p.classList.toggle('hidden', p.id !== 'page-' + page));
+  $$('.page').forEach((p) => {
+    const show = p.id === 'page-' + page;
+    p.classList.toggle('hidden', !show);
+    if (show) {                       // 只在切到该页时播一次淡入（180ms）
+      p.classList.remove('page-entering');
+      void p.offsetWidth;             // 强制重排，保证连点两次也能重播
+      p.classList.add('page-entering');
+    } else p.classList.remove('page-entering');
+  });
   const m = $('main');
   if (m) m.scrollTop = 0;
   /* ★ 鼠标页的「实时校准区」只在页面可见时轮询。
@@ -94,6 +102,29 @@ function goto(page) {
 function setDot(id, cls) {
   const d = $(id);
   if (d) d.className = 'dot' + (cls ? ' ' + cls : '');
+}
+
+// ── ③ 第一次使用：四步清单的完成判定 ──
+//   判据全部取自现有 state，不新增后端字段：
+//   ①配对 ②驱动+声卡 ③默认麦克风是否 CABLE ④是否真的收到过音频
+function renderJourney(s) {
+  const box = $('#journey');
+  if (!box || !s) return;
+  const d = s.device || {}, r = s.reg || {}, c = s.cable || {}, b = s.bridge || {};
+  const mic = String(c.defaultMicName || '').toLowerCase();
+  const done = [
+    !!(d.paired || d.connected),
+    !!(r.ok && c.ready),
+    mic.indexOf('cable') >= 0,
+    (b.frames || 0) > 0,
+  ];
+  const n = done.filter(Boolean).length;
+  const prog = $('#journeyProg');
+  if (prog) prog.textContent = n + ' / 4 项已确认';
+  $$('#journeyList .jstep').forEach((el, i) => el.classList.toggle('done', done[i]));
+  if (n === 4 && box.open && box.dataset.autoClosed !== '1') {
+    box.open = false; box.dataset.autoClosed = '1';   // 全部完成自动收起，只收一次
+  }
 }
 
 function renderOverview(s) {
@@ -929,6 +960,7 @@ async function refresh() {
   try {
     state = JSON.parse(await B.getState());
   } catch (e) { return; }
+  renderJourney(state);
   renderOverview(state);
   renderKeys(state);
   renderEnv(state);
@@ -1093,6 +1125,12 @@ function stopMousePad() {
 
 /* ───────── 绑定 ───────── */
 function bindUI() {
+  // ③ 四步清单：点一步跳到对应页面；用户手动展开后尊重其选择
+  const jr = $('#journey');
+  if (jr) {
+    jr.addEventListener('toggle', () => { if (jr.open) jr.dataset.autoClosed = '1'; });
+    $$('#journeyList .jstep').forEach((b) => { b.onclick = () => goto(b.dataset.go); });
+  }
   // 截图点击的全局调参（按键页顶部）——建一次即可，内部有 dataset.built 幂等守卫
   buildClickTune();
 
@@ -1401,7 +1439,7 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.80',
+      version: '1.2.81',
       buildStamp: '2026-10-16 09:50',
       versionLine: 'v1.2.69（构建于 2026-10-26 14:45）',
       device: {
