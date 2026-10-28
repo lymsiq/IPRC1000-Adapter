@@ -81,6 +81,7 @@ function toast(msg, ms = 2600) {
 
 /* ───────── 页面切换 ───────── */
 function goto(page) {
+  document.body.dataset.page = page;      // 供 CSS 按页做差异（如按键页隐藏左栏重复的遥控器图）
   $$('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
   $$('.page').forEach((p) => {
     const show = p.id === 'page-' + page;
@@ -1421,6 +1422,9 @@ function hasWebView2() {
 
 /* ───────── 启动 ───────── */
 function boot() {
+  // 初始页标记：CSS 里按页做差异（body[data-page="keys"] …）依赖它，
+  // 启动时不一定走 goto()，所以这里先落一个默认值。
+  document.body.dataset.page = (new URLSearchParams(location.search).get('page')) || 'overview';
   const qp = new URLSearchParams(location.search).get('page');
 
   if (hasWebView2()) {

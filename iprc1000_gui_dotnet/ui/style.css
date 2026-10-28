@@ -258,7 +258,9 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
 
 
 /* ───── 组合键编辑弹窗 ───── */
-.mask{position:fixed;inset:0;background:rgba(16,22,32,.42);backdrop-filter:blur(2px);
+.mask{position:fixed;inset:0;background:rgba(16,22,32,.32);
+  /* 2026-10-28：原来 42% 黑 + blur(2px)，改键时背景几乎看不清，想对照别的键就得关弹窗。
+     降到 32% 并去掉模糊 —— 弹窗自身有 24px 投影，层级仍然清楚。 */
   display:flex;align-items:center;justify-content:center;z-index:60}
 .mask.hide{display:none}
 .modal{width:min(560px,92vw);border-radius:16px;background:var(--bg1,#fff);
@@ -390,6 +392,12 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
 .seg input{display:none}
 .seg label.on{background:var(--blue-l);color:var(--txt);font-weight:600}
 .hintline{color:var(--txt3);font-size:12px;line-height:1.55;margin:0 0 10px}
+
+/* ── A：按键页隐藏左栏的小遥控器图（2026-10-28）
+   按键页自己有一张大图（可点击、按哪个键就高亮），左栏再来一张 92px 的
+   纯属重复；两张并排还会让人误以为是"重影"。只隐藏**图片**，
+   「IPRC1000 / 已检测：…」文字保留。 */
+body[data-page="keys"] .rail .device .remote{display:none}
 
 /* ── ③ 第一次使用：四步清单（2026-10-28）── */
 .journey{margin:0 0 16px;border:1px solid var(--line);border-radius:14px;background:var(--card);overflow:hidden}
