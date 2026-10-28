@@ -262,7 +262,10 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
   display:flex;align-items:center;justify-content:center;z-index:60}
 .mask.hide{display:none}
 .modal{width:min(560px,92vw);border-radius:16px;background:var(--bg1,#fff);
-  border:1px solid var(--line);box-shadow:0 24px 60px rgba(12,20,32,.34);overflow:hidden}
+  border:1px solid var(--line);box-shadow:0 24px 60px rgba(12,20,32,.34);overflow:hidden;
+  /* 窗口很矮时（如 660px）屏幕键盘比窗口高 —— 让弹窗内部滚动，而不是被切掉底部 */
+  max-height:calc(100vh - 28px);display:flex;flex-direction:column}
+.modal-body{overflow:auto}
 .modal-head{display:flex;align-items:center;gap:12px;padding:14px 16px 12px;
   border-bottom:1px solid var(--line)}
 .modal-thumb{flex:0 0 40px;width:40px;height:40px;border-radius:10px;
@@ -324,7 +327,12 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
   border-right:1px solid var(--line);align-self:stretch;display:flex;align-items:center}
 .seg.seg-sq label{padding:6px 10px}
 .kb-foot{display:flex;align-items:center;gap:8px;margin-top:13px;
-  border-top:1px solid var(--line);padding-top:11px}
+  border-top:1px solid var(--line);padding-top:11px;
+  /* ★ 2026-10-28：弹窗被限高后，屏幕键盘把「保存映射」推到滚动区底部 —— 得滚才能点。
+     主操作必须常驻：粘在滚动区底部，横跨整宽（负 margin 抵消 .modal-body 的左右内边距）。 */
+  position:sticky;bottom:0;z-index:2;
+  margin-left:-16px;margin-right:-16px;padding:11px 16px 10px;
+  background:var(--bg1,#fff);border-radius:0 0 15px 15px}
 .kb-foot .grow{flex:1}
 .kb-cur{font-size:12.5px;color:var(--txt2)}
 .kb-cur b{font-family:ui-monospace,Consolas,monospace;color:var(--blue);font-size:14px}

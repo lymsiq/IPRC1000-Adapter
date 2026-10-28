@@ -30,11 +30,15 @@ body{
 }
 .nav-btn.active .nav-txt{color:var(--blue);font-weight:600}
 
-/* 5) 页面切换：180ms 淡入 + 轻微上移（Java 端只在切页时加 .page-entering） */
-.page-entering { animation: page-fade .18s cubic-bezier(.2,.7,.3,1) both }
+/* 5) 页面切换：180ms 淡入
+   ★★ 只用 opacity，**绝不能用 transform**：
+   带 transform 的祖先会成为 position:fixed 的包含块 —— 实测把 .page 加了
+   translateY 之后，#comboMask（fixed;inset:0）的高度变成整页 1907px 而不是窗口 760px，
+   弹窗就被推到下面、底部越界。这条坑 2026-10-28 踩过。 */
+.page-entering { animation: page-fade .18s cubic-bezier(.2,.7,.3,1) }
 @keyframes page-fade{
-  from{opacity:.55; transform:translateY(4px)}
-  to{opacity:1; transform:none}
+  from{opacity:.55}
+  to{opacity:1}
 }
 
 /* 6) 尊重系统「减少动态效果」—— 宁可不动，也不要让人晕 */

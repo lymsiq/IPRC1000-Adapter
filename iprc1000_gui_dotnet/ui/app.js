@@ -89,6 +89,9 @@ function goto(page) {
       p.classList.remove('page-entering');
       void p.offsetWidth;             // 强制重排，保证连点两次也能重播
       p.classList.add('page-entering');
+      // 播完就摘掉：否则 animation 一直处于 active 状态（曾导致 .page 带着恒等 transform，
+      // 使 position:fixed 的弹窗以整页为包含块 —— 弹窗被推到屏幕下方）
+      p.addEventListener('animationend', () => p.classList.remove('page-entering'), { once: true });
     } else p.classList.remove('page-entering');
   });
   const m = $('main');
