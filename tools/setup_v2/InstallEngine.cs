@@ -466,8 +466,12 @@ namespace IprcSetup2
                 key.SetValue("Publisher", "IPRC1000_Adapter contributors");
                 key.SetValue("InstallLocation", _target);
                 key.SetValue("DisplayIcon", exe);
-                key.SetValue("UninstallString", "\"" + maintenance + "\" --uninstall");
-                key.SetValue("ModifyPath", "\"" + maintenance + "\" --resume");
+                // ★★ 2026-10-28 修：原来只写 `--uninstall`，不带目录。
+                //   卸载器于是按**默认目录**（%ProgramFiles%\…）找清单，而用户可能装在 D:// / F://，
+                //   找不到 package-manifest.json 就抛异常 ⇒ 用户点"卸载"完全没反应（日志只留一行）。
+                var dirArg = " --dir \"" + _target + "\"";
+                key.SetValue("UninstallString", "\"" + maintenance + "\" --uninstall" + dirArg);
+                key.SetValue("ModifyPath", "\"" + maintenance + "\" --resume" + dirArg);
                 key.SetValue("NoRepair", 0, RegistryValueKind.DWord);
             }
             dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
@@ -517,23 +521,61 @@ namespace IprcSetup2
         internal void Uninstall()
         {
             BeginLog("卸载主程序");
-            EnsureAppClosed();
-            var manifestPath = Path.Combine(_target, "package-manifest.json");
-            if (!File.Exists(manifestPath)) throw new InvalidOperationException("没有安装文件清单，已停止自动删除；请检查安装目录。");
-            var manifest = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<PackageManifest>(File.ReadAllText(manifestPath));
-            if (manifest == null || manifest.Product != Product.DirectoryName || manifest.Files == null)
-                throw new InvalidDataException("安装清单无效，已停止卸载。");
-            foreach (var file in manifest.Files)
+            // ★★ 2026-10-28 修：原来这里没有 try/catch —— 任何一步抛异常都会直接冒出去，
+            //   日志只留下开头一行（实测 68 字节），用户完全看不到原因。
+            try
             {
-                var path = SetupCore.SafeDestination(_target, file.Path);
-                if (File.Exists(path)) File.Delete(path);
+                EnsureAppClosed();
+                var manifestPath = Path.Combine(_target, "package-manifest.json");
+                if (!File.Exists(manifestPath))
+                {
+                    // 程序文件或清单已经不在了（被手动删除 / 上次卸载中断）。
+                    // 此时**不能抛异常**：那只会让"卸载"点了没反应。
+                    // 兜底把卸载项、快捷方式、续装任务清掉，让系统回到"未安装"。
+                    CleanResidual("程序文件或安装清单已不存在");
+                    return;
+                }
+                var manifest = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<PackageManifest>(File.ReadAllText(manifestPath));
+                if (manifest == null || manifest.Product != Product.DirectoryName || manifest.Files == null)
+                    throw new InvalidDataException("安装清单无效，已停止卸载。");
+                foreach (var file in manifest.Files)
+                {
+                    var path = SetupCore.SafeDestination(_target, file.Path);
+                    if (File.Exists(path)) File.Delete(path);
+                }
+                File.Delete(manifestPath);
+                var shortcut = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory), Product.DisplayName + ".lnk");
+                if (File.Exists(shortcut)) File.Delete(shortcut);
+                Registry.LocalMachine.DeleteSubKeyTree(Product.UninstallKey, false);
+                RemoveResumeTask();
+                Save("主程序已卸载；用户数据、共享驱动与维护程序已保留");
+                Report(100, State.Phase);
             }
-            File.Delete(manifestPath);
+            catch (Exception error)
+            {
+                // 失败也要**留痕**：写进日志与状态，否则用户只知道"点了没用"
+                State.PendingActions.Add(error.Message);
+                Save("卸载未完成：" + error.Message);
+                Report(100, "失败：" + error.Message);
+                throw;
+            }
+        }
+
+        /// <summary>清理残留安装记录（卸载项 / 快捷方式 / 续装任务 / 空目录）。</summary>
+        private void CleanResidual(string reason)
+        {
             var shortcut = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory), Product.DisplayName + ".lnk");
-            if (File.Exists(shortcut)) File.Delete(shortcut);
-            Registry.LocalMachine.DeleteSubKeyTree(Product.UninstallKey, false);
-            RemoveResumeTask();
-            Save("主程序已卸载；用户数据、共享驱动与维护程序已保留");
+            if (File.Exists(shortcut)) { try { File.Delete(shortcut); } catch { } }
+            try { Registry.LocalMachine.DeleteSubKeyTree(Product.UninstallKey, false); } catch { }
+            try { RemoveResumeTask(); } catch { }
+            try
+            {
+                // 只删**空目录**：目录里还有用户文件时绝不动
+                if (Directory.Exists(_target) && !Directory.EnumerateFileSystemEntries(_target).Any())
+                    Directory.Delete(_target);
+            }
+            catch { }
+            Save("已清除残留安装记录（" + reason + "）");
             Report(100, State.Phase);
         }
 
