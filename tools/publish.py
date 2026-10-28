@@ -55,7 +55,10 @@ def api(path: str, tok: str, method="GET", data=None, raw=None, ctype="applicati
                 return r.status, (json.loads(payload) if payload else None)
         except urllib.error.HTTPError as e:
             body = e.read()[:300].decode("utf-8", "replace")
-            if e.code in (422, 404) and method != "GET":
+            # 404 在 GET 上就是"不存在"，不是网络错误 —— 别重试 4 次刷屏
+            if e.code == 404:
+                return 404, None
+            if e.code in (401, 403, 422):
                 return e.code, {"message": body}
             print(f"    HTTP {e.code}（第 {i+1} 次）：{body[:120]}")
         except Exception as e:
