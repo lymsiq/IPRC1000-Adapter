@@ -113,6 +113,9 @@ def main() -> int:
     shutil.copy2(built, out_exe)
     os.remove(payload)
 
+    # 同步一份到仓库根：发包脚本/publish.py 与手工上传都从根目录取
+    shutil.copy2(out_exe, os.path.join(ROOT, os.path.basename(out_exe)))
+
     h = sha256_file(out_exe)
     with open(out_exe + ".sha256", "w", encoding="utf-8") as f:
         f.write(f"{h}  {os.path.basename(out_exe)}\n")
