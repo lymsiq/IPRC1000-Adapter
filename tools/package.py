@@ -971,7 +971,10 @@ if __name__ == "__main__":
     #    失败只警告、不阻断 —— 安装包是加分项，zip 包才是主线。
     print()
     try:
-        r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "build_setup.py")],
+        # ★ 2026-10-28：改用**新版安装器**（tools/setup_v2，移植自 DinggeVoiceHub 的
+        #   InstallEngine + 安装页面）：可选安装位置、逐文件哈希校验、组件按需安装、
+        #   蓝牙参数备份/修复模式/卸载清单。旧的极简引导程序保留在 build_setup.py 备查。
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "build_setup_v2.py")],
                            capture_output=True, text=True, encoding="utf-8", errors="replace")
         for line in (r.stdout or "").splitlines()[-4:]:
             if line.strip():
