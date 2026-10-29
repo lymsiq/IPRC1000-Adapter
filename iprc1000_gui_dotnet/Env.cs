@@ -659,6 +659,90 @@ internal static class Env
         catch (Exception ex) { return (false, $"启动安装脚本失败：{ex.Message}"); }
     }
 
+    /// <summary>
+    /// **一键安装 / 修复虚拟键盘驱动**（2026-10-29）。
+    ///
+    /// 与旧 `InstallWinuhid()` 的区别：旧的是**弹一个黑窗口**跑 cmd，用户只看得到滚屏、
+    /// 失败也没法回传结果。这里改为：
+    ///   · 直接调 `install-winuhid.ps1 -Mode InstallElevated [-Force]`，**捕获全部输出**；
+    ///   · 本程序本身以管理员运行 ⇒ 子进程继承提权，**不再弹 UAC**；
+    ///   · 返回结构化结果（是否成功 / 是否要重启 / 日志尾巴 / 中文结论）。
+    ///
+    /// force=true 时脚本会**先清空所有 WinUHid 节点再重建**（这是"重装也修不好"的解药）。
+    /// </summary>
+    public static (bool ok, bool reboot, string text) RepairWinuhid(bool force)
+    {
+        var script = FindAsset("install-winuhid.ps1");
+        if (script == null)
+            return (false, false, "找不到 assets\\winuhid\\install-winuhid.ps1 —— 安装目录不完整或被杀软隔离。");
+        var args = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + script + "\" -Mode InstallElevated"
+                   + (force ? " -Force" : "");
+        try
+        {
+            var psi = new ProcessStartInfo("powershell.exe", args)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                WorkingDirectory = Path.GetDirectoryName(script)!
+            };
+            var sb = new System.Text.StringBuilder();
+            using var p = new Process { StartInfo = psi };
+            p.OutputDataReceived += (_, e) => { if (e.Data != null) lock (sb) sb.AppendLine(e.Data); };
+            p.ErrorDataReceived += (_, e) => { if (e.Data != null) lock (sb) sb.AppendLine(e.Data); };
+            p.Start();
+            p.BeginOutputReadLine();
+            p.BeginErrorReadLine();
+            if (!p.WaitForExit(120_000)) { try { p.Kill(); } catch { } return (false, false, "驱动安装超时（120 秒）。"); }
+            p.WaitForExit();
+
+            var text = sb.ToString();
+            var reboot = p.ExitCode == 3010;
+            var ok = p.ExitCode == 0 || reboot;
+            var lines = text.Replace("\r\n", "\n").Split('\n').Where(l => l.Trim().Length > 0).ToArray();
+            var tail = string.Join("\n", lines.Skip(Math.Max(0, lines.Length - 12)));
+            var head = ok
+                ? (reboot ? "驱动已重建，需要重启后生效。" : "驱动已就绪。")
+                : $"安装/修复未成功（退出码 {p.ExitCode}）。";
+            return (ok, reboot, head + "\n\n" + tail);
+        }
+        catch (Exception e) { return (false, false, "调用安装脚本失败：" + e.Message); }
+    }
+
+    /// <summary>
+    /// 跑 `install-winuhid.ps1 -Mode Status`（**只读**）并捕获输出 —— 用于应用内一键诊断。
+    /// 与 `RepairWinuhid` 同一套调用方式，但绝不改系统。
+    /// </summary>
+    public static (bool ok, string text) RunWinuhidStatus()
+    {
+        var script = FindAsset("install-winuhid.ps1");
+        if (script == null) return (false, "找不到 assets\\winuhid\\install-winuhid.ps1");
+        try
+        {
+            var psi = new ProcessStartInfo("powershell.exe",
+                "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + script + "\" -Mode Status")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                WorkingDirectory = Path.GetDirectoryName(script)!
+            };
+            var sb = new System.Text.StringBuilder();
+            using var p = new Process { StartInfo = psi };
+            p.OutputDataReceived += (_, e) => { if (e.Data != null) lock (sb) sb.AppendLine(e.Data); };
+            p.ErrorDataReceived += (_, e) => { if (e.Data != null) lock (sb) sb.AppendLine(e.Data); };
+            p.Start();
+            p.BeginOutputReadLine();
+            p.BeginErrorReadLine();
+            if (!p.WaitForExit(60_000)) { try { p.Kill(); } catch { } return (false, "诊断超时（60 秒）。"); }
+            p.WaitForExit();
+            return (p.ExitCode == 0, sb.ToString());
+        }
+        catch (Exception e) { return (false, "调用诊断脚本失败：" + e.Message); }
+    }
+
     /// <summary>把内嵌 WinUHid 资源导出到桌面，供手动安装/排查</summary>
     public static (bool ok, string msg) ExportWinuhid()
     {

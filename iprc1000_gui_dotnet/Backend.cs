@@ -888,6 +888,14 @@ internal sealed class Backend : IDisposable
             ["keepEventLog"] = Settings.KeepEventLog,
             ["imeProfile"] = Settings.ImeProfile,
             ["driverFree"] = Settings.DriverFreeMode,
+            ["driverVersion"] = WinUhidInjector.DriverVersion,
+            ["uhidReady"] = _uhidReady,
+            ["lastRepair"] = _lastRepair.at == default ? null : new JsonObject
+            {
+                ["at"] = _lastRepair.at.ToString("HH:mm:ss"),
+                ["ok"] = _lastRepair.ok,
+                ["msg"] = _lastRepair.msg,
+            },
             ["ghostSwallowed"] = GhostGuard.Swallowed,
             ["ghostReleased"] = GhostGuard.ForcedReleases,
             ["ghostBursts"] = GhostGuard.Bursts,
@@ -1280,6 +1288,7 @@ internal sealed class Backend : IDisposable
         var driverFreeOn = Settings.DriverFreeMode && GhostGuard.Running;
         var devOk = driverFreeOn || !Env.RemoteStillKeyboard() || (_filter is { Running: true, KeySourceIsEtw: false });
         CheckGhostAutoFallback();   // 失控自愈：无驱动模式卡住时自动切回驱动模式
+        if (!Settings.DriverFreeMode) Task.Run(CheckDriverAutoHeal);   // 驱动失败自愈（不阻塞界面）
 
         return new JsonObject
         {
@@ -1595,6 +1604,74 @@ internal sealed class Backend : IDisposable
         });
     }
 
+    // ── 虚拟键盘驱动：一键修复 / 诊断 / 自愈（2026-10-29）─────────────
+    private (DateTime at, bool ok, string msg) _lastRepair;
+    private int _autoRepairCount;
+    private DateTime _lastAutoRepairAt = DateTime.MinValue;
+
+    /// <summary>
+    /// **一键安装 / 修复虚拟键盘驱动**（界面按钮直接调）。
+    /// 用 -Force：先清空所有 WinUHid 节点再重建 —— 这是"重装也修不好"的解药。
+    /// </summary>
+    public string RepairDriver(string? forceArg)
+    {
+        var force = forceArg is not ("0" or "false" or "False");
+        var (ok, reboot, text) = Env.RepairWinuhid(force);
+        _lastRepair = (DateTime.Now, ok, text.Split('\n')[0]);
+        // 重建后重新探测：ProbeDriver 决定注入是否可用、面板是否显示"已就绪"
+        try { WinUhidInjector.EnsureReady(); } catch { }
+        RefreshProbes(true);
+        DeviceLog((ok ? "✓ " : "★ ") + "一键修复驱动：" + _lastRepair.msg);
+        return Env.Json(new { ok, reboot, needRestart = reboot,
+            message = text, uhidReady = _uhidReady,
+            driverVersion = WinUhidInjector.DriverVersion });
+    }
+
+    /// <summary>**一键诊断**：跑只读 Status，写到桌面并返回全文（界面显示 + 可复制）。</summary>
+    public string ExportDriverDiag()
+    {
+        var (ok, text) = Env.RunWinuhidStatus();
+        var advice = text.Replace("\r\n", "\n").Split('\n')
+                         .Where(l => l.Contains("Phase: Advice |"))
+                         .Select(l => l[(l.IndexOf('|') + 1)..].Trim())
+                         .Where(l => l.Length > 0 && !l.StartsWith("----")).ToArray();
+        var body = "IPRC1000 Adapter — 驱动诊断\n时间: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+                 + "\n版本: " + Env.AppVersion + "\n" + new string('-', 50) + "\n" + text.Trim();
+        var path = "";
+        try
+        {
+            path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                "IPRC1000-driver-diag-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".txt");
+            File.WriteAllText(path, body, new System.Text.UTF8Encoding(true));
+        }
+        catch { }
+        return Env.Json(new { ok, path, text = body, advice });
+    }
+
+    /// <summary>
+    /// **失败自愈**：驱动"装了但不可用"持续一段时间 ⇒ 自动跑一次 -Force 修复。
+    /// 本程序以管理员运行，子进程继承提权，**不会再弹 UAC**。
+    /// 上限：本会话最多 2 次、间隔 ≥5 分钟（避免反复折腾）。
+    /// </summary>
+    private DateTime _uhidDownSince = DateTime.MinValue;
+
+    private void CheckDriverAutoHeal()
+    {
+        if (_uhidReady) { _uhidDownSince = DateTime.MinValue; return; }
+        if (_uhidDownSince == DateTime.MinValue) { _uhidDownSince = DateTime.Now; return; }
+        if ((DateTime.Now - _uhidDownSince).TotalSeconds < 20) return;          // 给它 20 秒自愈窗口
+        if (_autoRepairCount >= 2) return;
+        if ((DateTime.Now - _lastAutoRepairAt).TotalMinutes < 5) return;
+        _autoRepairCount++;
+        _lastAutoRepairAt = DateTime.Now;
+        Safe.Note($"驱动不可用超过 20 秒 → 自动修复（第 {_autoRepairCount} 次）");
+        var (ok, reboot, text) = Env.RepairWinuhid(force: true);
+        _lastRepair = (DateTime.Now, ok, (reboot ? "需要重启：" : "") + text.Split('\n')[0]);
+        try { WinUhidInjector.EnsureReady(); } catch { }
+        _probeAt = DateTime.MinValue;   // 下一轮立刻重新探测
+        DeviceLog((ok ? "✓ " : "★ ") + "驱动自愈：" + _lastRepair.msg);
+    }
+
     /// <summary>键源归因报告：`rawInput` / `rawInput reset`</summary>
     private static string RawInputReport(string? arg)
     {
@@ -1885,6 +1962,8 @@ internal sealed class Backend : IDisposable
             "setZeroGhost" => SetZeroGhost(a0),
             // 键源归因：返回"哪个设备发了什么键"。调试用，界面上没有入口。
             "rawInput" => RawInputReport(a0),
+            "repairDriver" => RepairDriver(a0),
+            "exportDriverDiag" => ExportDriverDiag(),
             "setAutoSwitchDriver" => SetAutoSwitchDriver(a0),
             "setAutoKeepMic" => SetAutoKeepMic(a0),
             "checkCaptureDevice" => CheckCaptureDevice(),

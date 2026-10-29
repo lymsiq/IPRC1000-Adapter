@@ -1329,10 +1329,30 @@ function bindUI() {
     const r = JSON.parse(await B.testInject());
     toast(r.ok ? `注入正常：按下时系统读到「${r.name} 按下」，松开后已释放` : '注入异常，请看状态面板', 5000);
   };
-  $('#btnInstallUhid').onclick = async () => {
-    if (!confirm('将以管理员身份运行 WinUHid 虚拟键盘安装脚本。\n\n它是 UMDF 用户态驱动（不受内核隔离限制），装完可能需要重启。继续？')) return;
-    const r = JSON.parse(await B.installWinuhid());
-    toast(r.message, 8000);
+  // 一键安装 / 修复：直接跑 -Force（清空旧节点再重建），**不弹黑窗口**、结果回到界面
+  const doRepairDriver = async () => {
+    if (!confirm('将重建虚拟键盘驱动（会先清空旧的 WinUHid 设备节点）。\n\n' +
+                 '· 本程序已以管理员运行，不会再弹 UAC\n· 装完可能需要重启\n\n继续？')) return;
+    toast('正在重建驱动，请稍候（约 5~15 秒）…', 60000);
+    const r = JSON.parse(await B.repairDriver('1'));
+    const head = r.ok
+      ? (r.needRestart ? '✅ 驱动已重建，需要重启后生效' : `✅ 驱动已就绪（接口 v${r.driverVersion}）`)
+      : '❌ 修复未成功';
+    toast(head, 12000);
+    // 详情写到控制台 + 面板备注，便于复制给我们
+    if (r.message) console.log('[repairDriver]\n' + r.message);
+    await refresh();
+  };
+  $('#btnInstallUhid').onclick = doRepairDriver;
+  // 一键诊断：跑只读 Status，写桌面 txt，并尝试复制到剪贴板
+  $('#btnDriverDiag').onclick = async () => {
+    const r = JSON.parse(await B.exportDriverDiag());
+    let copied = false;
+    try { await navigator.clipboard.writeText(r.text); copied = true; } catch (e) { }
+    const tip = (r.advice && r.advice.length ? '建议：' + r.advice.join('；') + '\n' : '') +
+                (r.path ? '已保存到桌面：' + r.path.split('\\').pop() : '未能写文件') +
+                (copied ? '（已复制到剪贴板）' : '');
+    toast(tip, 12000);
   };
   $('#btnExportUhid').onclick = async () => {
     const r = JSON.parse(await B.exportWinuhid());
@@ -1348,9 +1368,11 @@ function bindUI() {
     toast(r.message, 9000);
   };
   $('#btnInstallUhid2').onclick = async () => {
-    if (!confirm('安装 WinUHid 虚拟键盘驱动？\n\nUMDF 用户态驱动，不受内核隔离限制，装完可能需重启。')) return;
-    const r = JSON.parse(await B.installWinuhid());
-    toast(r.message, 9000);
+    if (!confirm('重建虚拟键盘驱动（先清空旧节点）？\n\n不会弹 UAC；装完可能需重启。')) return;
+    toast('正在重建驱动，请稍候…', 60000);
+    const r = JSON.parse(await B.repairDriver('1'));
+    toast(r.ok ? (r.needRestart ? '✅ 已重建，需要重启' : '✅ 驱动已就绪') : '❌ 修复未成功', 12000);
+    await refresh();
   };
   $('#btnSwitchDriver').onclick = async () => {
     if (!confirm('把遥控器的设备驱动换成「HID-compliant device」？\n\n效果：系统不再把它当键盘，按遥控器不会再打出 m。\n随时可用「还原成键盘驱动」恢复。')) return;
@@ -1523,9 +1545,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.103',
+      version: '1.2.104',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.103（构建于 2026-10-29 13:15）',
+      versionLine: 'v1.2.104（构建于 2026-10-29 13:35）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

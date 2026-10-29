@@ -119,8 +119,15 @@ internal static class Program
             // 输出**全文**（截断过会导致外部脚本解析失败；需要精简请自行 head -c）
             // 慢命令要放宽超时：切设备驱动会等设备重新枚举（最多 4 s），
             // 用默认 3 s 会误报"响应超时"（实测踩到：其实已经切成功）。
-            var slow = method is "setDriverFree" or "setDeviceDriver" or "installWinuhid" or "runSetup" or "installCable";
-            Console.WriteLine(ServiceClient.Call(method, pa0, pa1, slow ? 20000 : 3000));
+            // 慢命令单独放宽超时：驱动重建要跑脚本（5~15 s），诊断要跑 -Mode Status（3~6 s）
+            var timeout = method switch
+            {
+                "repairDriver" => 120_000,
+                "exportDriverDiag" => 60_000,
+                "setDriverFree" or "setDeviceDriver" or "installWinuhid" or "runSetup" or "installCable" => 60_000,
+                _ => 5_000
+            };
+            Console.WriteLine(ServiceClient.Call(method, pa0, pa1, timeout));
             return;
         }
 
