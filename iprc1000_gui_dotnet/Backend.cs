@@ -1991,7 +1991,29 @@ internal sealed class Backend : IDisposable
                                  : "不需要（遥控器已是非键盘 HID，不会串 m）"),
             "", "");
 
-        // 11 遥控器连接
+        // 11 按键稳定性（2026-10-30，用户点名要的）
+        //   判据全部来自现有运行数据，不新增探测：
+        //   · heldNow 非空 = 有键卡在按下态（最严重，会导致"一直在打字"）
+        //   · 看门狗在跑 = 卡键能自愈
+        //   · 幽灵键是否在正常吞/补
+        var held = S("heldNow");
+        var sg = st["stuckGuard"];
+        var unlockCount = sg?["unlockCount"]?.GetValue<long>() ?? 0;
+        var watchdogMs = sg?["watchdogMs"]?.GetValue<int>() ?? 0;
+        var ghostSwallow = st["ghostSwallowed"]?.GetValue<long>() ?? 0;
+        var ghostReplay = st["ghostReplayed"]?.GetValue<long>() ?? 0;
+        var stabLevel = held.Length > 0 ? "bad" : (watchdogMs > 0 ? "ok" : "warn");
+        var stabDetail = held.Length > 0
+            ? "有按键卡在按下状态（" + held + "）：点「紧急复位」清掉"
+            : (watchdogMs > 0
+                ? $"看门狗 {watchdogMs}ms 在跑；累计强制释放 {unlockCount} 次"
+                  + (ghostSwallow > 0 ? $"；幽灵键吞掉 {ghostSwallow} / 补回 {ghostReplay} 次" : "")
+                : "看门狗未启用：万一键卡住不会自动放开");
+        Add("按键稳定性", stabLevel, stabDetail,
+            held.Length > 0 ? "releaseAllKeys" : (watchdogMs > 0 ? "" : "resetKeys"),
+            held.Length > 0 ? "紧急复位" : (watchdogMs > 0 ? "" : "恢复默认"));
+
+        // 12 遥控器连接
         var conn = device?["connected"]?.GetValue<bool>() ?? false;
         Add("遥控器连接", conn ? "ok" : "warn",
             conn ? "已连接" : "未连接（按一下遥控器任意键唤醒）", "", "");

@@ -1023,6 +1023,20 @@ function renderEnv(s) {
 
 /* ───────── 刷新 ───────── */
 // 本地 ASR（环境设置）：引擎状态 + 模型列表 + 下载/选择
+// 环境页「启动与高级」默认折叠（2026-10-30）
+// ★ 放顶层而不是 bindUI：预览模式（无桥）不会调 bindUI，放里面就永远不折叠。
+(function initAdvToggle() {
+  const env = document.getElementById('page-env');
+  const btn = document.getElementById('btnAdvToggle');
+  if (!env || !btn) return;
+  env.classList.add('hide-adv');
+  btn.textContent = '展开';
+  btn.onclick = () => {
+    const hid = env.classList.toggle('hide-adv');
+    btn.textContent = hid ? '展开' : '收起';
+  };
+})();
+
 // 一键体检（2026-10-30）：逐项结果 + 可点的修复动作 + 复制报告
 let doctorReport = '';
 function renderDoctor(d) {
@@ -1657,9 +1671,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.134',
+      version: '1.2.135',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.134（构建于 2026-10-30 09:40）',
+      versionLine: 'v1.2.135（构建于 2026-10-30 10:20）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

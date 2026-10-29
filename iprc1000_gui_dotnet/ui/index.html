@@ -241,13 +241,31 @@
 
     <!-- ── 环境设置 ── -->
     <section class="page hidden" id="page-env">
-      <header class="page-head">
+      <header class="page-head" style="order:-1">
         <h1>环境设置</h1>
         <p>本机运行环境检查与一键修复</p>
       </header>
 
+      <!-- ── 分组标题（2026-10-30）：用 order 定位置，不改 DOM 顺序 ── -->
+      <div class="group-head" style="order:9">
+        <b>环境体检</b><span>先看这里：一键确认本机是否就绪</span>
+      </div>
+      <div class="group-head" style="order:19">
+        <b>声音通路</b><span>遥控器 → 虚拟声卡 → 输入法；这一段不通，语音键就没声音</span>
+      </div>
+      <div class="group-head" style="order:29">
+        <b>按键与注入</b><span>遥控器按键怎么送进系统；不出字、卡键都看这里</span>
+      </div>
+      <div class="group-head" style="order:39">
+        <b>鼠标</b><span>把遥控器当鼠标用：开关、手感、实时校准</span>
+      </div>
+      <div class="group-head" style="order:50">
+        <b>启动与高级</b><span>开机自启、注册表、诊断与实验开关（一般不用动）</span>
+        <button class="btn ghost" id="btnAdvToggle">展开</button>
+      </div>
+
       <!-- 0. 环境自检 · 一键就绪 -->
-      <div class="panel">
+      <div class="panel" style="order:10">
         <div class="panel-head">
           <div class="ic ic-green"><svg viewBox="0 0 24 24"><path d="M12 3.5 5 7v5c0 4.2 3 7 7 8.5 4-1.5 7-4.3 7-8.5V7z" fill="none" stroke-width="1.7"/><path d="M8.8 12.2 11 14.4l4.4-4.6" stroke-width="1.9" fill="none"/></svg></div>
           <div class="panel-title">
@@ -264,6 +282,8 @@
           <button class="btn ghost" id="btnCheckMic">检查录音设备</button>
           <button class="btn ghost" id="btnTestTone">发送 1 秒测试音</button>
           <button class="btn ghost" id="btnSetMic">设为 CABLE Output</button>
+          <button class="btn ghost" id="btnDriverDiag">复制诊断</button>
+          <button class="btn" id="btnDoctor">一键体检</button>
         </div>
         <details class="adv">
           <summary>更多选项：装声卡 / 装驱动 · 设备驱动切换 · 自启动设置</summary>
@@ -272,17 +292,12 @@
             <button class="btn" id="btnInstallUhid2">一键安装 / 修复虚拟键盘驱动</button>
             <button class="btn ghost" id="btnSwitchDriver">切换设备驱动</button>
             <button class="btn ghost" id="btnRevertDriver">还原成键盘驱动</button>
-            <button class="btn ghost" id="btnAutoStart">启动后自动拉起语音桥</button>
-            <button class="btn ghost" id="btnAutoRun">开机自启</button>
-            <button class="btn ghost" id="btnStartMin">启动时进托盘</button>
-            <button class="btn ghost" id="btnAutoDrv">启动自动切驱动</button>
-            <button class="btn ghost" id="btnAutoMic">默认麦克风被改走时自动改回</button>
           </div>
         </details>
       </div>
 
       <!-- 1. 注册表 -->
-      <div class="panel">
+      <div class="panel" style="order:51" data-adv="1">
         <div class="panel-head">
           <div class="ic ic-blue"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke-width="1.9" fill="none"/></svg></div>
           <div class="panel-title">
@@ -309,7 +324,7 @@
       </div>
 
       <!-- 2. 虚拟声卡 -->
-      <div class="panel">
+      <div class="panel" style="order:20">
         <div class="panel-head">
           <div class="ic ic-indigo"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="3" fill="none" stroke-width="1.8"/><circle cx="9" cy="12" r="2.2" fill="none" stroke-width="1.8"/><path d="M14 10h4M14 14h4" stroke-width="1.8" fill="none"/></svg></div>
           <div class="panel-title">
@@ -335,7 +350,7 @@
       </div>
 
       <!-- 3. 音频桥 -->
-      <div class="panel">
+      <div class="panel" style="order:21">
         <div class="panel-head">
           <div class="ic ic-amber"><svg viewBox="0 0 24 24"><path d="M4 12h3l2-5 3 10 3-8 2 3h3" stroke-width="1.8" fill="none"/></svg></div>
           <div class="panel-title">
@@ -367,7 +382,7 @@
       </div>
 
       <!-- 3.5 鼠标模式（开关从「鼠标模式」页搬来） -->
-      <div class="panel">
+      <div class="panel" style="order:40">
         <div class="panel-head">
           <div class="ic ic-blue"><svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="5"/><path d="M12 7.6v3.9"/></svg></div>
           <div class="panel-title">
@@ -383,9 +398,10 @@
       </div>
 
       <!-- 鼠标参数（原「鼠标模式」页整体搬入） -->
-      <div id="mouseParams">
+      <!-- ★ 包裹容器也是 flex 子元素：不给 order 会默认 0 抢到最前（实测踩到） -->
+      <div id="mouseParams" style="order:41;display:flex;flex-direction:column">
 <!-- 0. 模式 -->
-      <div class="panel">
+      <div class="panel" style="order:43">
         <div class="panel-head">
           <div class="ic ic-blue"><svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="5"/><path d="M12 7.6v3.9"/></svg></div>
           <div class="panel-title">
@@ -407,7 +423,7 @@
       </div>
 
       <!-- 1. 手感 -->
-      <div class="panel">
+      <div class="panel" style="order:41">
         <div class="panel-head">
           <div class="ic ic-indigo"><svg viewBox="0 0 24 24"><path d="M4 17c3.5-9 6.5-9 8 0s4.5 3 8-4" fill="none" stroke-width="1.8"/></svg></div>
           <div class="panel-title">
@@ -443,7 +459,7 @@
       </div>
 
       <!-- 2. 实时校准 -->
-      <div class="panel">
+      <div class="panel" style="order:42">
         <div class="panel-head">
           <div class="ic ic-green"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18" fill="none" stroke-width="1.7"/><circle cx="12" cy="12" r="4.2" fill="none" stroke-width="1.7"/></svg></div>
           <div class="panel-title">
@@ -460,8 +476,26 @@
       </div>
       </div>
 
+      <!-- 启动与自动化开关（2026-10-30）：从「环境自检」里拆出来，归入高级组 -->
+      <div class="panel" style="order:52" data-adv="1">
+        <div class="panel-head">
+          <div class="ic ic-blue"><svg viewBox="0 0 24 24"><path d="M12 3.5v6" stroke-width="1.8"/><circle cx="12" cy="12" r="2.6" stroke-width="1.6" fill="none"/><path d="M6.5 21c0-3 2.5-5.4 5.5-5.4s5.5 2.4 5.5 5.4" stroke-width="1.4" fill="none"/></svg></div>
+          <div class="panel-title">
+            <b>启动与自动化</b>
+            <span>开机自启、托盘、自动切驱动、麦克风守护——设一次就不用再管</span>
+          </div>
+        </div>
+        <div class="panel-actions">
+            <button class="btn ghost" id="btnAutoStart">启动后自动拉起语音桥</button>
+            <button class="btn ghost" id="btnAutoRun">开机自启</button>
+            <button class="btn ghost" id="btnStartMin">启动时进托盘</button>
+            <button class="btn ghost" id="btnAutoDrv">启动自动切驱动</button>
+            <button class="btn ghost" id="btnAutoMic">默认麦克风被改走时自动改回</button>
+        </div>
+      </div>
+
       <!-- 4. 按键拦截 -->
-      <div class="panel">
+      <div class="panel" style="order:30">
         <div class="panel-head">
           <div class="ic ic-purple"><svg viewBox="0 0 24 24"><path d="M12 3.5 5 7v5c0 4.2 3 7 7 8.5 4-1.5 7-4.3 7-8.5V7z" fill="none" stroke-width="1.7"/><path d="M9 12l2 2 4-4" stroke-width="1.7" fill="none"/></svg></div>
           <div class="panel-title">
@@ -477,8 +511,6 @@
         <div class="panel-actions">
           <button class="btn" id="btnReleaseAll">紧急复位：释放所有按键</button>
           <button class="btn" id="btnInstallUhid">一键安装 / 修复虚拟键盘驱动</button>
-          <button class="btn ghost" id="btnDriverDiag">复制诊断</button>
-          <button class="btn" id="btnDoctor">一键体检</button>
           <button class="btn ghost" id="btnWizardReset">重跑首次设置</button>
           <button class="btn ghost" id="btnExportConfig">导出配置</button>
         </div>
