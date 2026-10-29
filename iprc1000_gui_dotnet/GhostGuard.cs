@@ -175,6 +175,12 @@ internal static class GhostGuard
     /// <summary>确认"这个 m 是幽灵"（voice 按下 / 检测到连发）⇒ 不要补发</summary>
     private static void CancelPending() { _pending = false; }
 
+    private static volatile bool _needRelease;
+    private static long _rehookedAt;
+
+    /// <summary>仅供自愈重装使用（不解引用委托，避免 GC）</summary>
+    private static void UnhookWindowsHookEx_inner(IntPtr h) { try { UnhookWindowsHookEx(h); } catch { } }
+
     private static void EnsureReplayLoop()
     {
         if (_replayThread != null) return;
@@ -183,6 +189,25 @@ internal static class GhostGuard
             while (true)
             {
                 Thread.Sleep(15);
+                // 连发确认后补一次 keyup（打断系统侧"键一直按着"的重复链）。
+                // 必须在后台线程发 —— 钩子里注入会把钩子搞死（见上面的注释）。
+                if (_needRelease)
+                {
+                    _needRelease = false;
+                    ReleaseGhostKey();
+                }
+                // ★ 自愈：每 20 秒重装一次钩子。Windows 在"钩子回调超时"时会**静默卸载**，
+                //   而 SetWindowsHookEx 不会报错、也没有通知 —— 只能定期重装兜底。
+                if (Environment.TickCount64 - _rehookedAt > 20000)
+                {
+                    _rehookedAt = Environment.TickCount64;
+                    try
+                    {
+                        if (_hook != IntPtr.Zero) UnhookWindowsHookEx_inner(_hook);
+                        _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _proc!, GetModuleHandle(null), 0);
+                    }
+                    catch { }
+                }
                 if (!_pending || !Enabled) continue;
                 if (Environment.TickCount64 - _pendingAt < HoldMs) continue;
                 _pending = false;
@@ -254,6 +279,32 @@ internal static class GhostGuard
         _armed = false;
         Stop();
         return (int)(Swallowed - before);
+    }
+
+    /// <summary>
+    /// **长跑自检**：连续 200 次真实 m（约 7 秒），验证钩子不会被系统卸载。
+    /// 这是 2026-10-29 那次"输入框被 m 刷屏"的回归用例 —— 根因是钩子里调 keybd_event 导致钩子被静默卸载。
+    /// </summary>
+    public static string SelfTestLongBurst()
+    {
+        Enabled = true; Start();
+        if (!Running) return "钩子安装失败";
+        if (!WinUhidInjector.EnsureReady()) return "WinUHid 未就绪（先停掉正在运行的应用）";
+        HoldFirstKey = true; NoteRemoteActivity();
+
+        const int n = 200;
+        var s0 = Swallowed; var r0 = Replayed; var b0 = Bursts;
+        for (var i = 0; i < n; i++)
+        {
+            try { WinUhidInjector.Send(new[] { 0x4D }); } catch { }
+            Thread.Sleep(12);
+            try { WinUhidInjector.Send(Array.Empty<int>()); } catch { }
+            Thread.Sleep(22);
+        }
+        Thread.Sleep(200);
+        var swallowed = Swallowed - s0;
+        return $"连发 {n} 次：吞 {swallowed}（期望 ≈{n - 1}）/ 补发 {Replayed - r0}（期望 0）/ 段 {Bursts - b0}（期望 1）\n" +
+               $"钩子仍存活：{(Running ? "是" : "否")}";
     }
 
     /// <summary>
@@ -344,11 +395,14 @@ internal static class GhostGuard
                             _burstAt = now;
                             Bursts++;
                             CancelPending();      // 是连发 ⇒ 确认幽灵，别补发
+                            // ★★ 2026-10-29 真 bug（用户输入框被 m 刷屏）：**绝不能在钩子回调里注入**。
+                            //   `keybd_event()` 会重入输入系统，触发 Windows 的钩子超时保护，
+                            //   钩子被**静默卸载** ⇒ 之后所有 m 全放行（实测 3 秒 91 次漏到应用）。
+                            //   这里只置标志，由后台线程去发。
+                            _needRelease = true;
                             // ★★ 2026-10-29（用户提议，确实更彻底）：
                             //   光"吞 keydown"是拦不住自动重复的 —— 系统认为这个键**一直按着**，
                             //   于是按 31Hz 持续产生新的 keydown。**只有把键松开**才能终止重复。
-                            //   所以这里主动补一个 m 的 KEYUP：打断重复链，之后不再刷屏。
-                            ReleaseGhostKey();
                         }
                         _lastMDownAt = now;
 
