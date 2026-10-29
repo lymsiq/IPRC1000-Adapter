@@ -302,6 +302,7 @@ internal static class AsrCapture
         {
             _buf = new MemoryStream(16000 * 2 * 30);   // 预留 30 秒
             _bytes = 0;
+            _probe.Clear(); _ds2 = null;               // 每次重新判定上采样
         }
     }
 
@@ -310,6 +311,16 @@ internal static class AsrCapture
     {
         MemoryStream? buf;
         lock (Gate) { buf = _buf; if (buf == null) return; _bytes += len; }
+        // ★ 判定是否是"被上采样 2 倍"的音频（只在前 4096 样本做一次）
+        ProbeAndDecide(b, off, len);
+        if (_ds2 == true)
+        {
+            var dec = Decimate2(b, off, len);
+            if (dec.Length == 0) return;
+            try { buf.Write(dec, 0, dec.Length); } catch { }
+            AsrRun.PushLive(dec, 0, dec.Length);
+            return;
+        }
         try { buf.Write(b, off, len); } catch { }
         AsrRun.PushLive(b, off, len);   // 流式已连上就同时推过去
         // RMS 单独算：不能锁着 Gate 做浮点循环（音频线程要快）
@@ -331,6 +342,64 @@ internal static class AsrCapture
 
     /// <summary>最近一次实际使用的增益倍数（1.0 = 未放大）。</summary>
     public static double LastGain = 1.0;
+
+    /// <summary>
+    /// **上采样检测**（2026-10-29，真机破案）。
+    ///
+    /// 现象：用户说一句约 4 秒的话，我们录到 8.7 秒；频谱能量全挤在 3~8kHz
+    /// （正常语音该是 300~3400Hz）；把这堆样本每隔一个取一个（=时长减半）后，
+    /// 引擎立刻认出「好多遍了」。⇒ 音频被**上采样了 2 倍**（样本数翻倍 + 线性插值），
+    /// 引擎听到的是"拖慢一倍的糊音"，所以一个字都出不来。
+    ///
+    /// 判定依据：上采样产生的位置必然满足 `b ≈ (a + c) / 2`（a,b,c 为连续三个样本）。
+    /// 抽若干组算命中率，>75% 就认定是 2× 上采样，之后按 2:1 抽取（带 3 点平均低通）。
+    /// </summary>
+    private static bool? _ds2;          // null = 还没判定
+    private static readonly List<short> _probe = new(4096);
+    public static bool Downsampled => _ds2 == true;
+
+    private static void ProbeAndDecide(byte[] b, int off, int len)
+    {
+        if (_ds2 != null) return;
+        for (var i = off; i + 1 < off + len && _probe.Count < 4096; i += 2)
+            _probe.Add((short)(b[i] | (b[i + 1] << 8)));
+        if (_probe.Count < 4096) return;
+
+        var hit = 0; var tot = 0;
+        for (var i = 2; i + 2 < _probe.Count; i += 2)
+        {
+            var a = _probe[i - 1]; var b2 = _probe[i]; var c = _probe[i + 1];
+            var mid = (a + c) / 2.0;
+            var scale = Math.Max(64.0, Math.Abs(a) * 0.02);
+            tot++;
+            if (Math.Abs(b2 - mid) <= scale) hit++;
+        }
+        var ratio = tot == 0 ? 0 : (double)hit / tot;
+        _ds2 = ratio > 0.75;
+        Safe.Note($"ASR 音频判定：插值命中率 {ratio:P0} ⇒ {(_ds2 == true ? "按 32k→16k 抽取" : "按 16k 原样使用")}");
+    }
+
+    /// <summary>2:1 抽取 + 3 点平均（粗略低通，抑制抽取混叠）。</summary>
+    private static byte[] Decimate2(byte[] src, int off, int len)
+    {
+        var n = len / 2;
+        if (n < 4) return Array.Empty<byte>();
+        var outLen = n / 2;
+        var dst = new byte[outLen * 2];
+        for (var k = 0; k < outLen; k++)
+        {
+            var i0 = off + ((k * 2) * 2);
+            var i1 = i0 + 2;
+            var i2 = i0 + 4;
+            int a = (short)(src[i0] | (src[i0 + 1] << 8));
+            var bb = (short)(src[i1] | (src[i1 + 1] << 8));
+            var c = i2 + 1 < off + len ? (short)(src[i2] | (src[i2 + 1] << 8)) : bb;
+            var v = Math.Clamp((a + 2 * bb + c) / 4, -32000, 32000);
+            dst[k * 2] = (byte)(v & 0xFF);
+            dst[k * 2 + 1] = (byte)((v >> 8) & 0xFF);
+        }
+        return dst;
+    }
 
     /// <summary>
     /// **安静时自动增益**：遥控器离嘴远、房间安静时，PCM 峰值可能只有几百，
