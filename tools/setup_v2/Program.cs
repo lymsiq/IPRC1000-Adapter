@@ -237,7 +237,7 @@ namespace IprcSetup2
                 Controls.Add(_unCable);
                 Controls.Add(_unData);
                 Controls.Add(Label("想保留配置？先在应用「环境设置」点「导出配置」，文件会存到桌面。",
-                    56, 546, 720, 20, 8.5F, Muted));
+                    56, 566, 720, 20, 8.5F, Muted));
 
                 Load += (_, _) =>
                 {
@@ -403,6 +403,7 @@ namespace IprcSetup2
             }
             catch (Exception error)
             {
+                try { _progress.Visible = false; } catch { }   // 失败别留半截进度条
                 _phase.Text = "这次还没装好，我们帮你继续";
                 _phase.ForeColor = Color.FromArgb(155, 101, 39);
                 // 卸载/恢复失败时，原因必须**直接可见** —— 否则用户只知道"点了没用"

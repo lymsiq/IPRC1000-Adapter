@@ -75,6 +75,17 @@ internal static class Program
             return;
         }
 
+        // 卸载前恢复设备驱动（2026-10-29）：把遥控器 HID 节点从 input.inf 改回 keyboard.inf。
+        // 为什么由应用做而不是安装器：改设备驱动要靠 newdev.dll + 实际 HWID，
+        // 这套逻辑在 Env.SetDeviceDriver 里已经验证过，重复实现风险更大。
+        if (args.Length > 0 && args[0] == "--restore-device")
+        {
+            var (ok, msg) = Env.SetDeviceDriver(revert: true);
+            Console.WriteLine((ok ? "[restore] OK: " : "[restore] 失败: ") + msg);
+            Environment.ExitCode = ok ? 0 : 1;   // Main 返回 void，用 ExitCode 传出结果
+            return;
+        }
+
         // 键源归因：旁听 N 秒，按设备列出谁在发键（--raw-input [秒]）
         if (args.Length > 0 && args[0] == "--raw-input")
         {

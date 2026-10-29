@@ -42,11 +42,25 @@ namespace IprcSetup2
             _progress = progress;
             State = new InstallState();
         }
+        /// <summary>日志是否已关闭（删日志目录之后不能再写）。</summary>
+        private bool _logClosed;
+
         private void Report(int value, string message)
         {
-            if (LogPath != null) File.AppendAllText(LogPath, DateTime.UtcNow.ToString("o") + " " + message + Environment.NewLine, Encoding.UTF8);
-            if (_progress != null) _progress(value, message);
+            // ★★ 2026-10-29 自伤 bug：删完 %ProgramData% 目录后这里还会往 setup-*.log 追加，
+            //   于是抛"未能找到路径…的一部分"，把**已经成功的卸载**报成失败。
+            //   现在：日志写入永不抛异常；关日志后只报进度。
+            try
+            {
+                if (!_logClosed && LogPath != null)
+                    File.AppendAllText(LogPath, DateTime.UtcNow.ToString("o") + " " + message + Environment.NewLine, Encoding.UTF8);
+            }
+            catch { }
+            try { _progress?.Invoke(value, message); } catch { }
         }
+
+        /// <summary>关闭日志（删日志目录前必须先调）。</summary>
+        private void CloseLog() { _logClosed = true; }
         private void BeginLog(string operation)
         {
             Directory.CreateDirectory(StateDirectory);
@@ -67,7 +81,7 @@ namespace IprcSetup2
         {
             State.Phase = phase;
             State.LastCheckedUtc = DateTime.UtcNow.ToString("o");
-            SetupCore.SaveState(StatePath, State);
+            try { SetupCore.SaveState(StatePath, State); } catch { }   // 目录已删时不能抛
         }
         internal InstallState Install(InstallOptions options)
         {
@@ -738,6 +752,46 @@ namespace IprcSetup2
             }
         }
 
+        /// <summary>
+        /// **恢复设备驱动**（2026-10-29）：让应用把遥控器 HID 节点改回 keyboard.inf。
+        ///
+        /// 为什么必须做、且必须在卸 WinUHid 之前：否则用户拿遥控器当键盘用时它就是"不认"的状态；
+        /// 次序反了（先卸 WinUHid）更糟 —— 会留下"键盘 + 无注入"⇒ 幽灵 m 全量回归。
+        /// 由应用执行，是因为 newdev.dll + HWID 那套逻辑已在 Env.SetDeviceDriver 验证过。
+        /// </summary>
+        private void TryRestoreDeviceDriver()
+        {
+            try
+            {
+                var exe = Path.Combine(_target, Product.ExeName);
+                if (!File.Exists(exe)) { Report(84, "主程序不在，跳过设备驱动恢复"); return; }
+                Report(84, "正在把遥控器驱动恢复为键盘…");
+                var code = RunProcess(exe, "--restore-device", false);
+                Report(84, "设备驱动恢复返回 " + code + (code == 0 ? "（已恢复）" : "（可能未连接遥控器，可忽略）"));
+            }
+            catch (Exception e) { Report(84, "恢复设备驱动失败：" + e.Message); }
+        }
+
+        /// <summary>
+        /// **卸载 WinUHid 驱动 + 设备节点 + 自签名证书**（2026-10-29）。
+        /// 必须趁安装目录还在时调用（脚本就在 assets\winuhid 里）；删完文件就跑不了了。
+        /// </summary>
+        private void RemoveWinUHid()
+        {
+            try
+            {
+                var script = Path.Combine(_target, "assets", "winuhid", "install-winuhid.ps1");
+                if (!File.Exists(script)) { Report(88, "找不到驱动卸载脚本，已跳过（可手动清理）"); return; }
+                Report(88, "正在卸载虚拟键盘驱动与证书…");
+                var shell = Environment.GetEnvironmentVariable("SystemRoot") + "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+                var code = RunProcess(shell,
+                    "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + script + "\" -Mode Remove", false);
+                Report(89, "驱动/证书清理返回 " + code + (code == 0 ? "" : "（详见日志）"));
+                State.RestartRequired = true;
+            }
+            catch (Exception e) { Report(89, "卸载驱动失败：" + e.Message); }
+        }
+
         internal void Uninstall(bool removeCable = false, bool removeUserData = false)
         {
             BeginLog("卸载主程序");
@@ -747,6 +801,10 @@ namespace IprcSetup2
             {
                 EnsureAppClosed();
                 StopBridgeProcess();
+                // 次序很关键：先把遥控器驱动改回键盘，再卸 WinUHid
+                // （脚本在安装目录里，必须在删文件之前跑）
+                TryRestoreDeviceDriver();
+                RemoveWinUHid();
                 var manifestPath = Path.Combine(_target, "package-manifest.json");
                 if (!File.Exists(manifestPath))
                 {
@@ -783,7 +841,6 @@ namespace IprcSetup2
                 RemoveEtwValues();          // 我们写进蓝牙配置键的 ETW 值
                 RemoveStartupEntry();       // 登录自启
                 if (removeCable) UninstallCableBestEffort();
-                if (removeUserData) RemoveUserDataBestEffort();
                 var shortcut = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory), Product.DisplayName + ".lnk");
                 if (File.Exists(shortcut)) File.Delete(shortcut);
                 Registry.LocalMachine.DeleteSubKeyTree(Product.UninstallKey, false);
@@ -794,6 +851,14 @@ namespace IprcSetup2
                 Save($"主程序已卸载（删除 {removed} 个文件"
                      + (extras.Count > 0 ? "；另清理：" + string.Join("、", extras) : "；用户数据已保留")
                      + "）");
+
+                // ★ 删用户目录必须放在**最后**，而且要先关日志 ——
+                //   否则后面任何一次 Report() 都会因为日志文件所在目录没了而抛异常。
+                if (removeUserData)
+                {
+                    CloseLog();
+                    RemoveUserDataBestEffort();
+                }
                 Report(100, State.Phase);
             }
             catch (Exception error)
