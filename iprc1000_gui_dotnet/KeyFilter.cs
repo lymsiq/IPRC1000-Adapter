@@ -313,6 +313,15 @@ internal sealed class KeyFilter : IDisposable
     /// 取 **120ms**（≈3 倍余量），同时保证真轻点最多只延后 120ms 松开。
     /// </summary>
     private const int DebounceWindowMs = 120;
+
+    /// <summary>
+    /// **尾音窗口**（2026-10-29）：语音键松开后，晚这么久再发"松开"给输入法。
+    ///
+    /// 为什么需要：输入法收到 UP 就立刻收尾出字，而音频链本身有几十毫秒延迟
+    /// （抖缓 + 声卡缓冲）。实测症状就是"最后一个字被吃掉"。
+    /// 150 ms 足以覆盖，用户几乎无感（字晚 0.15 秒出现）。0 = 关闭。
+    /// </summary>
+    private const int VoiceTailMs = 150;
     private readonly Dictionary<string, int> _upToken = new();
     private readonly HashSet<string> _upPending = new();
     private readonly object _upLock = new();
@@ -693,6 +702,31 @@ internal sealed class KeyFilter : IDisposable
                     _upPending.Remove(bid);
                 }
                 try { ForceReleaseButton(bid, $"去抖 {DebounceWindowMs}ms 后仍无按下 ⇒ 确认松开"); } catch { }
+            });
+            return;
+        }
+
+        // ★ 尾音窗口：真正的松开也晚一点发，避免最后一点音频被切断
+        if (!pressed && bid == "voice" && src == "etw" && VoiceTailMs > 0)
+        {
+            int tok2;
+            lock (_upLock)
+            {
+                _upToken.TryGetValue(bid, out var prev2);
+                tok2 = prev2 + 1;
+                _upToken[bid] = tok2;
+                _upPending.Add(bid);
+            }
+            Safe.Note($"VOICE UP 进入尾音窗口 {VoiceTailMs}ms（推迟释放，避免吞掉最后一个字）");
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                await System.Threading.Tasks.Task.Delay(VoiceTailMs);
+                lock (_upLock)
+                {
+                    if (!_upToken.TryGetValue(bid, out var cur2) || cur2 != tok2) return;
+                    _upPending.Remove(bid);
+                }
+                try { ForceReleaseButton(bid, $"尾音 {VoiceTailMs}ms 已过 ⇒ 释放"); } catch { }
             });
             return;
         }

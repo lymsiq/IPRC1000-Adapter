@@ -76,6 +76,7 @@ internal sealed class Backend : IDisposable
         // 见 KeyFilter.VoiceKeyDown 的说明：不预热会丢掉"按住后立刻说的第一个字"。
         KeyFilter.VoiceKeyDown -= WarmAudio;   // 防重复订阅
         KeyFilter.VoiceKeyDown += WarmAudio;
+        KeyFilter.VoiceKeyDown += CheckVoiceAwake;   // 唤起失败检测（2026-10-29）
         // 动作值「切换配置组」（方块键的出厂值）→ 切组 + 同步鼠标模式
         KeyFilter.SwitchGroupRequested -= CycleGroup;
         KeyFilter.SwitchGroupRequested += CycleGroup;
@@ -896,6 +897,13 @@ internal sealed class Backend : IDisposable
             ["imeProfile"] = Settings.ImeProfile,
             ["driverFree"] = Settings.DriverFreeMode,
             ["ports"] = new JsonObject { ["pcm"] = Env.PcmPort, ["key"] = Env.KeyPort },
+            ["voiceDiag"] = new JsonObject
+            {
+                ["ok"] = _voiceOk,
+                ["miss"] = _voiceMiss,
+                ["last"] = _voiceLast,
+                ["tailMs"] = 150,
+            },
             ["wizard"] = WizardState(),
             ["driverVersion"] = WinUhidInjector.DriverVersion,
             ["uhidReady"] = _uhidReady,
@@ -1829,6 +1837,41 @@ internal sealed class Backend : IDisposable
                 message = "已导出到桌面：" + Path.GetFileName(dst) + "（" + copied.Count + " 个文件）" });
         }
         catch (Exception e) { return Env.Json(new { ok = false, message = "导出失败：" + e.Message }); }
+    }
+
+    // ── 语音唤起成功率（2026-10-29）────────────────────────────
+    //  "按了没反应"是这条链路最常见的抱怨，但它有两种完全不同的原因：
+    //    ① 音频没来（输入法没启流 / 麦克风选错 / 声卡被占）
+    //    ② 音频来了但输入法没出字（热键没被认 / 输入法被拦）
+    //  这里只判 ①，因为它**可观测**：按下 900ms 内 `Packets` 没动 ⇒ 判定没启流。
+    private long _voicePacketsAtDown;
+    private long _voiceOk, _voiceMiss;
+    private string _voiceLast = "—";
+
+    private void CheckVoiceAwake()
+    {
+        var before = _router.Packets;
+        _voicePacketsAtDown = before;
+        Task.Delay(900).ContinueWith(_ =>
+        {
+            try
+            {
+                var after = _router.Packets;
+                if (after > _voicePacketsAtDown)
+                {
+                    _voiceOk++;
+                    _voiceLast = "正常（" + (after - _voicePacketsAtDown) + " 帧）";
+                }
+                else
+                {
+                    _voiceMiss++;
+                    _voiceLast = "未收到音频（输入法可能没启动录音）";
+                    Safe.Note("VOICE 唤起失败：按下 900ms 内没有音频帧 —— " +
+                              "检查默认麦克风是否为 CABLE Output、输入法是否支持按住说话");
+                }
+            }
+            catch { }
+        });
     }
 
     /// <summary>键源归因报告：`rawInput` / `rawInput reset`</summary>
