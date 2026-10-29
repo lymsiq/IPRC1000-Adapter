@@ -42,7 +42,26 @@ internal static class Program
         //   否则连发间隔会抖动 5~15 ms —— 这正是"不丝滑/不精确"的根因。
         TimeBeginPeriod(1);
 
+        // ★ 2026-10-29：无界面服务模式 —— 只跑业务（注入/音频/探针），
+        //   不建窗口、不碰 WinForms。UI 通过命名管道调用 Backend.Dispatch。
+        //   这是"拆进程"的第一步：宿主可随时替换，业务不受影响。
+        if (args.Length > 0 && args[0] == "--headless")
+        {
+            ServiceHost.Run();
+            return;
+        }
+
+        // 管道自检：连上业务服务，调一条命令并打印结果（拆分后的联调工具）
+        if (args.Length > 0 && args[0] == "--pipe-test")
+        {
+            var method = args.Length > 1 ? args[1] : "getState";
+            Console.WriteLine(ServiceClient.Call(method) is var r && r.Length > 200 ? r[..200] + "…" : r);
+            return;
+        }
+
 #if IPRC_DEV
+
+
         var selftest = args.Length > 0 && args[0] == "--selftest";
 #else
         // 发布版没有自检入口（DevTools=false）；变量保留是因为 MainForm 的签名要用它

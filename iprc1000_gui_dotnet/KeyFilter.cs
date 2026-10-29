@@ -542,7 +542,10 @@ internal sealed class KeyFilter : IDisposable
         var hwnd = _hwnd;
         Stop();
         KeySourceIsEtw = etw;
-        if (hwnd != IntPtr.Zero) Start(hwnd);
+        // ★ 2026-10-29：原来 `if (hwnd != IntPtr.Zero) Start(hwnd)` —— 无界面模式（--headless）
+        //   没有窗口句柄，于是看门狗（卡键兜底）**永远不启动**。现在无条件启动：
+        //   hwnd 为 0 只是"收不到设备变更窗口消息"，看门狗与注入不受影响。
+        Start(hwnd);
     }
 
     public void Stop()

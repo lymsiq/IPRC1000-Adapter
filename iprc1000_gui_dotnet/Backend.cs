@@ -1576,4 +1576,68 @@ internal sealed class Backend : IDisposable
         StopBridge();
         _router.Dispose();
     }
+
+    /// <summary>
+    /// **统一命令分发**（2026-10-29 拆进程用）。
+    ///
+    /// 原来这套 switch 在 MainForm 里 —— 那是"宿主"代码，无界面模式（--headless）就用不到。
+    /// 抽到这里之后：UI 宿主（走 WebView 消息）与无界面服务（走命名管道）**调的是同一份**，
+    /// 命令语义必然一致，不会出现"界面能转、服务不能转"的分裂。
+    ///
+    /// 参数用两个字符串（原来 JS 侧最多用到 args[0]/args[1]）。
+    /// </summary>
+    public string Dispatch(string method, string a0 = "", string a1 = "")
+    {
+        return method switch
+        {
+            "getState" => GetState(),
+            "refreshAll" => GetState(),
+            "applyRegistry" => ApplyRegistry(),
+            "reboot" => Reboot(),
+            "installCable" => InstallCable(),
+            "setDefaultMic" => SetDefaultMic(),
+            "saveKey" => SaveKey(a0, a1),
+            "switchGroup" => SwitchGroup(a0),
+            "newGroup" => NewGroup(),
+            "renameGroup" => RenameGroup(a0, a1),
+            "deleteGroup" => DeleteGroup(a0),
+            "exportGroup" => ExportGroup(),
+            "importGroup" => ImportGroup(a0),
+            "resetKeys" => ResetKeys(),
+            "startBridge" => StartBridge(),
+            "stopBridge" => StopBridge(),
+            "relaunchAdmin" => RelaunchAdmin(),
+            "openUrl" => OpenUrl(a0),
+            "setInject" => SetInject(a0),
+            "testInject" => TestInject(),
+            // forceUnlock=托盘"紧急释放"；releaseAllKeys=面板"释放全部注入键"（语义不同，都保留）
+            "forceUnlock" => ForceUnlock(),
+            "releaseAllKeys" => ReleaseAllKeys(),
+            "runSetup" => RunSetup(),
+            "setDeviceDriver" => SetDeviceDriver(a0),
+            // 鼠标模式（2026-10-16）：方块键切模式；参数与状态见 Backend.Mouse
+            "setMouseMode" => SetMouseMode(a0),
+            "setMouseConfig" => SetMouseConfig(a0),
+            "mouseSample" => TakeMouseSample(),
+            "mouseCalibrate" => CalibrateMouse(),
+            "setAutoStart" => SetAutoStart(a0),
+            "clearKeyLog" => ClearKeyLog(),
+            "setAutoRun" => SetAutoRun(a0),
+            "setStartMinimized" => SetStartMinimized(a0),
+            "setLog" => SetLog(a0),
+            "setKeepEventLog" => SetKeepEventLog(a0),
+            "setAutoSwitchDriver" => SetAutoSwitchDriver(a0),
+            "setAutoKeepMic" => SetAutoKeepMic(a0),
+            "checkCaptureDevice" => CheckCaptureDevice(),
+            "learnClickIcon" => LearnClickIcon(),
+            "testClickIcon" => TestClickIcon(),
+            "testTone" => PlayTestTone(),
+            "setClickMinScore" => SetClickMinScore(a0),
+            "setClickSearchScope" => SetClickSearchScope(a0),
+            "setClickReturnOrigin" => SetClickReturnOrigin(a0),
+            "installWinuhid" => InstallWinuhid(),
+            "exportWinuhid" => ExportWinuhid(),
+            _ => Env.Json(new { ok = false, message = $"未知方法 {method}" }),
+        };
+    }
 }

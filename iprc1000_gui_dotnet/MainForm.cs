@@ -657,57 +657,8 @@ internal sealed class MainForm : Form
             StartupMark("前端 JS 已就绪（首次向宿主取状态）");
         }
 
-        string result = method switch
-        {
-            "getState" => _backend.GetState(),
-            "refreshAll" => _backend.GetState(),
-            "applyRegistry" => _backend.ApplyRegistry(),
-            "reboot" => _backend.Reboot(),
-            "installCable" => _backend.InstallCable(),
-            "setDefaultMic" => _backend.SetDefaultMic(),
-            "saveKey" => _backend.SaveKey(Arg(0), Arg(1)),
-            "switchGroup" => _backend.SwitchGroup(Arg(0)),
-            "newGroup" => _backend.NewGroup(),
-            "renameGroup" => _backend.RenameGroup(Arg(0), Arg(1)),
-            "deleteGroup" => _backend.DeleteGroup(Arg(0)),
-            "exportGroup" => _backend.ExportGroup(),
-            "importGroup" => _backend.ImportGroup(Arg(0)),
-            "resetKeys" => _backend.ResetKeys(),
-            "startBridge" => _backend.StartBridge(),
-            "stopBridge" => _backend.StopBridge(),
-            "relaunchAdmin" => _backend.RelaunchAdmin(),
-            "openUrl" => _backend.OpenUrl(Arg(0)),
-            "setInject" => _backend.SetInject(Arg(0)),
-            "testInject" => _backend.TestInject(),
-            // forceUnlock=托盘"紧急释放"；releaseAllKeys=面板"释放全部注入键"（语义不同，都保留）
-            "forceUnlock" => _backend.ForceUnlock(),
-            "releaseAllKeys" => _backend.ReleaseAllKeys(),
-            "runSetup" => _backend.RunSetup(),
-            "setDeviceDriver" => _backend.SetDeviceDriver(Arg(0)),
-            // 鼠标模式（2026-10-16）：方块键切模式；参数与状态见 Backend.Mouse
-            "setMouseMode" => _backend.SetMouseMode(Arg(0)),
-            "setMouseConfig" => _backend.SetMouseConfig(Arg(0)),
-            "mouseSample" => _backend.TakeMouseSample(),
-            "mouseCalibrate" => _backend.CalibrateMouse(),
-            "setAutoStart" => _backend.SetAutoStart(Arg(0)),
-            "clearKeyLog" => _backend.ClearKeyLog(),
-            "setAutoRun" => _backend.SetAutoRun(Arg(0)),
-            "setStartMinimized" => _backend.SetStartMinimized(Arg(0)),
-            "setLog" => _backend.SetLog(Arg(0)),
-            "setKeepEventLog" => _backend.SetKeepEventLog(Arg(0)),
-            "setAutoSwitchDriver" => _backend.SetAutoSwitchDriver(Arg(0)),
-            "setAutoKeepMic" => _backend.SetAutoKeepMic(Arg(0)),
-            "checkCaptureDevice" => _backend.CheckCaptureDevice(),
-            "learnClickIcon" => _backend.LearnClickIcon(),
-            "testClickIcon" => _backend.TestClickIcon(),
-            "testTone" => _backend.PlayTestTone(),
-            "setClickMinScore" => _backend.SetClickMinScore(Arg(0)),
-            "setClickSearchScope" => _backend.SetClickSearchScope(Arg(0)),
-            "setClickReturnOrigin" => _backend.SetClickReturnOrigin(Arg(0)),
-            "installWinuhid" => _backend.InstallWinuhid(),
-            "exportWinuhid" => _backend.ExportWinuhid(),
-            _ => Env.Json(new { ok = false, message = $"未知方法 {method}" }),
-        };
+        // ★ 2026-10-29：命令分发已抽到 Backend.Dispatch（宿主与无界面进程共用同一份）。
+        string result = _backend.Dispatch(method, Arg(0), Arg(1));
 
         var resp = new JsonObject { ["id"] = idNode, ["result"] = result };
         // 界面进程可能已被释放（窗口在托盘里）—— 这时候没有页面在等回包，直接丢弃
