@@ -30,7 +30,7 @@
     <!-- ── 版本信息 ──
          改版本只需要改下面这一个 <Version>：程序内显示、exe 文件属性、
          发布包文件名（package.py 会读它）都从这里取，避免多处各写一份而漂移。 -->
-    <Version>1.2.86</Version>
+    <Version>1.2.87</Version>
     <FileVersion>1.2.0.0</FileVersion>
     <AssemblyVersion>1.2.0.0</AssemblyVersion>
     <Product>IPRC1000 遥控器适配器</Product>
@@ -98,4 +98,25 @@
           SkipUnchangedFiles="true" />
   </Target>
 
+
+  <!-- ★★ 2026-10-29：把 WPF 与设计期程序集从发布输出里剔掉。
+       原因：`UseWindowsForms` 会带上整个 Microsoft.WindowsDesktop.App 框架，而自包含发布
+       会把框架里的**所有**程序集都拷进去 —— 其中 WPF 一套（PresentationFramework 15.4MB +
+       PresentationCore 8.2MB + D3DCompiler 4.5MB …）本程序一个都不用。
+       实测：删掉后窗口/WebView2/按键全部正常；压缩单文件 63.8MB → 约 35MB。
+       用 ResolvedFileToPublish 剔除，对单文件与文件夹发布都生效。 -->
+  <Target Name="DropUnusedDesktopPayload" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(Filename)' == 'PresentationFramework'
+                or '%(Filename)' == 'PresentationCore'
+                or '%(Filename)' == 'PresentationUI'
+                or '%(Filename)' == 'ReachFramework'
+                or '%(Filename)' == 'System.Printing'
+                or '%(Filename)' == 'System.Windows.Controls.Ribbon'
+                or '%(Filename)' == 'System.Windows.Forms.Design'
+                or '%(Filename)' == 'D3DCompiler_47_cor3'
+                or '%(Filename)' == 'Microsoft.DiaSymReader.Native.amd64'" />
+    </ItemGroup>
+  </Target>
 </Project>
