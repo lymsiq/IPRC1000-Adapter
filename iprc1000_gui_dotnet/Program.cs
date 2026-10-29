@@ -54,6 +54,11 @@ internal static class Program
         // 无驱动模式的钩子自检（不动设备驱动）：注入 3 个 m，看被吞掉几个
         if (args.Length > 0 && args[0] == "--ghost-test")
         {
+            if (args.Length > 1 && args[1] == "zero")
+            {
+                Console.WriteLine(GhostGuard.SelfTestZeroGhost());
+                return;
+            }
             var n = GhostGuard.SelfTest();
             Console.WriteLine(n < 0 ? "钩子安装失败" : $"已吞掉 {n} / 3 个 m");
             return;

@@ -149,13 +149,67 @@ internal static class GhostGuard
     /// 界面用它回答"现在还发不发 m"，比累计数字有用得多。</summary>
     public static long LastSwallowAt;
 
+    // ── 「零漏」模式：先吞后补（2026-10-29）──────────────────────────
+    //   问题：语音键在 HID 层就是 m，"第一个 m"既是触发器又要变成字符 —— 物理上抓不住。
+    //   做法：**只在遥控器近期活跃时**，把 m 先吞 60ms：
+    //     · 60ms 内收到 voice 按下（ETW）或第二个 m ⇒ 确认是幽灵，不补（零漏 ✓）
+    //     · 否则 ⇒ 补发一个 m（你自己打的字，晚 60ms 出现）
+    //   为什么加"活跃窗口"：否则**每个 m 都延迟 60ms**，拼音输入会明显发黏。
+    public static volatile bool HoldFirstKey;          // 开关（默认关，可由用户打开）
+    public static long Replayed;                        // 补发次数（可观测）
+
+    private const int RemoteActiveMs = 8000;            // 遥控器活跃窗口：8 秒
+    private const int HoldMs = 60;                      // 先吞多久
+    private static long _lastRemoteAt;
+    private static long _pendingAt;
+    private static volatile bool _pending;
+    private static Thread? _replayThread;
+
+    /// <summary>遥控器有任何按键（ETW）→ 刷新活跃窗口</summary>
+    public static void NoteRemoteActivity() { _lastRemoteAt = Environment.TickCount64; }
+
+    private static bool RemoteActive => Environment.TickCount64 - _lastRemoteAt < RemoteActiveMs;
+
+    /// <summary>确认"这个 m 是幽灵"（voice 按下 / 检测到连发）⇒ 不要补发</summary>
+    private static void CancelPending() { _pending = false; }
+
+    private static void EnsureReplayLoop()
+    {
+        if (_replayThread != null) return;
+        _replayThread = new Thread(() =>
+        {
+            while (true)
+            {
+                Thread.Sleep(15);
+                if (!_pending || !Enabled) continue;
+                if (Environment.TickCount64 - _pendingAt < HoldMs) continue;
+                _pending = false;
+                try
+                {
+                    // 补发：用注入事件（钩子里会因 LLKHF_INJECTED 放行，不会被自己再吞一次）
+                    keybd_event(VK_M, 0, 0, UIntPtr.Zero);
+                    keybd_event(VK_M, 0, 2 /*KEYUP*/, UIntPtr.Zero);
+                    Replayed++;
+                }
+                catch { }
+            }
+        })
+        { IsBackground = true, Name = "ghost-replay" };
+        _replayThread.Start();
+    }
+
     /// <summary>清零统计（切换模式时调用，避免累计数字被误读成"还在发"）</summary>
-    public static void ResetStats() { Swallowed = 0; Bursts = 0; ForcedReleases = 0; LastSwallowAt = 0; }
+    public static void ResetStats()
+    {
+        Swallowed = 0; Bursts = 0; ForcedReleases = 0; LastSwallowAt = 0;
+        Replayed = 0; _pending = false; _lastRemoteAt = 0;
+    }
 
     /// <summary>语音键按下 → 开始吞 m。</summary>
     public static void Arm(long nowMs)
     {
         if (!Enabled) return;
+        CancelPending();          // ETW 说"语音按下了" ⇒ 刚才那个 m 是幽灵，别补发
         _armedAt = nowMs;
         _armed = true;
         _graceGen++;      // 取消任何待执行的 Disarm
@@ -200,6 +254,49 @@ internal static class GhostGuard
         return (int)(Swallowed - before);
     }
 
+    /// <summary>
+    /// 「先吞后补」的三条路径自检（用 WinUHid 造**真实** HID 按键，因为注入事件会被钩子放行，测不出来）。
+    /// 返回 (无窗口放行, 活跃窗吞+补, 连发不补)。
+    /// </summary>
+    public static string SelfTestZeroGhost()
+    {
+        var sb = new System.Text.StringBuilder();
+        Enabled = true; Start();
+        if (!Running) return "钩子安装失败";
+        // 必须先把虚拟键盘建起来，否则 Send 是空操作（第一次跑就是这样全 0）
+        if (!WinUhidInjector.EnsureReady()) return "WinUHid 未就绪，无法造真实按键";
+
+        void RealM(int times, int gapMs)
+        {
+            for (var i = 0; i < times; i++)
+            {
+                try { WinUhidInjector.Send(new[] { 0x4D }); } catch { }
+                Thread.Sleep(20);
+                try { WinUhidInjector.Send(Array.Empty<int>()); } catch { }
+                Thread.Sleep(gapMs);
+            }
+        }
+
+        // ① 无遥控器活动 + 零漏开 → 应放行（不吞）
+        HoldFirstKey = true; _lastRemoteAt = 0;
+        var s0 = Swallowed; RealM(1, 200); Thread.Sleep(150);
+        sb.AppendLine($"① 无活跃窗口：吞 {Swallowed - s0}（期望 0）");
+
+        // ② 遥控器活跃 + 零漏开 → 先吞后补
+        NoteRemoteActivity();
+        var s1 = Swallowed; var r1 = Replayed; RealM(1, 200); Thread.Sleep(250);
+        sb.AppendLine($"② 活跃窗口：吞 {Swallowed - s1}（期望 1）/ 补发 {Replayed - r1}（期望 1）");
+
+        // ③ 活跃 + 连发 → 吞且**不补**
+        NoteRemoteActivity();
+        var s2 = Swallowed; var r2 = Replayed; var b2 = Bursts;
+        RealM(4, 25); Thread.Sleep(250);
+        sb.AppendLine($"③ 连发 4 次：吞 {Swallowed - s2}（期望 3）/ 补发 {Replayed - r2}（期望 0）/ 段 {Bursts - b2}（期望 1）");
+
+        HoldFirstKey = false;
+        return sb.ToString().TrimEnd();
+    }
+
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
@@ -216,9 +313,18 @@ internal static class GhostGuard
                 if (msg is WM_KEYDOWN or WM_SYSKEYDOWN)
                 {
                     var info = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
+                    // ★ 自己补发的那个 m 会带回钩子：带 INJECTED 标志，必须放行，
+                    //   否则"先吞后补"会变成"吞了又吞"，m 永远出不来。
+                    if ((info.flags & 0x10) != 0) return CallNextHookEx(_hook, nCode, wParam, lParam);
                     if (info.vkCode == VK_M)
                     {
                         var now = Environment.TickCount64;
+
+                        // ★★★ 结构说明（2026-10-29 第二次修）：
+                        //   必须先做"连发判定 / 过期判定"，最后才决定吞不吞。
+                        //   我第一版把"先吞后补"放在最前面并**提前 return**，
+                        //   导致 _lastMDownAt 没更新 ⇒ 第二个 m 判不出连发 ⇒
+                        //   连发时既没形成抑制、又补发了一个 m（自检 ③ 就是 4/1/0）。
 
                         // ★★★ 顺序很重要（2026-10-29 真 bug，用户键盘 m 打不出来）：
                         //     必须先按"距上次的间隔"判过期，**再**更新 _lastMDownAt。
@@ -234,6 +340,7 @@ internal static class GhostGuard
                             _burst = true;
                             _burstAt = now;
                             Bursts++;
+                            CancelPending();      // 是连发 ⇒ 确认幽灵，别补发
                             // ★★ 2026-10-29（用户提议，确实更彻底）：
                             //   光"吞 keydown"是拦不住自动重复的 —— 系统认为这个键**一直按着**，
                             //   于是按 31Hz 持续产生新的 keydown。**只有把键松开**才能终止重复。
@@ -247,6 +354,20 @@ internal static class GhostGuard
                             Swallowed++;
                             LastSwallowAt = now;
                             return (IntPtr)1;      // 吞掉：不传给后续（包括输入法）
+                        }
+
+                        // ── 先吞后补：走到这里说明"既不在抑制中、也不是连发"，
+                        //    但遥控器刚刚活跃过 ⇒ 这一个 m 可能就是语音键的第一个按下。
+                        //    先吞 60ms：期间若来第二个 m（连发）或 voice 按下（ETW）就**不补**，
+                        //    否则补发回去（用户自己打的字，晚 60ms 出现）。
+                        if (HoldFirstKey && RemoteActive)
+                        {
+                            _pending = true;
+                            _pendingAt = now;
+                            Swallowed++;
+                            LastSwallowAt = now;
+                            EnsureReplayLoop();
+                            return (IntPtr)1;
                         }
                     }
                 }

@@ -446,7 +446,11 @@ internal sealed class Backend : IDisposable
             AutoPickIme();
 
             // 无驱动模式：恢复幽灵键抑制（钩子不随进程持久，重启后要重新装）
-            if (Settings.DriverFreeMode) { try { GhostGuard.Enabled = true; GhostGuard.Start(); } catch { } }
+            if (Settings.DriverFreeMode)
+            {
+                try { GhostGuard.Enabled = true; GhostGuard.Start(); } catch { }
+                GhostGuard.HoldFirstKey = Settings.ZeroGhost;
+            }
 
             // ★★ 2026-10-29：先清**上一次进程残留的任意卡键**（真机事故：用户键盘 m 打不出来，
             //   系统按 31Hz 自动重复它，拔遥控器电池也停不了）。只在真有键按着时才动手。
@@ -883,6 +887,8 @@ internal sealed class Backend : IDisposable
             ["ghostSwallowed"] = GhostGuard.Swallowed,
             ["ghostReleased"] = GhostGuard.ForcedReleases,
             ["ghostBursts"] = GhostGuard.Bursts,
+            ["ghostReplayed"] = GhostGuard.Replayed,
+            ["zeroGhost"] = Settings.ZeroGhost,
             // -1 = 从未拦过；否则=距最近一次拦截的秒数（不变化 = 现在已经不发 m）
             ["ghostLastAgo"] = GhostGuard.LastSwallowAt == 0 ? -1
                 : (int)((Environment.TickCount64 - GhostGuard.LastSwallowAt) / 1000),
@@ -1563,6 +1569,18 @@ internal sealed class Backend : IDisposable
     ///
     /// 只在"当前映射还是某个档位的默认值"时才自动改写 —— 用户手工改过就不动。
     /// </summary>
+    /// <summary>无驱动模式的「零漏」开关：遥控器活跃时 m 先吞后补，代价是 60ms 延迟。</summary>
+    public string SetZeroGhost(string? on)
+    {
+        var want = on is "true" or "1" or "True";
+        Settings.ZeroGhost = want;
+        GhostGuard.HoldFirstKey = want;
+        return Env.Json(new { ok = true, zeroGhost = want,
+            message = want
+                ? "已开启「零漏」：遥控器活跃的 8 秒内，第一个 m 会被先吞再补（打字时若刚用过遥控器，单个 m 会晚 60ms 出现）。"
+                : "已关闭「零漏」：每次按住语音键可能漏 1 个 m。" });
+    }
+
     public string SetImeProfile(string? p)
     {
         var profile = (p ?? "").Trim().ToLowerInvariant();
@@ -1827,6 +1845,7 @@ internal sealed class Backend : IDisposable
             "setKeepEventLog" => SetKeepEventLog(a0),
             "setImeProfile" => SetImeProfile(a0),
             "setDriverFree" => SetDriverFreeMode(a0),
+            "setZeroGhost" => SetZeroGhost(a0),
             "setAutoSwitchDriver" => SetAutoSwitchDriver(a0),
             "setAutoKeepMic" => SetAutoKeepMic(a0),
             "checkCaptureDevice" => CheckCaptureDevice(),

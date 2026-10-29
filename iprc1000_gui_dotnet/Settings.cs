@@ -125,6 +125,12 @@ internal static class Settings
         set { _data.ImeAutoPicked = value; Save(); }
     }
 
+    public static bool ZeroGhost
+    {
+        get => _data.ZeroGhost;
+        set { _data.ZeroGhost = value; Save(); }
+    }
+
     /// <summary>语音输入法档位（doubao / wechat / custom）。见 IPRC1000Adapter.Backend.SetImeProfile。</summary>
     public static string ImeProfile
     {
@@ -310,6 +316,12 @@ internal static class Settings
 
         /// <summary>是否已经做过"首次自动预选"。做过后不再自动改，避免覆盖用户的手动选择。</summary>
         public bool ImeAutoPicked { get; set; }
+
+        /// <summary>
+        /// 无驱动模式的「零漏」增强：遥控器活跃时，m 先吞 60ms，确认不是幽灵再补发。
+        /// 默认**关**（会让 m 延迟 60ms，虽然只在遥控器活跃的 8 秒内）。
+        /// </summary>
+        public bool ZeroGhost { get; set; }
 
         /// <summary>
         /// **无驱动（降级）模式**：不把遥控器切成普通 HID，而是保持键盘 +

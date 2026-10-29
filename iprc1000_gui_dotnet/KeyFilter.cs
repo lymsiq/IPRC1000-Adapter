@@ -569,6 +569,7 @@ internal sealed class KeyFilter : IDisposable
         // ★ 2026-10-29 无驱动模式：按住语音键期间吞掉遥控器自带的 31 Hz 幽灵 `m`。
         //   必须在这里（两种按键来源共用的漏斗）而不是注入路径 —— 幽灵键是**遥控器自己发的**，
         //   跟我们注入了什么无关。
+        GhostGuard.NoteRemoteActivity();      // 遥控器活跃 → 由 ETW 时间戳驱动"先吞后补"的窗口
         if (bid == "voice")
         {
             if (pressed) GhostGuard.Arm(Environment.TickCount64);

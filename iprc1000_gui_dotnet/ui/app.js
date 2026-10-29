@@ -861,6 +861,12 @@ function renderEnv(s) {
       + ' 微信输入法需把「麦克风」选成 CABLE Output。';
   }
 
+  // 零漏模式
+  const zgT = $('#zeroGhostToggle');
+  if (zgT) zgT.checked = s.zeroGhost === true;
+  const zgSw = $('#zeroGhostSwitch');
+  if (zgSw) zgSw.classList.toggle('on', s.zeroGhost === true);
+
   // 无驱动模式开关
   const dfT = $('#driverFreeToggle');
   if (dfT) dfT.checked = s.driverFree === true;
@@ -1283,6 +1289,19 @@ function bindUI() {
     };
   }
 
+  // 零漏模式：先吞后补
+  const zgT2 = $('#zeroGhostToggle');
+  if (zgT2 && hasBridge) {
+    zgT2.onchange = async () => {
+      const r = JSON.parse(await B.setZeroGhost(zgT2.checked ? '1' : '0'));
+      zgT2.checked = r.zeroGhost === true;
+      const sw = $('#zeroGhostSwitch');
+      if (sw) sw.classList.toggle('on', zgT2.checked);
+      toast(r.message, 9000);
+      await refresh();
+    };
+  }
+
   // 无驱动模式：切驱动 + 启停钩子，切完提示重启
   const dfT2 = $('#driverFreeToggle');
   if (dfT2 && hasBridge) {
@@ -1504,9 +1523,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.99',
+      version: '1.2.100',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.99（构建于 2026-10-29 11:55）',
+      versionLine: 'v1.2.100（构建于 2026-10-29 12:10）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
