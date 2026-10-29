@@ -293,6 +293,8 @@ internal static class AsrCapture
     }
 
     public static bool Active { get { lock (Gate) return _buf != null; } }
+    /// <summary>实时字节数（诊断：能涨说明 PCM 真的进来了）。</summary>
+    public static long LiveBytes { get { lock (Gate) return _bytes; } }
 
     public static void Begin()
     {
@@ -377,6 +379,9 @@ internal static class AsrRun
             AsrCapture.Begin();
             AsrOverlay.Show("正在听…");
             _stream = null;
+            // ★ 必须先打开音频会话：快捷键不是遥控器事件，不预热的话
+            //   CableRouter 不会把 PCM 送进缓冲（录到 0 字节，表现为"没声音/没字"）
+            KeyFilter.RaiseVoiceKeyDown();
             // 后台把引擎和流拉起来：音频先进本地缓冲，连上后把已攒的部分补推过去
             Task.Run(async () =>
             {

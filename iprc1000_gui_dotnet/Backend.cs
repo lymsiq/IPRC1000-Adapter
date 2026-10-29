@@ -1963,6 +1963,12 @@ internal sealed class Backend : IDisposable
             progress = _asrDlPct,
             message = _asrDlMsg,
             selected = Settings.AsrModel,
+            hotkey = AsrHotkey.Describe,
+            hotkeyReady = AsrHotkey.Ready,
+            hotkeySeen = AsrHotkey.Seen,
+            hotkeyHits = AsrHotkey.Hits,
+            recording = AsrCapture.Active,
+            liveBytes = AsrCapture.LiveBytes,
             polish = Settings.PolishRules,
             terms = Glossary.Count,
             enabled = Settings.AsrEnabled,
@@ -2074,6 +2080,7 @@ internal sealed class Backend : IDisposable
         var v = (on ?? "") == "1" || string.Equals(on, "true", StringComparison.OrdinalIgnoreCase);
         Settings.AsrEnabled = v;
         if (!v) LocalAsr.Stop();          // 关掉就释放引擎进程，省内存
+        AsrHotkey.Sync();                 // 开/关总开关时同步快捷键钩子
         return Env.Json(new
         {
             ok = true, enabled = v,
@@ -2103,6 +2110,7 @@ internal sealed class Backend : IDisposable
         // ★ 选了「本地 ASR」就把总开关一起打开 —— 否则用户点了通道却什么都不发生
         //   （上一版就是这里：总开关默认关，闸门要 enabled && mode 同时成立，点了没反应）
         if (m == "asr") Settings.AsrEnabled = true;
+        AsrHotkey.Sync();
         var hasModel = Settings.AsrModel.Length > 0 &&
                        File.Exists(Path.Combine(AsrModelDir, Settings.AsrModel + ".gguf"));
         return Env.Json(new

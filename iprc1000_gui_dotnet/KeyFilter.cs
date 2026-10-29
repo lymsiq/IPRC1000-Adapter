@@ -242,6 +242,16 @@ internal sealed class KeyFilter : IDisposable
     public static event Action? VoiceKeyDown;
 
     /// <summary>
+    /// 外部主动触发一次"语音键按下"的副作用（预热音频链）。
+    /// 快捷键（Ctrl+Alt+V）不是遥控器事件，但**音频会话必须被打开**，
+    /// 否则 CableRouter 不会把 PCM 送进缓冲 —— 表现就是"录到 0 字节"。
+    /// </summary>
+    public static void RaiseVoiceKeyDown()
+    {
+        try { VoiceKeyDown?.Invoke(); } catch { }
+    }
+
+    /// <summary>
     /// 按下绑定了动作值「切换配置组」的按键时触发（方块键的出厂值）。
     /// 由 <c>Backend</c> 接上：切到下一组 + 同步鼠标模式。
     /// 放在事件里而不是直接调 Keymaps 的原因：切组要顺带更新托盘提示与鼠标模式，

@@ -1051,6 +1051,7 @@ function renderAsr(s, a) {
     kvItem('识别引擎', (engineOk ? '已就位' : '未安装') +
            (a.backends && a.backends.length ? ` · 后端 ${a.backends.join('/')}` : ''), engineOk ? 'ok' : 'bad') +
     // ★ 通道 chip 一律可点：选「本地 ASR」会顺手打开总开关（点了没反应最糟）
+    kvItem('触发快捷键', a.hotkey ? ('<b>' + a.hotkey + '</b>（按住说话，可把遥控器语音键映射成它）') : '（未设置）', '') +
     kvItem('语音快捷键', chip('交给输入法（' + imeName + '）', mode === 'hotkey' && en, 'data-asr-mode', 'hotkey')
                        + chip('本地 ASR', mode === 'asr' && en, 'data-asr-mode', 'asr'), '') +
     kvItem('计算后端', chip('CPU', be === 'cpu', 'data-asr-be', 'cpu', dis)
@@ -1704,9 +1705,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.122',
+      version: '1.2.123',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.122（构建于 2026-10-29 20:05）',
+      versionLine: 'v1.2.123（构建于 2026-10-29 20:35）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

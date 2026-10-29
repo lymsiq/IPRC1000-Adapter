@@ -152,6 +152,13 @@ internal static class Settings
         set { _data.AsrModel = value; Save(); }
     }
 
+    /// <summary>本地识别快捷键（VK 码）。0 = 关闭快捷键。</summary>
+    public static int AsrHotkeyVk
+    {
+        get => _data.AsrHotkeyVk;
+        set { _data.AsrHotkeyVk = value; Save(); }
+    }
+
     /// <summary>规则层润色开关。</summary>
     public static bool PolishRules
     {
@@ -387,6 +394,9 @@ internal static class Settings
 
         /// <summary>选中的本地 ASR 模型 id（空 = 未选）。见 Backend.AsrModels。</summary>
         public string AsrModel { get; set; } = "";
+
+        /// <summary>本地识别的快捷键（VK 码）。默认 V = 0x56，配 Ctrl+Alt 使用。</summary>
+        public int AsrHotkeyVk { get; set; } = 0x56;
 
         /// <summary>规则层润色（去填充词/重复字/标点规整）。默认开。</summary>
         public bool PolishRules { get; set; } = true;

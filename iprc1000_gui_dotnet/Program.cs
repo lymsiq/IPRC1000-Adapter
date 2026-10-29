@@ -75,6 +75,8 @@ internal static class Program
             return;
         }
 
+        AsrHotkey.Sync();   // 启动就把快捷键钩子挂好（总开关开着才有用）
+
         // 规则润色自检（--polish-test）：不需要模型/遥控器，直接看"原文 → 润色后"
         if (args.Length > 0 && args[0] == "--polish-test")
         {
