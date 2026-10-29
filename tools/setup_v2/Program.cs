@@ -113,14 +113,18 @@ namespace IprcSetup2
             Controls.Add(location);
 
             var help = Card(30, 283, 764, 180);
-            help.Controls.Add(Label("搭配豆包输入法使用", 20, 15, 550, 25, 10.5F, Ink, true));
-            help.Controls.Add(Label("请自行下载豆包输入法，设置长按右 Alt，麦克风选择 CABLE Output。", 20, 47, 720, 24, 9.5F, Muted));
-            var doubao = new LinkLabel { Text = "下载豆包输入法  ↗", Bounds = new Rectangle(583, 17, 158, 24), LinkColor = Blue, ActiveLinkColor = Blue };
+            help.Controls.Add(Label("搭配语音输入法使用（豆包 / 微信输入法，任选其一）", 20, 15, 560, 25, 10.5F, Ink, true));
+            var doubao = new LinkLabel { Text = "下载豆包  ↗", Bounds = new Rectangle(470, 17, 88, 24), LinkColor = Blue, ActiveLinkColor = Blue };
             doubao.LinkClicked += (s, e) => OpenLink(Product.DoubaoUrl);
             help.Controls.Add(doubao);
-            help.Controls.Add(Label("先连接遥控器", 20, 85, 600, 24, 10.5F, Ink, true));
-            help.Controls.Add(Label("① 按住「下 + LAST」至闪灯     ② Windows 蓝牙添加 IPRC1000", 20, 117, 720, 24, 9.5F, Muted));
-            help.Controls.Add(Label("③ 配对后按一下 OK 唤醒，按住语音键即可开始说话。", 20, 144, 720, 24, 9.5F, Muted));
+            var weixin = new LinkLabel { Text = "下载微信输入法  ↗", Bounds = new Rectangle(562, 17, 130, 24), LinkColor = Blue, ActiveLinkColor = Blue };
+            weixin.LinkClicked += (s, e) => OpenLink(Product.WeixinImeUrl);
+            help.Controls.Add(weixin);
+            help.Controls.Add(Label("豆包长按右 Alt；微信输入法长按 Ctrl+Win。两者都要把「麦克风」选成 CABLE Output。", 20, 47, 730, 24, 9.5F, Muted));
+            help.Controls.Add(Label("装好后在应用「环境设置」里选中你用的那个，语音键会自动改成对应组合键。", 20, 71, 730, 22, 9F, Muted));
+            help.Controls.Add(Label("先连接遥控器", 20, 99, 600, 24, 10.5F, Ink, true));
+            help.Controls.Add(Label("① 按住「下 + LAST」至闪灯     ② Windows 蓝牙添加 IPRC1000", 20, 128, 720, 24, 9.5F, Muted));
+            help.Controls.Add(Label("③ 配对后按一下 OK 唤醒，按住语音键即可开始说话。", 20, 152, 720, 24, 9.5F, Muted));
             Controls.Add(help);
 
             _install.Text = "立即安装";

@@ -20,6 +20,8 @@ namespace IprcSetup2
         internal const string SharedBluetoothMarkerKey = @"SOFTWARE\IPRC1000VoiceHub\Bluetooth";
         internal const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\IPRC1000Adapter";
         internal const string DoubaoUrl = "https://shurufa.doubao.com/pc";
+        /// <summary>微信输入法官网（PC 版语音输入 = 长按 Ctrl+Win，快捷键全局生效）</summary>
+        internal const string WeixinImeUrl = "https://z.weixin.qq.com/";
         internal const string CableUrl = "https://vb-audio.com/Cable/";
         internal static string Version
         {

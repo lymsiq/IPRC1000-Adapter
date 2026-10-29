@@ -378,7 +378,8 @@ SRC_REQUIRED = [
     ("自检断言「开模式不发移动注入」", "iprc1000_gui_dotnet/MouseEngine.cs", "开启鼠标模式不发出任何移动注入"),
     ("自检断言「松开后不再注入」", "iprc1000_gui_dotnet/MouseEngine.cs", "松开后引擎立即停止注入"),
     ("校准区光点=光标真实位置", "iprc1000_gui_dotnet/ui/app.js", "(d.x - d.vx)"),
-    ("界面取数用 mouseSample", "iprc1000_gui_dotnet/MainForm.cs", "\"mouseSample\""),
+    # 2026-10-29：命令分发已从 MainForm 搬到 Backend.Dispatch，断言跟着搬
+    ("界面取数用 mouseSample", "iprc1000_gui_dotnet/Backend.cs", "\"mouseSample\""),
     # 诊断盲区：这三个"静默降级"以前完全查不出来
     ("注入开关变化会留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "InjectEnabled"),
     ("虚拟 HID 失败会留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "虚拟 HID 下发失败"),

@@ -112,6 +112,13 @@ internal static class Settings
         set { _data.KeepEventLog = value; Save(); Safe.NotesEnabled = value; }
     }
 
+    /// <summary>语音输入法档位（doubao / wechat / custom）。见 IPRC1000Adapter.Backend.SetImeProfile。</summary>
+    public static string ImeProfile
+    {
+        get => _data.ImeProfile;
+        set { _data.ImeProfile = value; Save(); }
+    }
+
     public static int ClickSearchScope
     {
         get => _data.ClickSearchScope is >= 0 and <= 2 ? _data.ClickSearchScope : 1;
@@ -278,6 +285,15 @@ internal static class Settings
         /// 关掉它 = **完全不写任何日志**（用户明确要求"不做日志记录"时用）。
         /// </summary>
         public bool KeepEventLog { get; set; } = true;
+
+        /// <summary>
+        /// 语音输入法档位：决定「语音键」按下时注入什么。
+        ///   doubao → 右 Alt（豆包默认长按右 Alt 说话）
+        ///   wechat → Ctrl + Win（微信输入法默认长按 Ctrl+Win；快捷键全局生效，不必切默认输入法）
+        ///   custom → 不动映射，用户自己在按键页配
+        /// 2026-10-29 增加：原来写死右 Alt，只适配豆包。
+        /// </summary>
+        public string ImeProfile { get; set; } = "doubao";
 
         /// <summary>
         /// 截图点击的**搜索范围**：

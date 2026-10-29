@@ -378,8 +378,13 @@
           <label class="switch" id="logSwitch"><input type="checkbox" id="logToggle">写入诊断日志<i>排查用，默认关闭</i></label>
           <!-- 第二级：事件日志（每天几 KB）。关掉它 = 完全不写任何日志。 -->
           <label class="switch" id="noteSwitch"><input type="checkbox" id="noteToggle">记录事件日志<i>按键/释放等归因，每天几 KB；关掉即完全不记录</i></label>
+          <!-- 语音输入法：三档互斥。切换会把「语音」键的映射改成该输入法要求的组合键 -->
+          <label class="switch" id="imeDoubao"><input type="checkbox" id="imeDoubaoCB">豆包输入法<i>长按右 Alt 说话（默认）</i></label>
+          <label class="switch" id="imeWechat"><input type="checkbox" id="imeWechatCB">微信输入法<i>长按 Ctrl+Win；快捷键全局生效，无需换默认输入法</i></label>
+          <label class="switch" id="imeCustom"><input type="checkbox" id="imeCustomCB">自定义<i>自己在「按键映射」里设语音键</i></label>
         </div>
         <div class="note" id="logNote"></div>
+        <div class="note" id="imeNote"></div>
         <details class="adv">
           <summary>更多选项：测试注入 · 导出驱动手动安装</summary>
           <div class="panel-actions">

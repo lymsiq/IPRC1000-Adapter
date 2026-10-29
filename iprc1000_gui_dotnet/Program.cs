@@ -55,7 +55,10 @@ internal static class Program
         if (args.Length > 0 && args[0] == "--pipe-test")
         {
             var method = args.Length > 1 ? args[1] : "getState";
-            Console.WriteLine(ServiceClient.Call(method) is var r && r.Length > 200 ? r[..200] + "…" : r);
+            var pa0 = args.Length > 2 ? args[2] : "";
+            var pa1 = args.Length > 3 ? args[3] : "";
+            // 输出**全文**（截断过会导致外部脚本解析失败；需要精简请自行 head -c）
+            Console.WriteLine(ServiceClient.Call(method, pa0, pa1));
             return;
         }
 

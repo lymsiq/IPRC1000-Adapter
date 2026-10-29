@@ -786,6 +786,8 @@ internal sealed class Backend : IDisposable
             ["remoteKb"] = Env.RemoteKb().ToString(),   // Absent / Keyboard / NotKeyboard
             ["heldNow"] = KeyFilter.HeldKeysNow(),
             ["keepEventLog"] = Settings.KeepEventLog,
+            ["imeProfile"] = Settings.ImeProfile,
+            ["imeVoice"] = Keys.FormatSymbols(Keymaps.Get("voice") ?? Array.Empty<int>()),
             ["clickMinScore"] = Settings.ClickMinScore,
             ["clickSearchScope"] = Settings.ClickSearchScope,
             ["clickReturnToOrigin"] = Settings.ClickReturnToOrigin,
@@ -1408,6 +1410,57 @@ internal sealed class Backend : IDisposable
         }
     }
 
+    /// <summary>
+    /// 切换**语音输入法档位**：把「语音键」的映射改成该输入法要求的组合键。
+    ///
+    ///   豆包：长按 **右 Alt**（VK_RMENU = 0xA5）
+    ///   微信输入法：长按 **Ctrl+Win**（0x11 + 0x5B）—— 官方快捷键**全局生效**，
+    ///               不需要把默认输入法切换成微信输入法
+    ///   自定义：不改映射
+    ///
+    /// 只在"当前映射还是某个档位的默认值"时才自动改写 —— 用户手工改过就不动。
+    /// </summary>
+    public string SetImeProfile(string? p)
+    {
+        var profile = (p ?? "").Trim().ToLowerInvariant();
+        if (profile is not ("doubao" or "wechat" or "custom"))
+            return Env.Json(new { ok = false, message = $"未知输入法：{p}" });
+
+        var doubao = new[] { 0xA5 };
+        var wechat = new[] { 0x11, 0x5B };
+        var target = profile switch { "doubao" => doubao, "wechat" => wechat, _ => Array.Empty<int>() };
+        var cur = Keymaps.Get("voice") ?? Array.Empty<int>();
+        var curShown = Keys.FormatSymbols(cur);
+        var isPreset = cur.Length == 0 || cur.SequenceEqual(doubao) || cur.SequenceEqual(wechat);
+
+        if (profile != "custom" && !isPreset)
+        {
+            Settings.ImeProfile = profile;
+            return Env.Json(new { ok = true, applied = false, imeProfile = profile, voiceNow = curShown,
+                message = $"已切换为「{ImeName(profile)}」，但「语音」当前是自定义映射（{curShown}），未改动。" });
+        }
+
+        if (profile != "custom")
+        {
+            try { _filter?.ClearHeld("切换输入法档位，先放掉按住的键"); } catch { }
+            Keymaps.Set("voice", target);
+        }
+        Settings.ImeProfile = profile;
+        return Env.Json(new { ok = true, applied = profile != "custom", imeProfile = profile,
+            voiceNow = Keys.FormatSymbols(Keymaps.Get("voice") ?? Array.Empty<int>()),
+            message = profile switch
+            {
+                "doubao" => "已切到豆包：语音键 = 长按右 Alt。",
+                "wechat" => "已切到微信输入法：语音键 = 长按 Ctrl+Win（全局生效，无需切换默认输入法）。另请在微信输入法设置里把「麦克风」选成 CABLE Output。",
+                _ => "已切到自定义：语音键映射不再自动改动。",
+            } });
+    }
+
+    private static string ImeName(string p) => p switch
+    {
+        "doubao" => "豆包输入法", "wechat" => "微信输入法", _ => "自定义"
+    };
+
     /// <summary>事件日志开关（errors.log 的 VOICE/CLEARHELD 等）。关掉 = 完全不写日志。</summary>
     public string SetKeepEventLog(string? on)
     {
@@ -1626,6 +1679,7 @@ internal sealed class Backend : IDisposable
             "setStartMinimized" => SetStartMinimized(a0),
             "setLog" => SetLog(a0),
             "setKeepEventLog" => SetKeepEventLog(a0),
+            "setImeProfile" => SetImeProfile(a0),
             "setAutoSwitchDriver" => SetAutoSwitchDriver(a0),
             "setAutoKeepMic" => SetAutoKeepMic(a0),
             "checkCaptureDevice" => CheckCaptureDevice(),
