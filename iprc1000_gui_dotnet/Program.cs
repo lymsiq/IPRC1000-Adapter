@@ -51,6 +51,30 @@ internal static class Program
             return;
         }
 
+        // 时序对比：Raw Input 与 LL 钩子，谁先看到同一个 m？（决定"靠设备归因彻底解决"是否可行）
+        if (args.Length > 0 && args[0] == "--order-test")
+        {
+            GhostGuard.Enabled = true; GhostGuard.Start();
+            KeySourceDiag.Start();
+            if (!GhostGuard.Running || !KeySourceDiag.Running) { Console.WriteLine("组件未就绪"); return; }
+            if (!WinUhidInjector.EnsureReady()) { Console.WriteLine("WinUHid 未就绪（先停掉正在运行的应用）"); return; }
+            Console.WriteLine("注入 5 个真实 HID 的 m，对比两者时刻……");
+            for (var i = 0; i < 5; i++)
+            {
+                GhostGuard.LastHookMAt = 0; KeySourceDiag.LastRawMAt = 0;
+                try { WinUhidInjector.Send(new[] { 0x4D }); } catch { }
+                Thread.Sleep(30);
+                try { WinUhidInjector.Send(Array.Empty<int>()); } catch { }
+                Thread.Sleep(200);
+                var hook = GhostGuard.LastHookMAt; var raw = KeySourceDiag.LastRawMAt;
+                var delta = (hook != 0 && raw != 0) ? (hook - raw) : long.MinValue;
+                var who = delta == long.MinValue ? "（一侧没收到）"
+                        : delta > 0 ? $"钩子晚 {delta} ms" : $"Raw 晚 {-delta} ms";
+                Console.WriteLine($"  第{i + 1}次: hook={hook} raw={raw} → {who}");
+            }
+            return;
+        }
+
         // 键源归因：旁听 N 秒，按设备列出谁在发键（--raw-input [秒]）
         if (args.Length > 0 && args[0] == "--raw-input")
         {

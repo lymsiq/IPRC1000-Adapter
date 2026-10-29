@@ -97,6 +97,9 @@ internal static class KeySourceDiag
 
     public static bool Running => _hwnd != IntPtr.Zero;
 
+    /// <summary>最近一次从**真实设备**收到 m 的时刻（TickCount64）。用于对比 Raw Input 与 LL 钩子的先后。</summary>
+    public static long LastRawMAt;
+
     public static void Start(int timeoutMs = 1500)
     {
         if (_hwnd != IntPtr.Zero) return;
@@ -167,6 +170,7 @@ internal static class KeySourceDiag
             // 只统计**按下**：RI_KEY_BREAK(0x01) = 弹起；VKey 0 = 占位假键
             if (kb.VKey == 0 || (kb.Flags & 0x01) != 0) return;
 
+            if (kb.VKey == 0x4D) LastRawMAt = Environment.TickCount64;
             var name = DeviceName(hdr.hDevice);
             lock (_lock)
             {

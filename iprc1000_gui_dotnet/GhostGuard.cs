@@ -157,6 +157,8 @@ internal static class GhostGuard
     //   为什么加"活跃窗口"：否则**每个 m 都延迟 60ms**，拼音输入会明显发黏。
     public static volatile bool HoldFirstKey;          // 开关（默认关，可由用户打开）
     public static long Replayed;                        // 补发次数（可观测）
+    /// <summary>最近一次**钩子**看到 m 的时刻（对比 Raw Input 用）</summary>
+    public static long LastHookMAt;
 
     private const int RemoteActiveMs = 8000;            // 遥控器活跃窗口：8 秒
     private const int HoldMs = 60;                      // 先吞多久
@@ -319,6 +321,7 @@ internal static class GhostGuard
                     if (info.vkCode == VK_M)
                     {
                         var now = Environment.TickCount64;
+                        LastHookMAt = now;
 
                         // ★★★ 结构说明（2026-10-29 第二次修）：
                         //   必须先做"连发判定 / 过期判定"，最后才决定吞不吞。
