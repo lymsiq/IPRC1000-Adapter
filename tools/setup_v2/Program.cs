@@ -61,6 +61,8 @@ namespace IprcSetup2
         private readonly Label _phase = new Label(), _result = new Label();
         private readonly ProgressBar _progress = new ProgressBar();
         private readonly LinkLabel _detailsLink = new LinkLabel(), _logLink = new LinkLabel();
+        // 2026-10-29：维护入口 —— 修复安装 / 复制诊断（复用驱动脚本已验证的 -Force 与 -Mode Status）
+        private readonly LinkLabel _repairLink = new LinkLabel(), _diagLink = new LinkLabel();
         private readonly Panel _resultPanel = new Panel();
         private static readonly Color Ink = Color.FromArgb(27, 48, 76);
         private static readonly Color Muted = Color.FromArgb(94, 115, 137);
@@ -143,6 +145,18 @@ namespace IprcSetup2
             _open.Click += (s, e) => OpenApplication();
             _resultPanel.Controls.AddRange(new Control[] { _phase, _result, _open });
             Controls.Add(_resultPanel);
+
+            // 维护入口：始终可见（装坏了也能自救）
+            _repairLink.Text = "修复安装";
+            _repairLink.Bounds = new Rectangle(330, 662, 90, 22);
+            _repairLink.LinkColor = Muted;
+            _repairLink.LinkClicked += async (s, e) => await RepairAsync();
+            Controls.Add(_repairLink);
+            _diagLink.Text = "复制诊断";
+            _diagLink.Bounds = new Rectangle(432, 662, 90, 22);
+            _diagLink.LinkColor = Muted;
+            _diagLink.LinkClicked += (s, e) => CopyDiagnostics();
+            Controls.Add(_diagLink);
 
             _detailsLink.Text = "展开故障详情";
             _detailsLink.Bounds = new Rectangle(30, 662, 150, 22);
@@ -251,6 +265,71 @@ namespace IprcSetup2
             }
             finally { _running = false; _install.Enabled = _browse.Enabled = true; }
         }
+        /// <summary>修复安装：重建虚拟键盘驱动（-Force 会先清旧节点，这是"重装修不好"的解药）。</summary>
+        private async Task RepairAsync()
+        {
+            if (_running) return;
+            if (_engine == null) { _phase.Text = "请先完成一次安装"; return; }
+            _running = true;
+            _repairLink.Enabled = _diagLink.Enabled = _install.Enabled = _browse.Enabled = false;
+            _phase.ForeColor = Ink;
+            _phase.Text = "正在修复虚拟键盘驱动（会清空旧节点后重建）…";
+            _result.Text = "期间请勿关闭本窗口。";
+            try
+            {
+                var (ok, reboot, text) = await Task.Run(() => _engine.RepairWinUhid());
+                _phase.Text = reboot ? "已修复，需要重启计算机后生效" : (ok ? "修复完成" : "修复未成功");
+                _phase.ForeColor = ok ? Color.FromArgb(17, 121, 103) : Color.FromArgb(155, 101, 39);
+                _result.Text = ok
+                    ? "可以直接点「打开 IPRC1000」验证；若提示未就绪，请重启后再试。"
+                    : "请点「复制诊断」把信息发给我们，便于定位。";
+                _details.Text = text;
+                _detailsLink.Visible = true;
+                _logLink.Visible = _engine != null && File.Exists(_engine.LogPath);
+            }
+            catch (Exception error)
+            {
+                _phase.Text = "修复未完成";
+                _phase.ForeColor = Color.FromArgb(155, 101, 39);
+                _result.Text = error.Message;
+                _details.Text = error.Message;
+                _detailsLink.Visible = true;
+            }
+            finally
+            {
+                _running = false;
+                _repairLink.Enabled = _diagLink.Enabled = _install.Enabled = _browse.Enabled = true;
+            }
+        }
+
+        /// <summary>复制诊断：跑只读的 -Mode Status，复制到剪贴板并落盘到桌面。</summary>
+        private void CopyDiagnostics()
+        {
+            if (_engine == null) { _phase.Text = "请先完成一次安装"; return; }
+            try
+            {
+                var (ok, text, path) = _engine.CollectDiagnostics();
+                var copied = false;
+                try { Clipboard.SetText(text); copied = true; } catch { }
+                _phase.ForeColor = ok ? Color.FromArgb(17, 121, 103) : Color.FromArgb(155, 101, 39);
+                _phase.Text = copied ? "诊断信息已复制到剪贴板" : "诊断已生成（剪贴板不可用）";
+                _result.Text = path.Length > 0
+                    ? "同时已保存到桌面：" + Path.GetFileName(path) + "\n直接把内容发给我们即可。"
+                    : "未能写入桌面文件，可从下方「展开故障详情」里复制。";
+                _details.Text = text;
+                _details.Visible = true;
+                _detailsLink.Visible = true;
+            }
+            catch (Exception error)
+            {
+                _phase.Text = "诊断采集失败";
+                _phase.ForeColor = Color.FromArgb(155, 101, 39);
+                _result.Text = error.Message;
+                _details.Text = error.Message;
+                _detailsLink.Visible = true;
+            }
+        }
+
         private void OnProgress(int progress, string message)
         {
             if (IsDisposed) return;

@@ -347,6 +347,93 @@ namespace IprcSetup2
             return false;
         }
 
+        /// <summary>运行并**捕获输出**（同时仍写入安装日志）。用于"修复/诊断"这类要把结果给用户看的操作。</summary>
+        private (int code, string output) RunCapture(string file, string arguments)
+        {
+            var sb = new System.Text.StringBuilder();
+            var start = new ProcessStartInfo(file, arguments)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                WorkingDirectory = _target
+            };
+            using (var p = new Process { StartInfo = start })
+            {
+                p.OutputDataReceived += (s, e) => { if (e.Data != null) lock (sb) sb.AppendLine(e.Data); };
+                p.ErrorDataReceived += (s, e) => { if (e.Data != null) lock (sb) sb.AppendLine(e.Data); };
+                p.Start();
+                p.BeginOutputReadLine();
+                p.BeginErrorReadLine();
+                if (!p.WaitForExit(10 * 60 * 1000))
+                    throw new TimeoutException("操作超时（10 分钟）。");
+                p.WaitForExit();
+                var text = sb.ToString();
+                try { lock (this) File.AppendAllText(LogPath, text, Encoding.UTF8); } catch { }
+                return (p.ExitCode, text);
+            }
+        }
+
+        private static string Tail(string text, int lines)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return "";
+            var all = text.Replace("\r\n", "\n").Split('\n');
+            var take = all.Skip(Math.Max(0, all.Length - lines)).Where(x => x.Trim().Length > 0);
+            return string.Join("\n", take);
+        }
+
+        private string WinUhidScript()
+        {
+            var folder = Path.Combine(_target, "assets", "winuhid");
+            var script = Path.Combine(folder, "install-winuhid.ps1");
+            if (!File.Exists(script))
+                throw new FileNotFoundException("安装目录不完整：找不到 assets\\winuhid\\install-winuhid.ps1");
+            return script;
+        }
+
+        /// <summary>
+        /// **修复安装**：复用驱动脚本的 -Force（清空所有 WinUHid 节点 → 重导证书 → 重建唯一节点）。
+        /// 之所以能"修"，是因为脚本里先删节点再注册；不 -Force 时坏节点会让注册被跳过 ——
+        /// 那正是"重装也修不好"的根因。
+        /// </summary>
+        public (bool ok, bool reboot, string text) RepairWinUhid()
+        {
+            var script = WinUhidScript();
+            Report(66, "修复：重建虚拟键盘驱动（会清空旧节点）");
+            var (code, output) = RunCapture("powershell.exe",
+                "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + script + "\" -Mode InstallElevated -Force");
+            var reboot = code == 3010;
+            var ok = code == 0 || reboot;
+            var head = ok
+                ? (reboot ? "驱动已重建，需要重启后生效。" : "驱动已重建并通过检查。")
+                : "修复未成功（退出码 " + code + "）。请点「复制诊断」把信息发给我们。";
+            return (ok, reboot, head + (string.IsNullOrWhiteSpace(output) ? "" : "\n\n" + Tail(output, 10)));
+        }
+
+        /// <summary>
+        /// **采集诊断**：跑只读的 -Mode Status，写成 txt 并返回文本（调用方负责复制到剪贴板）。
+        /// </summary>
+        public (bool ok, string text, string path) CollectDiagnostics()
+        {
+            var script = WinUhidScript();
+            Report(66, "采集诊断信息（只读，不改系统）");
+            var (code, output) = RunCapture("powershell.exe",
+                "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + script + "\" -Mode Status");
+            var body = new System.Text.StringBuilder();
+            body.AppendLine("IPRC1000 Adapter — 诊断报告");
+            body.AppendLine("时间: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            body.AppendLine("安装目录: " + _target);
+            body.AppendLine("Windows: " + Environment.OSVersion.VersionString);
+            body.AppendLine("退出码: " + code);
+            body.AppendLine(new string('-', 60));
+            body.AppendLine(string.IsNullOrWhiteSpace(output) ? "(脚本无输出)" : output.Trim());
+            var dir = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            var path = Path.Combine(dir, "IPRC1000-diag-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".txt");
+            try { File.WriteAllText(path, body.ToString(), new UTF8Encoding(true)); } catch { path = ""; }
+            return (code == 0, body.ToString(), path);
+        }
+
         private int RunProcess(string file, string arguments, bool visible)
         {
             var start = new ProcessStartInfo(file, arguments) { UseShellExecute = false, CreateNoWindow = !visible, WorkingDirectory = Path.IsPathRooted(file) ? Path.GetDirectoryName(file) : _target };
