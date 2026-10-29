@@ -198,11 +198,45 @@ namespace IprcSetup2
             imeCard.Controls.Add(Label("装完会自动把遥控器「语音键」映射成对应组合键；以后也能在应用里改。", 20, 30, 730, 18, 8.5F, Muted));
             Controls.Add(imeCard);
 
-            _install.Text = "立即安装";
+            // ★★ 2026-10-29 真机问题：`--uninstall` 时**页面还是安装页**（按钮写着「立即安装」），
+            //   只靠一个 MessageBox 确认；用户点「否」（还被设成默认）就什么都不发生，
+            //   点「立即安装」则变成**重装** ⇒ 表现就是"卸载点了没用、文件还在"。
+            //   现在卸载/恢复模式**把页面本身改成确认页**，确认动作就是这个醒目按钮。
+            var isUninstall = uninstall;
+            var isRestore = restore;
+            _install.Text = isUninstall ? "确认卸载" : isRestore ? "确认恢复配置" : "立即安装";
             _install.Bounds = new Rectangle(30, 481, 764, 49);
             StyleButton(_install, true);
             _install.Font = new Font("Microsoft YaHei UI", 11F, FontStyle.Bold);
-            _install.Click += async (s, e) => await RunWork("install");
+            _install.Click += async (s, e) =>
+                await RunWork(isUninstall ? "uninstall" : isRestore ? "restore" : "install");
+
+            if (isUninstall || isRestore)
+            {
+                // 卸载页不需要"装到哪""选输入法""搭配输入法"，只留一个明确的确认动作
+                location.Visible = false;
+                imeCard.Visible = false;
+                help.Visible = false;
+                Text = Product.DisplayName + (isUninstall ? " · 卸载" : " · 恢复配置");
+                // 三张卡都隐藏后中间会空出一大块 —— 把主按钮与说明重排成"确认页"版式，
+                // 否则用户看到的是"上面一块空白 + 下面一段字"，像页面没加载完。
+                // ★ 必须在 Load 里重排：_phase / _result 是**本段之后**才创建的，
+                //   在这里直接设 Bounds 会被它们自己的创建代码覆盖（实测：文字仍在底部）。
+                Load += (_, _) =>
+                {
+                    _install.Bounds = new Rectangle(30, 210, 764, 56);
+                    // ★ 说明文字在 _resultPanel 容器里，而**容器默认隐藏**（要等操作开始才显示）。
+                    //   只设 _phase/_result 的 Visible 没用（实测截图仍是空的）—— 必须显示并移动容器。
+                    _resultPanel.Visible = true;
+                    _resultPanel.Bounds = new Rectangle(30, 292, 764, 190);
+                };
+                _phase.Text = isUninstall ? "卸载主程序" : "恢复安装前的蓝牙配置";
+                _result.Text = isUninstall
+                    ? "会删除程序文件并移除「应用和功能」里的条目；\n用户设置、按键映射、共享驱动（虚拟键盘/虚拟声卡）都会保留。\n\n确认无误请点下面的「确认卸载」。"
+                    : "会把蓝牙相关的注册表项恢复成安装前的值，恢复后需要重启。\n\n确认无误请点下面的「确认恢复配置」。";
+                _result.ForeColor = Color.FromArgb(155, 101, 39);
+                _install.Text = isUninstall ? "确认卸载（程序文件将被删除）" : "确认恢复配置";
+            }
             Controls.Add(_install);
             _progress.Bounds = new Rectangle(31, 542, 762, 6);
             _progress.Visible = false;
@@ -255,17 +289,8 @@ namespace IprcSetup2
             FormClosing += (s, e) => { if (_running) e.Cancel = true; };
             Shown += async (s, e) =>
             {
-                if (uninstall || restore)
-                {
-                    var action = uninstall ? "卸载主程序，保留用户数据和共享组件？" : "恢复安装前的蓝牙配置？恢复后需要重启。";
-                    // ★ 2026-10-29：原来用无 owner 的重载，确认框可能被主窗口盖住 ——
-                    //   用户点"卸载"后看不到任何反应，就以为"无法卸载"。这里指定 owner。
-                    if (MessageBox.Show(this, action, Product.DisplayName,
-                            MessageBoxButtons.YesNo, MessageBoxIcon.Question,
-                            MessageBoxDefaultButton.Button2) == DialogResult.Yes)
-                        await RunWork(uninstall ? "uninstall" : "restore");
-                }
-                else if (resume)
+                // 卸载/恢复：确认已改成页面内的醒目按钮（见 ctor），这里不再弹 MessageBox。
+                if (resume)
                 {
                     await RunWork("resume");
                     if (_engine != null && _engine.State.ComponentsReady && _engine.State.DoubaoInstalled && !_engine.State.RestartRequired) OpenApplication();
