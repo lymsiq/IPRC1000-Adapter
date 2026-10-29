@@ -5,8 +5,8 @@ using System.Drawing.Drawing2D;
 using System.IO;
 using System.Reflection;
 using System.Threading.Tasks;
-using System.Text.Json;
-using System.Text.Json.Nodes;
+using System.Collections.Generic;
+using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 namespace IprcSetup2
@@ -303,19 +303,23 @@ namespace IprcSetup2
                                        "IPRC1000 Adapter");
                 Directory.CreateDirectory(dir);
                 var file = Path.Combine(dir, "settings.json");
-                JsonObject obj;
+
+                // 用 net48 自带的 JavaScriptSerializer（本项目没有 System.Text.Json）
+                var ser = new JavaScriptSerializer();
+                var map = new Dictionary<string, object>();
                 if (File.Exists(file))
                 {
-                    try { obj = JsonNode.Parse(File.ReadAllText(file)) as JsonObject ?? new JsonObject(); }
-                    catch { obj = new JsonObject(); }
+                    try
+                    {
+                        var parsed = ser.Deserialize<Dictionary<string, object>>(File.ReadAllText(file));
+                        if (parsed != null) map = parsed;
+                    }
+                    catch { /* 坏了就重建，只影响这两个键 */ }
                 }
-                else obj = new JsonObject();
 
-                obj["ImeProfile"] = _imeWechat.Checked ? "wechat" : "doubao";
-                obj["ImeAutoPicked"] = true;    // 安装时已经选过，启动时不要再自动改
-                File.WriteAllText(file,
-                    obj.ToJsonString(new JsonSerializerOptions { WriteIndented = true }),
-                    new System.Text.UTF8Encoding(true));
+                map["ImeProfile"] = _imeWechat.Checked ? "wechat" : "doubao";
+                map["ImeAutoPicked"] = true;    // 安装时已选过，启动时不要再自动改
+                File.WriteAllText(file, ser.Serialize(map), new System.Text.UTF8Encoding(true));
             }
             catch { /* 写不进去也不影响安装本身；应用里还能选 */ }
         }
