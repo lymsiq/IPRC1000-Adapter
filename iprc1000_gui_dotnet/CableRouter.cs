@@ -125,6 +125,23 @@ internal sealed class CableRouter : IDisposable
     /// 用户看到的现象就是**按住语音键立刻说话、第一个字识别不出来**。
     /// 现在把开声卡提前到按键时刻（音频还要 100~200 ms 才到），关键路径上就没有这段开销了。
     /// </summary>
+    /// <summary>
+    /// **丢弃当前声卡句柄**（2026-10-29）。下一轮循环的 EnsureSink 会重新枚举并重建。
+    ///
+    /// 用途：休眠唤醒 / 切换用户 / 远程桌面回来后，原来的 WasapiOut 句柄可能已失效
+    /// （表现为"有包但没声音"）。这类情况**只能关掉重建**，不能靠重试恢复。
+    /// </summary>
+    public void DropSink()
+    {
+        lock (_sinkLock)
+        {
+            try { _out?.Dispose(); } catch { }
+            _out = null;
+            _cable = null;
+            Error = null;
+        }
+    }
+
     public void WarmUp()
     {
         // ★ 幂等：同一次按下可能从**两条来源**各来一次（低级钩子 + ETW/RawInput），

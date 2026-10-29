@@ -446,6 +446,7 @@ internal sealed class Backend : IDisposable
         {
             // 端口已在构造函数里解析（见 Backend ctor），这里只保证后续读到的是一致值
             Env.ResolvePortsOnce();
+            HookSystemEvents();   // 唤醒/解锁后自动重建音频通道
 
             // 键源归因：旁听所有键盘事件（只读、不拦截）。出问题时一条命令就能看出"谁在发键"。
             try { KeySourceDiag.Start(); } catch { }
@@ -1680,6 +1681,44 @@ internal sealed class Backend : IDisposable
         DeviceLog((ok ? "✓ " : "★ ") + "驱动自愈：" + _lastRepair.msg);
     }
 
+    /// <summary>
+    /// **重建音频通道**（2026-10-29）：丢弃旧句柄 + 重新探测。
+    /// 触发场景：休眠唤醒、会话解锁、远程桌面回来、用户手动触发。
+    /// </summary>
+    public string RecoverAudio(string? why)
+    {
+        try { _router.DropSink(); } catch { }
+        _probeAt = DateTime.MinValue;
+        RefreshProbes(true);
+        Safe.Note($"重建音频通道（{why ?? "手动"}）");
+        return Env.Json(new { ok = true, message = "已重建音频通道", device = _router.Device });
+    }
+
+    /// <summary>
+    /// 订阅系统事件：唤醒 / 解锁后自动重建音频。
+    /// 为什么必须做：CABLE 端点在睡眠或会话切换后可能失效，而 **UDP 包照常到达**
+    /// （我们看着"有数据"），用户听到的却是静音 —— 这种"假正常"最难自查。
+    /// </summary>
+    private void HookSystemEvents()
+    {
+        try
+        {
+            Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) =>
+            {
+                if (e.Mode != Microsoft.Win32.PowerModes.Resume) return;
+                Safe.Note("系统唤醒 → 重建音频通道");
+                Task.Delay(1500).ContinueWith(_ => { try { RecoverAudio("系统唤醒"); } catch { } });
+            };
+            Microsoft.Win32.SystemEvents.SessionSwitch += (_, e) =>
+            {
+                if (e.Reason != Microsoft.Win32.SessionSwitchReason.SessionUnlock) return;
+                Safe.Note("会话解锁 → 重建音频通道");
+                Task.Delay(800).ContinueWith(_ => { try { RecoverAudio("会话解锁"); } catch { } });
+            };
+        }
+        catch (Exception e) { Safe.Note("系统事件订阅失败（不影响主功能）：" + e.Message); }
+    }
+
     /// <summary>键源归因报告：`rawInput` / `rawInput reset`</summary>
     private static string RawInputReport(string? arg)
     {
@@ -1970,6 +2009,7 @@ internal sealed class Backend : IDisposable
             "setZeroGhost" => SetZeroGhost(a0),
             // 键源归因：返回"哪个设备发了什么键"。调试用，界面上没有入口。
             "rawInput" => RawInputReport(a0),
+            "recoverAudio" => RecoverAudio(a0),
             "repairDriver" => RepairDriver(a0),
             "exportDriverDiag" => ExportDriverDiag(),
             "setAutoSwitchDriver" => SetAutoSwitchDriver(a0),

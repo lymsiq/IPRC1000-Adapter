@@ -41,6 +41,26 @@ namespace IprcSetup2
                 }
                 var di = Array.IndexOf(args, "--dir");
                 var target = di >= 0 && di + 1 < args.Length ? args[di + 1] : defaultDirectory;
+                // ── 静默安装（企业批量部署用）：`/S` 或 `--silent` ──────────────
+                //   无界面、无 UAC（清单已要求提权）、退出码：0 成功 / 3010 需重启 / 1 失败。
+                if (Array.IndexOf(args, "--silent") >= 0 || Array.IndexOf(args, "/S") >= 0)
+                {
+                    try
+                    {
+                        var engine = new InstallEngine(target, null);
+                        var st = engine.Install(new InstallOptions());
+                        Console.WriteLine("[silent] 安装目录：" + st.InstallDir);
+                        Console.WriteLine("[silent] 版本：" + st.Version + " 组件就绪：" + st.ComponentsReady);
+                        Console.WriteLine("[silent] 日志：" + engine.LogPath);
+                        return st.RestartRequired ? 3010 : (st.ComponentsReady ? 0 : 1);
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine("[silent] 失败：" + e.Message);
+                        return 1;
+                    }
+                }
+
                 using (var form = new InstallForm(target, Array.IndexOf(args, "--resume") >= 0,
                     Array.IndexOf(args, "--uninstall") >= 0, Array.IndexOf(args, "--restore-registry") >= 0))
                     Application.Run(form);
@@ -103,6 +123,26 @@ namespace IprcSetup2
 
             var location = Card(30, 166, 764, 103);
             location.Controls.Add(Label("安装位置", 20, 14, 500, 23, 10F, Ink, true));
+            // 升级还是全新安装，一眼可见（2026-10-29）
+            var installedVersion = "";
+            try
+            {
+                var existingExe = Path.Combine(_target, "IPRC1000 Adapter.exe");
+                if (File.Exists(existingExe))
+                {
+                    var vi = System.Diagnostics.FileVersionInfo.GetVersionInfo(existingExe);
+                    // 优先 ProductVersion（带发布号）；FileVersion 在老包里可能是 1.2.0.0
+                    installedVersion = (vi.ProductVersion ?? "").Split('+')[0].Trim();
+                    if (string.IsNullOrEmpty(installedVersion)) installedVersion = vi.FileVersion ?? "";
+                }
+            }
+            catch { }
+            var versionHint = string.IsNullOrEmpty(installedVersion)
+                ? $"全新安装 · 目标版本 {Product.Version}"
+                : (installedVersion.StartsWith(Product.Version)
+                    ? $"已安装 {installedVersion}（同版本，将覆盖修复）"
+                    : $"检测到已安装 {installedVersion} → 将升级到 {Product.Version}");
+            location.Controls.Add(Label(versionHint, 20, 78, 720, 20, 9F, Muted));
             _path.Bounds = new Rectangle(22, 48, 602, 28);
             _path.ReadOnly = true;
             _path.TabStop = false;
