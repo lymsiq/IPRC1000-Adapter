@@ -145,70 +145,6 @@ internal static class Settings
         set { _data.WizardStep = value; Save(); }
     }
 
-    /// <summary>选中的本地 ASR 模型 id。</summary>
-    public static string AsrModel
-    {
-        get => _data.AsrModel ?? "";
-        set { _data.AsrModel = value; Save(); }
-    }
-
-    /// <summary>
-    /// 本地识别快捷键（VK 码）。0 = 关闭快捷键。
-    ///
-    /// ★ 这里带一次性迁移：老配置里写的是 0x56(V) —— 改代码默认值**对已存在的
-    ///   settings.json 无效**（这是踩过的坑：改完默认值，界面还显示旧键）。
-    ///   只迁一次，之后用户自己改过就不再覆盖。
-    /// </summary>
-    public static int AsrHotkeyVk
-    {
-        get
-        {
-            if (!_data.AsrHotkeyMigrated)
-            {
-                _data.AsrHotkeyMigrated = true;
-                if (_data.AsrHotkeyVk == 0x56) _data.AsrHotkeyVk = 0x58;   // V → X
-                Save();
-            }
-            return _data.AsrHotkeyVk;
-        }
-        set { _data.AsrHotkeyVk = value; _data.AsrHotkeyMigrated = true; Save(); }
-    }
-
-    /// <summary>规则层润色开关。</summary>
-    public static bool PolishRules
-    {
-        get => _data.PolishRules;
-        set { _data.PolishRules = value; Save(); }
-    }
-
-    /// <summary>本地识别总开关。</summary>
-    public static bool AsrEnabled
-    {
-        get => _data.AsrEnabled;
-        set { _data.AsrEnabled = value; Save(); }
-    }
-
-    /// <summary>识别框架（目前只有内置 haolive）。</summary>
-    public static string AsrFramework
-    {
-        get => string.IsNullOrEmpty(_data.AsrFramework) ? "haolive" : _data.AsrFramework;
-        set { _data.AsrFramework = value; Save(); }
-    }
-
-    /// <summary>识别通道：hotkey / asr。</summary>
-    public static string AsrMode
-    {
-        get => string.IsNullOrEmpty(_data.AsrMode) ? "hotkey" : _data.AsrMode;
-        set { _data.AsrMode = value; Save(); }
-    }
-
-    /// <summary>本地引擎计算后端：cpu / vulkan。</summary>
-    public static string AsrBackend
-    {
-        get => string.IsNullOrEmpty(_data.AsrBackend) ? "cpu" : _data.AsrBackend;
-        set { _data.AsrBackend = value; Save(); }
-    }
-
     /// <summary>语音输入法档位（doubao / wechat / custom）。见 IPRC1000Adapter.Backend.SetImeProfile。</summary>
     public static string ImeProfile
     {
@@ -406,30 +342,6 @@ internal static class Settings
 
         /// <summary>向导当前进行到第几步（0 基），支持中途退出后续做。</summary>
         public int WizardStep { get; set; }
-
-        /// <summary>选中的本地 ASR 模型 id（空 = 未选）。见 Backend.AsrModels。</summary>
-        public string AsrModel { get; set; } = "";
-
-        /// <summary>本地识别的快捷键（VK 码）。默认 V = 0x56，配 Ctrl+Alt 使用。</summary>
-        public int AsrHotkeyVk { get; set; } = 0x58;   // X（原 V）
-
-        /// <summary>快捷键迁移标记：老配置里存的是 V(0x56)，只迁一次，之后用户改了就不再动。</summary>
-        public bool AsrHotkeyMigrated { get; set; }
-
-        /// <summary>规则层润色（去填充词/重复字/标点规整）。默认开。</summary>
-        public bool PolishRules { get; set; } = true;
-
-        /// <summary>本地识别**总开关**。关掉 = 完全不介入（等价于原来的"交给输入法"）。</summary>
-        public bool AsrEnabled { get; set; }
-
-        /// <summary>识别框架：haolive（内置本地引擎）。将来可加 cloud（云端 API）。</summary>
-        public string AsrFramework { get; set; } = "haolive";
-
-        /// <summary>识别通道：hotkey = 交给输入法（豆包/微信）；asr = 本地引擎。默认 hotkey。</summary>
-        public string AsrMode { get; set; } = "hotkey";
-
-        /// <summary>本地引擎计算后端：cpu / vulkan。默认 cpu（随包只有 CPU 版）。</summary>
-        public string AsrBackend { get; set; } = "cpu";
 
         /// <summary>
         /// **无驱动（降级）模式**：不把遥控器切成普通 HID，而是保持键盘 +

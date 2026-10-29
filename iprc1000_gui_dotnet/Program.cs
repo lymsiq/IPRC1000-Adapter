@@ -75,46 +75,6 @@ internal static class Program
             return;
         }
 
-        AsrHotkey.Sync();   // 启动就把快捷键钩子挂好（总开关开着才有用）
-
-        // 规则润色自检（--polish-test）：不需要模型/遥控器，直接看"原文 → 润色后"
-        if (args.Length > 0 && args[0] == "--polish-test")
-        {
-            var cases = new[]
-            {
-                "嗯，那个，我觉得这个方案应该是可以的啊。",
-                "然后我们然后把这个然后改一下",
-                "我我我觉得就是就是说这个不行",
-                "这个遥控器的语音识别效果怎么样",
-                "把代码改成异步加载,记得加注释",
-            };
-            foreach (var c in cases)
-                Console.WriteLine("  原文：" + c + Environment.NewLine + "  润色：" + TextPolish.Apply(c) + Environment.NewLine);
-            return;
-        }
-
-        // 悬浮框外观自检（--overlay-test [秒]）：不需要遥控器/模型，纯粹看渲染与位置
-        if (args.Length > 0 && args[0] == "--overlay-test")
-        {
-            var sec = args.Length > 1 && int.TryParse(args[1], out var s0) ? Math.Clamp(s0, 2, 30) : 8;
-            AsrOverlay.Show("正在听…");
-            // 造一段假波形，让截图能看到柱状起伏
-            var rnd = new Random(7);
-            var t0 = DateTime.UtcNow;
-            for (var i = 0; i < sec * 25; i++)
-            {
-                AsrCapture.DebugFeedLevel((float)(0.25 + 0.6 * rnd.NextDouble()));
-                if (i == sec * 8) AsrOverlay.ShowPartial("今天下午三点在会议室开会");   // 未定稿：带下划线
-                if (i == sec * 12) AsrOverlay.Recognizing();
-                Application.DoEvents();
-                Thread.Sleep(40);
-            }
-            AsrOverlay.ShowResult("这是识别结果：今天下午三点在会议室开会");
-            for (var i = 0; i < 50; i++) { Application.DoEvents(); Thread.Sleep(40); }
-            AsrOverlay.Hide();
-            return;
-        }
-
         // 卸载前恢复设备驱动（2026-10-29）：把遥控器 HID 节点从 input.inf 改回 keyboard.inf。
         // 为什么由应用做而不是安装器：改设备驱动要靠 newdev.dll + 实际 HWID，
         // 这套逻辑在 Env.SetDeviceDriver 里已经验证过，重复实现风险更大。

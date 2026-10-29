@@ -227,7 +227,6 @@ internal sealed class CableRouter : IDisposable
         try
         {
             _jit!.AddSamples(buf, 0, buf.Length);
-                    AsrCapture.Feed(buf, 0, buf.Length);
             Log($"[TEST] 已向 CABLE Input 写入 {ms} ms 测试音（440Hz）");
             return $"已发送 {ms} 毫秒测试音（440Hz）。请在输入法/录音软件里选 CABLE Output，看电平是否跳动。";
         }
@@ -376,7 +375,7 @@ internal sealed class CableRouter : IDisposable
                             if (g >= 0 && g < 5000) _gaps.Add(g);
                         }
                         _lastPktMs = nowMs;
-                        if (ok) { _jit!.AddSamples(asm, 0, n); AsrCapture.Feed(asm, 0, n); }
+                        if (ok) _jit!.AddSamples(asm, 0, n);
                     }
                 }
             }

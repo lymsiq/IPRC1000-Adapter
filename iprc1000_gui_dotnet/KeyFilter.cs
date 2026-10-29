@@ -242,16 +242,6 @@ internal sealed class KeyFilter : IDisposable
     public static event Action? VoiceKeyDown;
 
     /// <summary>
-    /// 外部主动触发一次"语音键按下"的副作用（预热音频链）。
-    /// 快捷键（Ctrl+Alt+V）不是遥控器事件，但**音频会话必须被打开**，
-    /// 否则 CableRouter 不会把 PCM 送进缓冲 —— 表现就是"录到 0 字节"。
-    /// </summary>
-    public static void RaiseVoiceKeyDown()
-    {
-        try { VoiceKeyDown?.Invoke(); } catch { }
-    }
-
-    /// <summary>
     /// 按下绑定了动作值「切换配置组」的按键时触发（方块键的出厂值）。
     /// 由 <c>Backend</c> 接上：切到下一组 + 同步鼠标模式。
     /// 放在事件里而不是直接调 Keymaps 的原因：切组要顺带更新托盘提示与鼠标模式，
@@ -683,18 +673,6 @@ internal sealed class KeyFilter : IDisposable
         // 语音键是核心功能，它的每次按下/抬起都始终留痕（含按住时长），便于事后归因
         if (bid == "voice")
             Safe.Note($"VOICE {(pressed ? "DOWN" : "UP")}  来源={src}" + (holdMs >= 0 ? $"  按住 {holdMs:F0} ms" : ""));
-
-        // ★★ ASR 模式：语音键**只录音，不注入组合键**。
-        //   否则会同时唤起"输入法 + 本地引擎" → 双重录音、两份文字抢着上屏。
-        //   抖动对（<25ms）不当成一次说话，避免把半句话当成整句送去识别。
-        if (bid == "voice" && Settings.AsrEnabled && Settings.AsrMode == "asr")
-        {
-            AsrRun.VoiceGateHits++;
-            if (pressed) AsrRun.Begin();
-            else if (holdMs < 0 || holdMs >= DebounceMs) AsrRun.Schedule(VoiceTailMs + 40);
-            else Safe.Note("ASR 忽略抖动对（按住过短）");
-            return;   // 不注入、不走去抖/尾音窗口
-        }
 
         // ★★★ 语音键"抖动对"去抖（2026-10-19 全键抓包确认的真实报文形态）：
         //   遥控器在**按住开始**时会先发一个极短的 DOWN→UP（实测 3 / 18 / 34 ms），

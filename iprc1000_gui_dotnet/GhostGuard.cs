@@ -25,10 +25,6 @@ namespace Iprc1000Adapter;
 internal static class GhostGuard
 {
     private const int WH_KEYBOARD_LL = 13;
-    private const int VK_CONTROL = 0x11, VK_MENU = 0x12;
-    private const int WM_SYSKEYUP = 0x0105;
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern short GetAsyncKeyState(int vKey);
     private const int WM_KEYDOWN = 0x0100;
     private const int WM_KEYUP = 0x0101;
     private const int WM_SYSKEYDOWN = 0x0104;
@@ -447,7 +443,6 @@ internal static class GhostGuard
         {
             // m 弹起 ⇒ 键正常松开，连击计数归零（说明没卡住）
             if (nCode >= 0 && wParam.ToInt32() == WM_KEYUP) _swallowStreak = 0;
-
             if (nCode >= 0 && Enabled)
             {
                 // 安全阀：万一"松开"事件丢了（遥控器断连），15 秒后自动解除

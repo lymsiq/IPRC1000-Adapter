@@ -1022,100 +1022,7 @@ function renderEnv(s) {
 }
 
 /* ───────── 刷新 ───────── */
-// 本地 ASR（环境设置）：引擎状态 + 模型列表 + 下载/选择 + 语音快捷键
-// ★ 只能用项目里**确实存在**的原语：kvItem / setDot / .btn —— 上一版误用了
-//   不存在的 row() 和 .row/.sub 类，导致整块渲染抛错被 catch 吞掉，卡片全空。
-function renderAsr(s, a) {
-  const kv = $('#asrKv'), note = $('#asrNote'), list = $('#asrModels');
-  if (!kv || !a) return;
-  const engineOk = !!a.engineFound;
-  setDot('#d-asr', engineOk ? 'on' : 'err');
-
-  const ime = (s && s.imeProfile) || '';
-  const imeName = ime === 'doubao' ? '豆包输入法' : ime === 'wechat' ? '微信输入法' : (ime ? ime : '未选择');
-  const voiceMap = (s && s.mouseMode !== undefined) ? '' : '';
-
-  const mode = a.mode || 'hotkey';
-  const be = a.backend || 'cpu';
-  const gpuOk = !!a.gpuAvailable;
-  const chip = (txt, active, attr, val, disabled) =>
-    `<span class="chip${active ? ' on' : ''}${disabled ? ' off' : ''}" ${disabled ? '' : attr + '="' + val + '"'}`
-    + ` title="${disabled ? '当前引擎未编译该后端' : ''}">${txt}</span>`;
-
-  const en = !!a.enabled;
-  const dis = !en;   // 总开关关闭时，下面所有选择都灰掉
-  kv.innerHTML =
-    kvItem('本地识别', chip('已启用', en, 'data-asr-en', '1') + chip('已关闭', !en, 'data-asr-en', '0'), en ? 'ok' : '') +
-    kvItem('识别框架', (a.frameworks || []).map(f =>
-             chip(f.name, a.framework === f.id, 'data-asr-fw', f.id, !f.ready)).join(''), '') +
-    kvItem('识别引擎', (engineOk ? '已就位' : '未安装') +
-           (a.backends && a.backends.length ? ` · 后端 ${a.backends.join('/')}` : ''), engineOk ? 'ok' : 'bad') +
-    // ★ 通道 chip 一律可点：选「本地 ASR」会顺手打开总开关（点了没反应最糟）
-    kvItem('触发快捷键', a.hotkey ? ('<b>' + a.hotkey + '</b>（按住说话，可把遥控器语音键映射成它）') : '（未设置）', '') +
-    kvItem('语音快捷键', chip('交给输入法（' + imeName + '）', mode === 'hotkey' && en, 'data-asr-mode', 'hotkey')
-                       + chip('本地 ASR', mode === 'asr' && en, 'data-asr-mode', 'asr'), '') +
-    kvItem('计算后端', chip('CPU', be === 'cpu', 'data-asr-be', 'cpu', dis)
-                     + chip('GPU（Vulkan）', be === 'vulkan', 'data-asr-be', 'vulkan', dis || !gpuOk), '') +
-    kvItem('智能整理', chip('开（说完即整理）', !!a.polish, 'data-asr-polish', '1')
-                        + chip('关（保留原文）', !a.polish, 'data-asr-polish', '0'), '') +
-    kvItem('术语表', (a.terms || 0) + ' 条规则', '') +
-    kvItem('模型目录', (a.modelDir || '—').replace(/^.*\\asr\\/, '…\\asr\\'), '');
-
-  // 总开关 / 框架
-  $$('[data-asr-en]').forEach(el => {
-    el.onclick = async () => { const r = JSON.parse(await B.asrSetEnabled(el.dataset.asrEn)); toast(r.message, 7000); await refresh(); };
-  });
-  $$('[data-asr-polish]').forEach(el => {
-    el.onclick = async () => { const r = JSON.parse(await B.asrSetPolish(el.dataset.asrPolish)); toast(r.message, 5000); await refresh(); };
-  });
-  $$('[data-asr-fw]').forEach(el => {
-    el.onclick = async () => { const r = JSON.parse(await B.asrSetFramework(el.dataset.asrFw)); toast(r.message, 6000); await refresh(); };
-  });
-
-  // 通道 / 后端切换
-  $$('[data-asr-mode]').forEach(el => {
-    el.onclick = async () => { const r = JSON.parse(await B.asrSetMode(el.dataset.asrMode)); toast(r.message, 7000); await refresh(); };
-  });
-  $$('[data-asr-be]').forEach(el => {
-    el.onclick = async () => { const r = JSON.parse(await B.asrSetBackend(el.dataset.asrBe)); toast(r.message, 7000); await refresh(); };
-  });
-
-  if (note) {
-    note.className = 'note' + (engineOk ? '' : ' warn');
-    note.className = 'note' + (en ? '' : ' warn');
-    if (!en) {
-      note.innerHTML = '本地识别<b>当前关闭</b>：语音键走「交给输入法」（豆包/微信），不占内存。'
-        + '<b>点上面的「本地 ASR」会同时打开总开关</b>。';
-    } else note.innerHTML = a.downloading
-      ? `正在下载 <b>${a.downloading}</b> · ${a.progress}% · ${a.message || ''}`
-      : (engineOk
-          ? '模型在本地运行，语音不出本机。选「本地 ASR」后：按住语音键<b>边说边出字</b>，'
-            + '松手即定稿上屏（实测 7.7 秒音频、155 次流式更新）。'
-            + (a.gpuAvailable ? '' : ' GPU 需要单独换 GPU 版引擎（随包是 CPU 版）。')
-          : '⚠ 引擎文件缺失（assets\\haolive\\haolive-server.exe），请重新安装或点上面的「一键安装 / 修复」。');
-  }
-
-  if (list) {
-    list.innerHTML = '<div class="asr-list">' + (a.models || []).map(m => `
-      <div class="asr-item">
-        <div class="m">
-          <b>${m.name}</b>
-          <span class="s">${m.mb} MB${m.installed ? ` · 已下载 ${m.sizeMb} MB` : ''} · ${m.note}</span>
-        </div>
-        ${m.installed
-          ? (m.active ? '<span class="tag-ok">已选用</span>'
-                      : `<button class="btn ghost" data-asr-use="${m.id}">选用</button>`)
-          : `<button class="btn ghost" data-asr-dl="${m.id}">下载</button>`}
-      </div>`).join('') + '</div>';
-    list.querySelectorAll('[data-asr-dl]').forEach(b => {
-      b.onclick = async () => { const r = JSON.parse(await B.asrDownload(b.dataset.asrDl)); toast(r.message, 6000); setTimeout(refresh, 900); };
-    });
-    list.querySelectorAll('[data-asr-use]').forEach(b => {
-      b.onclick = async () => { const r = JSON.parse(await B.asrSelect(b.dataset.asrUse)); toast(r.message, 5000); await refresh(); };
-    });
-  }
-}
-
+// 本地 ASR（环境设置）：引擎状态 + 模型列表 + 下载/选择
 async function refresh() {
   if (!B) return;
   try {
@@ -1126,10 +1033,6 @@ async function refresh() {
   renderKeys(state);
   renderEnv(state);
   renderMouse(state);
-  if (B) {
-    try { renderAsr(state, JSON.parse(await B.asrState())); }
-    catch (e) { console.error('renderAsr', e); }   // 别再静默吞掉（上一版因此白屏一块）
-  }
 }
 
 /* ── 窗口藏进托盘后停掉 2 秒轮询 ──
@@ -1419,21 +1322,6 @@ function bindUI() {
     };
   }
   // 导出配置：卸载会删掉配置目录，先让用户能备份
-  const asrTerms = $('#btnAsrTerms');
-  if (asrTerms && B) {
-    asrTerms.onclick = async () => { const r = JSON.parse(await B.asrOpenTerms()); toast(r.message, 5000); };
-  }
-  const asrOpen = $('#btnAsrOpenDir');
-  if (asrOpen && B) {
-    asrOpen.onclick = async () => { const r = JSON.parse(await B.asrOpenDir()); toast(r.message, 5000); };
-  }
-  const asrRefresh = $('#btnAsrRefresh');
-  if (asrRefresh && hasBridge) {
-    asrRefresh.onclick = async () => {
-      try { renderAsr(state, JSON.parse(await B.asrState())); toast('已刷新', 2500); }
-      catch (e) { toast('读取失败：' + e.message, 6000); }
-    };
-  }
   const expBtn = $('#btnExportConfig');
   if (expBtn && hasBridge) {
     expBtn.onclick = async () => {
@@ -1706,9 +1594,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.131',
+      version: '1.2.132',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.131（构建于 2026-10-29 23:30）',
+      versionLine: 'v1.2.132（构建于 2026-10-29 23:50）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
