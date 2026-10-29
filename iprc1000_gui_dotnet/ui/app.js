@@ -839,21 +839,19 @@ function renderEnv(s) {
   if (logT) logT.checked = s.logEnabled === true;
   const logSw = $('#logSwitch');
   if (logSw) logSw.classList.toggle('on', s.logEnabled === true);
-  // 语音输入法三档：互斥单选（用 checkbox 模拟，样式复用 .switch 的 on 态）
+  // 语音输入法（首页「第一次使用」里的分段按钮，2026-10-29 从环境设置搬过来）
   const imeCur = s.imeProfile || 'doubao';
-  [['imeDoubao','doubao'],['imeWechat','wechat'],['imeCustom','custom']].forEach(([wrap,val]) => {
-    const cb = $('#' + wrap + 'CB'), sw = $('#' + wrap);
-    if (cb) cb.checked = (imeCur === val);
-    if (sw) sw.classList.toggle('on', imeCur === val);
+  document.querySelectorAll('.ime-seg button[data-ime]').forEach(btn => {
+    btn.classList.toggle('on', btn.dataset.ime === imeCur);
   });
-  const imeN = $('#imeNote');
-  if (imeN) {
+  const imeHint = $('#imeHint');
+  if (imeHint) {
     const det = s.imeDetected || {};
     const hit = [det.doubao && '豆包', det.wechat && '微信输入法'].filter(Boolean);
-    imeN.textContent =
-      (hit.length ? `检测到已安装：${hit.join(' / ')}。` : '未检测到豆包 / 微信输入法 —— 可手动选择，或用「自定义」。')
-      + (s.imeVoice ? ` 当前「语音」键 = ${s.imeVoice}。` : '')
-      + ' 微信输入法需在它自己的设置里把「麦克风」选成 CABLE Output。';
+    imeHint.textContent =
+      (hit.length ? `检测到：${hit.join(' / ')}。` : '未检测到豆包 / 微信输入法。')
+      + (s.imeVoice ? ` 语音键 = ${s.imeVoice}。` : '')
+      + ' 微信输入法需把「麦克风」选成 CABLE Output。';
   }
 
   // 事件日志开关（第二级）的初始态
@@ -1265,12 +1263,11 @@ function bindUI() {
     };
   }
 
-  // 语音输入法：点哪个就切到哪个（业务侧会在"映射仍是预设值"时才自动改写）
-  [['imeDoubao','doubao'],['imeWechat','wechat'],['imeCustom','custom']].forEach(([wrap,val]) => {
-    const cb = $('#' + wrap + 'CB');
-    if (!cb || !hasBridge) return;
-    cb.onchange = async () => {
-      const r = JSON.parse(await B.setImeProfile(val));
+  // 语音输入法：点哪个就切到哪个（业务侧只在"映射仍是预设值"时自动改写，不覆盖自定义）
+  document.querySelectorAll('.ime-seg button[data-ime]').forEach(btn => {
+    if (!hasBridge) return;
+    btn.onclick = async () => {
+      const r = JSON.parse(await B.setImeProfile(btn.dataset.ime));
       toast(r.message, 6000);
       await refresh();
     };
@@ -1474,9 +1471,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.90',
+      version: '1.2.91',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.69（构建于 2026-10-26 14:45）',
+      versionLine: 'v1.2.91（构建于 2026-10-29 10:10）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
