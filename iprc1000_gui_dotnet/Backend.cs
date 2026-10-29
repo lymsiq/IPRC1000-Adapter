@@ -440,7 +440,9 @@ internal sealed class Backend : IDisposable
     {
         try
         {
-            // 首次启动：按"实际装了哪个输入法"预选档位（只做一次）
+            // 先按**已保存的档位**补应用映射（安装器可能在安装时就选好了输入法）
+            EnsureImeProfileApplied();
+            // 再考虑"首次启动自动预选"（只做一次）
             AutoPickIme();
 
             // 无驱动模式：恢复幽灵键抑制（钩子不随进程持久，重启后要重新装）
@@ -660,6 +662,32 @@ internal sealed class Backend : IDisposable
     /// 为什么"都装"时不选微信：豆包是本产品长期调过的默认路径，微信的 Ctrl+Win 是
     /// 全局快捷键、可能与其他软件冲突 —— 两个都在时把选择权留给用户更稳。
     /// </summary>
+    /// <summary>
+    /// 把**已保存的档位**落到「语音键」映射上（幂等）。
+    ///
+    /// 场景：安装器里选了"微信输入法" → 写 settings.json 的 ImeProfile=wechat + ImeAutoPicked=true；
+    /// 应用启动时如果不看这个档位，映射还是旧的右 Alt ⇒ 用户在安装界面的选择等于白选。
+    /// 规则：只在当前映射仍是**某个档位的预设值**时才改；用户自定义过就不动。
+    /// </summary>
+    private void EnsureImeProfileApplied()
+    {
+        try
+        {
+            var prof = Settings.ImeProfile;
+            if (prof is not ("doubao" or "wechat")) return;
+            var doubao = new[] { 0xA5 };
+            var wechat = new[] { 0xA2, 0x5B };
+            var want = prof == "doubao" ? doubao : wechat;
+            var other = prof == "doubao" ? wechat : doubao;
+            var cur = Keymaps.Get("voice") ?? Array.Empty<int>();
+            if (cur.SequenceEqual(want)) return;              // 已经是目标
+            if (cur.Length > 0 && !cur.SequenceEqual(other)) return;   // 用户自定义，不动
+            Keymaps.Set("voice", want);
+            Safe.Note($"IME 按已保存档位应用映射：{prof} → {Keys.FormatSymbols(want)}");
+        }
+        catch (Exception e) { Safe.Note($"IME 应用档位失败 {e.GetType().Name}: {e.Message}"); }
+    }
+
     private void AutoPickIme()
     {
         if (Settings.ImeAutoPicked) return;
@@ -850,6 +878,7 @@ internal sealed class Backend : IDisposable
             ["driverFree"] = Settings.DriverFreeMode,
             ["ghostSwallowed"] = GhostGuard.Swallowed,
             ["ghostReleased"] = GhostGuard.ForcedReleases,
+            ["ghostBursts"] = GhostGuard.Bursts,
             ["imeVoice"] = Keys.FormatSymbols(Keymaps.Get("voice") ?? Array.Empty<int>()),
             ["imeDetected"] = new JsonObject
             {

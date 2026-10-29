@@ -141,6 +141,10 @@ internal static class GhostGuard
     /// <summary>已主动补发的 keyup 次数（面板可观测）</summary>
     public static long ForcedReleases;
 
+    /// <summary>进入连发抑制的**次数**（= 遥控器按住过几次）。比"吞了多少下"更有意义：
+    /// 按住 1 秒就会吞 31 下，面板显示"已吞 2640 次"会让用户以为出大问题。</summary>
+    public static long Bursts;
+
     /// <summary>语音键按下 → 开始吞 m。</summary>
     public static void Arm(long nowMs)
     {
@@ -222,6 +226,7 @@ internal static class GhostGuard
                         {
                             _burst = true;
                             _burstAt = now;
+                            Bursts++;
                             // ★★ 2026-10-29（用户提议，确实更彻底）：
                             //   光"吞 keydown"是拦不住自动重复的 —— 系统认为这个键**一直按着**，
                             //   于是按 31Hz 持续产生新的 keydown。**只有把键松开**才能终止重复。

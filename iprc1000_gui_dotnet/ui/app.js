@@ -923,9 +923,9 @@ function renderEnv(s) {
   // 注意：driverFree / ghostSwallowed 在 **GetState 顶层**（不在 keySrc 子对象里）
   $('#keySrcNote').innerHTML = s.driverFree
     // 无驱动模式：遥控器**就是键盘**，这里不能再喊"请安装虚拟键盘驱动"（那恰好会推翻本模式）
-    ? '<b>无驱动模式</b>：遥控器保持键盘，它自带的 m 由钩子按「连发特征」吞掉' +
-      '（按住时的连发每秒约 31 次，已吞 <b>' + (s.ghostSwallowed || 0) + '</b> 次；' +
-      '开头第 1 个 m 可能漏进来，属正常）。' + (ks.guard ? `<br>${ks.guard}` : '')
+    ? '<b>无驱动模式</b>：遥控器保持键盘，它自带的 m 由钩子按「连发特征」拦掉' +
+      '（已拦 <b>' + (s.ghostBursts || 0) + '</b> 段连发 / 共 ' + (s.ghostSwallowed || 0) + ' 下；' +
+      '每段开头可能漏 1 个 m，属正常）。'
     : (ks.stillKeyboard
       ? '⚠⚠ <b>驱动还没换！</b>系统仍把遥控器当键盘 → <b>按遥控器会同时打出 m</b>。' +
         '请点下面的「<b>安装虚拟键盘驱动</b>」，把它的驱动从「HID Keyboard Device」换成' +
@@ -1503,9 +1503,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.97',
+      version: '1.2.98',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.97（构建于 2026-10-29 11:20）',
+      versionLine: 'v1.2.98（构建于 2026-10-29 11:35）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

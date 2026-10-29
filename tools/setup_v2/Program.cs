@@ -5,6 +5,8 @@ using System.Drawing.Drawing2D;
 using System.IO;
 using System.Reflection;
 using System.Threading.Tasks;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Windows.Forms;
 
 namespace IprcSetup2
@@ -63,6 +65,8 @@ namespace IprcSetup2
         private readonly LinkLabel _detailsLink = new LinkLabel(), _logLink = new LinkLabel();
         // 2026-10-29：维护入口 —— 修复安装 / 复制诊断（复用驱动脚本已验证的 -Force 与 -Mode Status）
         private readonly LinkLabel _repairLink = new LinkLabel(), _diagLink = new LinkLabel();
+        // 2026-10-29：安装时直接选输入法，装完就把「语音键」映射写好（省掉用户进应用再点一次）
+        private readonly RadioButton _imeDoubao = new RadioButton(), _imeWechat = new RadioButton();
         private readonly Panel _resultPanel = new Panel();
         private static readonly Color Ink = Color.FromArgb(27, 48, 76);
         private static readonly Color Muted = Color.FromArgb(94, 115, 137);
@@ -112,7 +116,7 @@ namespace IprcSetup2
             location.Controls.AddRange(new Control[] { _path, _browse });
             Controls.Add(location);
 
-            var help = Card(30, 283, 764, 180);
+            var help = Card(30, 283, 764, 128);
             // ★ 2026-10-29 修：标题 Label 宽 560 会**盖住**右侧链接（Control 先加=在上层），
             //   于是"下载豆包"整个被遮住，只剩微信那个露在外面。现在标题只占 420，链接排在它右边。
             help.Controls.Add(Label("搭配语音输入法使用（豆包 / 微信输入法，任选其一）", 20, 15, 424, 25, 10.5F, Ink, true));
@@ -124,10 +128,23 @@ namespace IprcSetup2
             help.Controls.Add(weixin);
             help.Controls.Add(Label("豆包长按右 Alt；微信输入法长按 Ctrl+Win。两者都要把「麦克风」选成 CABLE Output。", 20, 47, 730, 24, 9.5F, Muted));
             help.Controls.Add(Label("装好后在应用「环境设置」里选中你用的那个，语音键会自动改成对应组合键。", 20, 71, 730, 22, 9F, Muted));
-            help.Controls.Add(Label("先连接遥控器", 20, 99, 600, 24, 10.5F, Ink, true));
-            help.Controls.Add(Label("① 按住「下 + LAST」至闪灯     ② Windows 蓝牙添加 IPRC1000", 20, 128, 720, 24, 9.5F, Muted));
-            help.Controls.Add(Label("③ 配对后按一下 OK 唤醒，按住语音键即可开始说话。", 20, 152, 720, 24, 9.5F, Muted));
+            help.Controls.Add(Label("先连接遥控器：按住「下 + LAST」至闪灯 → Windows 蓝牙添加 IPRC1000", 20, 99, 730, 22, 9.5F, Muted));
             Controls.Add(help);
+
+            // 语音输入法：装的时候直接选，装完即写好映射
+            var imeCard = Card(30, 423, 764, 50);
+            imeCard.Controls.Add(Label("语音输入法", 20, 13, 90, 22, 10F, Ink, true));
+            _imeDoubao.Text = "豆包（长按右 Alt）";
+            _imeDoubao.Bounds = new Rectangle(112, 11, 170, 24);
+            _imeDoubao.Font = new Font("Microsoft YaHei UI", 9.5F);
+            _imeDoubao.Checked = true;
+            _imeWechat.Text = "微信输入法（长按 Ctrl+Win）";
+            _imeWechat.Bounds = new Rectangle(292, 11, 240, 24);
+            _imeWechat.Font = new Font("Microsoft YaHei UI", 9.5F);
+            imeCard.Controls.Add(_imeDoubao);
+            imeCard.Controls.Add(_imeWechat);
+            imeCard.Controls.Add(Label("装完会自动把遥控器「语音键」映射成对应组合键；以后也能在应用里改。", 20, 30, 730, 18, 8.5F, Muted));
+            Controls.Add(imeCard);
 
             _install.Text = "立即安装";
             _install.Bounds = new Rectangle(30, 481, 764, 49);
@@ -250,6 +267,7 @@ namespace IprcSetup2
                 var result = operation == "uninstall" || operation == "restore"
                     ? new[] { state.Phase, "操作已记录，可在需要时重新运行安装。" }
                     : SetupCore.InstallationResult(state);
+                ApplyImeChoice();       // 把安装时选的输入法写进应用设置
                 _phase.Text = result[0];
                 _result.Text = result[1];
                 _phase.ForeColor = state.ComponentsReady && state.DoubaoInstalled && !state.RestartRequired ? Color.FromArgb(17, 121, 103) : Ink;
@@ -271,6 +289,37 @@ namespace IprcSetup2
             }
             finally { _running = false; _install.Enabled = _browse.Enabled = true; }
         }
+        /// <summary>
+        /// 把安装时选的输入法写进应用设置（`%APPDATA%\IPRC1000 Adapter\settings.json`）。
+        ///
+        /// 只改两个键（ImeProfile / ImeAutoPicked），**其余原样保留** —— 用户已有的按键映射、
+        /// 鼠标参数等不能被安装器覆盖。应用下次启动会据此把「语音键」映射写好。
+        /// </summary>
+        private void ApplyImeChoice()
+        {
+            try
+            {
+                var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                                       "IPRC1000 Adapter");
+                Directory.CreateDirectory(dir);
+                var file = Path.Combine(dir, "settings.json");
+                JsonObject obj;
+                if (File.Exists(file))
+                {
+                    try { obj = JsonNode.Parse(File.ReadAllText(file)) as JsonObject ?? new JsonObject(); }
+                    catch { obj = new JsonObject(); }
+                }
+                else obj = new JsonObject();
+
+                obj["ImeProfile"] = _imeWechat.Checked ? "wechat" : "doubao";
+                obj["ImeAutoPicked"] = true;    // 安装时已经选过，启动时不要再自动改
+                File.WriteAllText(file,
+                    obj.ToJsonString(new JsonSerializerOptions { WriteIndented = true }),
+                    new System.Text.UTF8Encoding(true));
+            }
+            catch { /* 写不进去也不影响安装本身；应用里还能选 */ }
+        }
+
         /// <summary>修复安装：重建虚拟键盘驱动（-Force 会先清旧节点，这是"重装修不好"的解药）。</summary>
         private async Task RepairAsync()
         {
