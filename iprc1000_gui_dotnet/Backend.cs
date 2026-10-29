@@ -1885,6 +1885,9 @@ internal sealed class Backend : IDisposable
         ("x-asr-zh-en-q4_k", "X-ASR 中英 · q4_k（省空间）", 88,
          "https://huggingface.co/cstr/x-asr-zh-en-GGUF/resolve/main/x-asr-zh-en-q4_k.gguf",
          "未验证：体积小 45%，质量待测"),
+        ("x-asr-zh-en-f16", "X-ASR 中英 · f16（最准，体积大）", 295,
+         "https://huggingface.co/cstr/x-asr-zh-en-GGUF/resolve/main/x-asr-zh-en-f16.gguf",
+         "同架构最高精度：识别率不够时换这个（CPU 会慢约 1.5 倍）"),
     };
 
     private static string[] _asrBackends = Array.Empty<string>();

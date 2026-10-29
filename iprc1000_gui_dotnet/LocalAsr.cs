@@ -406,7 +406,14 @@ internal static class AsrCapture
         Safe.Note($"ASR 音频判定：插值命中率 {ratio:P0} ⇒ {(_ds2 == true ? "按 32k→16k 抽取" : "按 16k 原样使用")}");
     }
 
-    /// <summary>2:1 抽取 + 3 点平均（粗略低通，抑制抽取混叠）。</summary>
+    /// <summary>
+    /// 2:1 抽取：**只取偶数位**，不做平均。
+    ///
+    /// ★ 为什么不能"3 点平均"：被 2× 上采样的音频里，
+    ///   偶数位是**原始样本**、奇数位是**插值出来的**（≈前后两个原始样本的平均）。
+    ///   如果做平均，等于把插值样本又掺回去 ⇒ 等于二次模糊 ⇒ 识别率下降
+    ///   （实测：纯抽取能认出「好多遍了」，加平均后识别率明显变差）。
+    /// </summary>
     private static byte[] Decimate2(byte[] src, int off, int len)
     {
         var n = len / 2;
@@ -415,15 +422,9 @@ internal static class AsrCapture
         var dst = new byte[outLen * 2];
         for (var k = 0; k < outLen; k++)
         {
-            var i0 = off + ((k * 2) * 2);
-            var i1 = i0 + 2;
-            var i2 = i0 + 4;
-            int a = (short)(src[i0] | (src[i0 + 1] << 8));
-            var bb = (short)(src[i1] | (src[i1 + 1] << 8));
-            var c = i2 + 1 < off + len ? (short)(src[i2] | (src[i2 + 1] << 8)) : bb;
-            var v = Math.Clamp((a + 2 * bb + c) / 4, -32000, 32000);
-            dst[k * 2] = (byte)(v & 0xFF);
-            dst[k * 2 + 1] = (byte)((v >> 8) & 0xFF);
+            var i = off + (k * 2) * 2;              // 偶数位
+            dst[k * 2] = src[i];
+            dst[k * 2 + 1] = src[i + 1];
         }
         return dst;
     }
@@ -541,7 +542,19 @@ internal static class AsrRun
                     var (ok, msg) = LocalAsr.Ensure(model, Settings.AsrBackend);
                     if (!ok) { Safe.Note("ASR 引擎不可用：" + msg); return; }
                     var st = await AsrStream.OpenAsync(LocalAsr.WsPort);
-                    if (st == null) { Safe.Note("ASR 流式不可用，松手后走整段识别"); return; }
+                    if (st == null)
+                    {
+                        // 再试一次：上一次会话残留/端口刚释放时会偶发失败
+                        await Task.Delay(150);
+                        st = await AsrStream.OpenAsync(LocalAsr.WsPort);
+                    }
+                    if (st == null)
+                    {
+                        AsrOverlay.ShowError("流式未连上：本次用整段识别（无实时文字）");
+                        Safe.Note("ASR 流式不可用（重试后仍失败），松手后走整段识别");
+                        DumpDiag("stream-open-failed", null, 0, 0);
+                        return;
+                    }
                     st.OnPartial += txt => AsrOverlay.ShowPartial(txt);
                     _stream = st;
                     // 补推已经攒下的音频
@@ -635,8 +648,18 @@ internal static class AsrRun
             {
                 try
                 {
-                    System.IO.File.WriteAllBytes(
-                        System.IO.Path.Combine(Env.ConfigDir, "asr-last.wav"), wav);
+                    // 保留最近 3 次：asr-1.wav(最新) / asr-2 / asr-3
+                    // 只留一份的话，想对比"这次和上次"就没法比了
+                    var dir = Env.ConfigDir;
+                    var p2 = System.IO.Path.Combine(dir, "asr-2.wav");
+                    var p3 = System.IO.Path.Combine(dir, "asr-3.wav");
+                    if (System.IO.File.Exists(p2))
+                    {
+                        if (System.IO.File.Exists(p3)) System.IO.File.Delete(p3);
+                        System.IO.File.Move(p2, p3);
+                    }
+                    System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, "asr-last.wav"), wav);
+                    try { System.IO.File.Copy(System.IO.Path.Combine(dir, "asr-last.wav"), p2, true); } catch { }
                 }
                 catch { }
             }
