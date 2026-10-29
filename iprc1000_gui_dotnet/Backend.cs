@@ -46,6 +46,9 @@ internal sealed class Backend : IDisposable
     {
         // ★ 2026-10-27：事件日志总闸跟随设置（默认开）。关掉后 Safe.Note 变成空操作。
         Safe.NotesEnabled = Settings.KeepEventLog;
+        // ★★ 2026-10-29：**必须先选端口再绑**。原来把 ResolvePorts 放在 InitAsync 里，
+        //   而 CableRouter.Start() 在构造函数里就绑 31680 ⇒ 端口被占时直接抛 SocketException 崩溃。
+        if (startAudio) Env.ResolvePortsOnce();
         // client 模式（宿主只做 UI）不启音频路由：UDP 31680 由业务进程独占
         if (startAudio) _router.Start();   // 常驻：随时接收语音桥推来的 PCM
     }
@@ -441,6 +444,9 @@ internal sealed class Backend : IDisposable
     {
         try
         {
+            // 端口已在构造函数里解析（见 Backend ctor），这里只保证后续读到的是一致值
+            Env.ResolvePortsOnce();
+
             // 键源归因：旁听所有键盘事件（只读、不拦截）。出问题时一条命令就能看出"谁在发键"。
             try { KeySourceDiag.Start(); } catch { }
 
@@ -888,6 +894,7 @@ internal sealed class Backend : IDisposable
             ["keepEventLog"] = Settings.KeepEventLog,
             ["imeProfile"] = Settings.ImeProfile,
             ["driverFree"] = Settings.DriverFreeMode,
+            ["ports"] = new JsonObject { ["pcm"] = Env.PcmPort, ["key"] = Env.KeyPort },
             ["driverVersion"] = WinUhidInjector.DriverVersion,
             ["uhidReady"] = _uhidReady,
             ["lastRepair"] = _lastRepair.at == default ? null : new JsonObject
@@ -899,6 +906,7 @@ internal sealed class Backend : IDisposable
             ["ghostSwallowed"] = GhostGuard.Swallowed,
             ["ghostReleased"] = GhostGuard.ForcedReleases,
             ["ghostBursts"] = GhostGuard.Bursts,
+            ["ghostGate"] = new JsonObject { ["enabled"] = GhostGuard.AttributeEnabled, ["remotes"] = GhostGuard.RemoteCount },
             ["ghostReplayed"] = GhostGuard.Replayed,
             ["zeroGhost"] = Settings.ZeroGhost,
             // -1 = 从未拦过；否则=距最近一次拦截的秒数（不变化 = 现在已经不发 m）
@@ -1085,7 +1093,7 @@ internal sealed class Backend : IDisposable
                     StandardErrorEncoding = Encoding.UTF8,
                     // 日志关着就给桥加 --quiet：桥不写 bridge.log、也不打 [KEY] 行
                     // （那行是每条按键一次管道写，C# 读到也是丢）
-                    Arguments = $"--udp 127.0.0.1:{Env.PcmPort} --hp 70 --seconds 86400"
+                    Arguments = $"--udp 127.0.0.1:{Env.PcmPort} --key-udp 127.0.0.1:{Env.KeyPort} --hp 70 --seconds 86400"
                                 + (LogSwitch.Enabled ? "" : " --quiet"),
                 };
                 var proc = Process.Start(psi);

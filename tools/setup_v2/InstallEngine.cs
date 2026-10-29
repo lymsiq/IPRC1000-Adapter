@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
 using System.Globalization;
 using System.IO;
 using System.IO.Compression;
@@ -131,12 +132,49 @@ namespace IprcSetup2
             return State;
         }
 
+        /// <summary>
+        /// **升级前请应用优雅退出**（2026-10-29）。
+        ///
+        /// 原则：**绝不强杀**。强杀会让系统蓝牙栈失去响应，只能重启电脑（同类项目记录过该事故）。
+        /// 流程：Set 命名事件「请退出」→ 应用自己走正常退出（释放注入键、关蓝牙会话）→
+        /// 最多等 10 秒；仍不退才提示用户手动从托盘退出。
+        ///
+        /// 旧版本应用没有这个监听 ⇒ OpenExisting 失败 ⇒ 直接落到"请手动退出"，行为与以前一致。
+        /// </summary>
         private void EnsureAppClosed()
         {
             var processName = Path.GetFileNameWithoutExtension(Product.ExeName);
-            foreach (var process in Process.GetProcessesByName(processName))
-                using (process)
-                    throw new InvalidOperationException("请先从托盘退出“" + Product.DisplayName + "”，再点击安装/修复。安装器不会强制关闭正在运行的程序。");
+            var running = Process.GetProcessesByName(processName);
+            if (running.Length == 0) return;
+            foreach (var process in running) using (process) { }
+
+            Report(2, "正在请已运行的程序退出…");
+            var asked = false;
+            try
+            {
+                using (var ev = EventWaitHandle.OpenExisting(@"Local\IPRC1000Adapter.ExitRequest"))
+                {
+                    ev.Set();
+                    asked = true;
+                }
+            }
+            catch { /* 应用不在运行、或旧版本没有该监听 */ }
+
+            if (asked)
+            {
+                var deadline = DateTime.UtcNow.AddSeconds(10);
+                while (DateTime.UtcNow < deadline)
+                {
+                    Thread.Sleep(300);
+                    var still = Process.GetProcessesByName(processName);
+                    foreach (var process in still) using (process) { }
+                    if (still.Length == 0) return;
+                }
+            }
+
+            throw new InvalidOperationException(
+                "请先从托盘退出“" + Product.DisplayName + "”，再点击安装/修复。" +
+                "安装器不会强制关闭正在运行的程序（强杀会让系统蓝牙栈失去响应，可能只能重启电脑）。");
         }
         private void InstallFiles()
         {

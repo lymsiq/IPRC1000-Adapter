@@ -49,7 +49,7 @@ internal static class ServiceHost
         });
 
         Console.WriteLine($"[service] 业务服务已启动，管道名 {PipeName}");
-        Console.WriteLine("[service] 接收端口：音频 UDP 31680 / 按键 UDP 31681");
+        Console.WriteLine($"[service] 接收端口：音频 UDP {Env.PcmPort} / 按键 UDP {Env.KeyPort}（被占用时自动避让）");
         Console.WriteLine("[service] 用 --headless 启动后，UI（若有）通过命名管道调用；Ctrl+C 退出。");
 
         while (true)

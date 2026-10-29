@@ -68,8 +68,55 @@ internal sealed class MainForm : Form
     /// </summary>
     public const string SingleInstanceMutex = @"Local\IPRC1000Adapter.SingleInstance";
     public const string ShowWindowEvent = @"Local\IPRC1000Adapter.ShowWindow";
+
+    /// <summary>
+    /// **安装/卸载前的"请退出"请求**（2026-10-29）。
+    ///
+    /// 为什么需要：升级时应用还在跑 ⇒ 文件被占用、复制失败；若强行 taskkill，
+    /// **系统蓝牙栈会失去响应，只能重启电脑**（同类项目明确记录过这个事故）。
+    /// 所以安装器改为：Set 这个事件 → 等最多 10 秒 → 超时也**不强杀**，提示用户手动退出。
+    /// </summary>
+    public const string ExitRequestEvent = @"Local\IPRC1000Adapter.ExitRequest";
+    private EventWaitHandle? _exitEvent;
+    private Thread? _exitThread;
     private EventWaitHandle? _showEvent;
     private Thread? _showThread;
+
+    /// <summary>接住安装器的"请退出"请求：正常走退出流程（释放注入键、停桥），绝不强杀。</summary>
+    private void StartExitRequestListener()
+    {
+        try
+        {
+            _exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ExitRequestEvent);
+            _exitThread = new Thread(() =>
+            {
+                while (!_reallyExit)
+                {
+                    try
+                    {
+                        if (!_exitEvent.WaitOne(1000)) continue;
+                        if (IsDisposed) break;
+                        Safe.Note("收到安装器的退出请求 → 正常退出（释放注入键、停桥）");
+                        try
+                        {
+                            BeginInvoke(new Action(() =>
+                            {
+                                _reallyExit = true;
+                                try { Safe.FlushNotes(); } catch { }
+                                Close();
+                                Application.Exit();
+                            }));
+                        }
+                        catch { break; }
+                    }
+                    catch { break; }
+                }
+            })
+            { IsBackground = true, Name = "iprc1000-exit-request" };
+            _exitThread.Start();
+        }
+        catch (Exception e) { Safe.Note("退出请求监听启动失败：" + e.Message); }
+    }
 
     /// <summary>接住"第二个实例要求显示窗口"的通知（后台线程等待，回 UI 线程执行）。</summary>
     private void StartShowWindowListener()
@@ -171,6 +218,7 @@ internal sealed class MainForm : Form
 
         // 单实例：第二个实例会 Set 事件要求我们把窗口显示出来
         StartShowWindowListener();
+        StartExitRequestListener();
 
         // 启动时最小化到托盘（默认开）；E2E 测试模式例外，必须把界面建出来
         if (Settings.StartMinimized && !_e2e)

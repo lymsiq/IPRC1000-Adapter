@@ -12,7 +12,57 @@ internal static class Env
 {
     public const string AppName = "IPRC1000 Adapter";
     public const string RegPath = @"SYSTEM\CurrentControlSet\Services\BthPort\Parameters";
-    public const int PcmPort = 31680;
+    /// <summary>
+    /// 音频接收端口。**不再是 const**（2026-10-29）：
+    /// 被别的程序占用时自动 +1 递增，避免"端口被占 → 音频整体失效"。
+    /// 实际值由 <see cref="ResolvePorts"/> 在启动时确定；桥通过 `--udp` 参数被告知。
+    /// </summary>
+    public static int PcmPort { get; private set; } = 31680;
+
+    /// <summary>按键事件接收端口（桥推送）。同样支持自动避让。</summary>
+    public static int KeyPort { get; private set; } = 31681;
+
+    /// <summary>
+    /// 选端口：从默认值起找第一个能绑的（最多试 20 个）。
+    /// 为什么要做：31680/31681 是硬编码的，一旦被别的软件占住，**音频和按键会整体失效**，
+    /// 而用户看到的只是"没声音"，极难自查。
+    /// </summary>
+    private static bool _portsResolved;
+
+    /// <summary>只解析一次：二次调用会用"已被自己占用"的端口去试，反而跳号。</summary>
+    public static void ResolvePortsOnce()
+    {
+        if (_portsResolved) return;
+        _portsResolved = true;
+        ResolvePorts();
+    }
+
+    public static void ResolvePorts()
+    {
+        var pcm = FindFreePort(31680, 20);
+        var key = FindFreePort(31681, 20, avoid: pcm);
+        if (pcm != PcmPort || key != KeyPort)
+            Safe.Note($"端口被占用，已避让：音频 {PcmPort}→{pcm}，按键 {KeyPort}→{key}");
+        PcmPort = pcm;
+        KeyPort = key;
+    }
+
+    private static int FindFreePort(int start, int span, int avoid = -1)
+    {
+        for (var i = 0; i < span; i++)
+        {
+            var p = start + i;
+            if (p == avoid) continue;
+            try
+            {
+                using var probe = new System.Net.Sockets.UdpClient(
+                    new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, p));
+                return p;    // 绑得上就是空的
+            }
+            catch { }
+        }
+        return start;        // 全被占就退回默认，让后续报错更直观
+    }
     /// <summary>
     /// 出厂那台遥控器的 MAC —— **仅作最后兜底**。
     ///

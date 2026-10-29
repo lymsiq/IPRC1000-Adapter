@@ -76,6 +76,10 @@ internal static class GhostGuard
     private const int BurstHoldMs = 200;    // 抑制状态保持多久（无新 m）
     private static long _lastMDownAt;
     private static volatile bool _burst;
+
+    /// <summary>当前是否满足"唯一遥控器"归因门控（面板/诊断可读）</summary>
+    public static bool AttributeEnabled => _attributeEnabled;
+    public static int RemoteCount => _remoteCount;
     private static long _burstAt;           // 进入连发抑制的时刻（硬性兜底用）
     private static volatile int _graceGen;
 
@@ -114,6 +118,7 @@ internal static class GhostGuard
         // ★ 2026-10-29：`SetWindowsHookEx` 在新线程里执行，这里必须**等它装完**再返回，
         //   否则调用方立刻查 `Running` 会拿到 false（自检就会误报"安装失败"）。
         for (var i = 0; i < 100 && _hook == IntPtr.Zero; i++) Thread.Sleep(10);
+        EnsureReplayLoop();   // 保活线程同时负责：补发 keyup / 遥控器在场探测 / 钩子自愈
     }
 
     public static void Stop()
@@ -172,6 +177,20 @@ internal static class GhostGuard
     ///   由 Backend 自动切回驱动模式（系统层面就没有 m 了），并提示用户。
     /// </summary>
     public static volatile bool AutoDisabled;
+
+    /// <summary>
+    /// **按键门控**（2026-10-29，借鉴同类项目"只在唯一设备时归因"）。
+    ///
+    /// 判据（每 5 秒刷新一次，注册表枚举有成本）：
+    ///   · 遥控器**在场**（HID 节点存在）；
+    ///   · 已绑定的遥控器**恰好 1 只** —— 多只时无法确定这次按键来自哪一只，
+    ///     归因就不可靠，宁可**不吞**（漏 1 个 m 也强过吞掉用户物理键盘的 m）。
+    ///
+    /// 不满足任一条 ⇒ 一律放行，并清空抑制状态。
+    /// </summary>
+    private static volatile bool _attributeEnabled;
+    private static int _remoteCount;
+    private static long _presentCheckedAt;
     private static int _swallowStreak;
 
     private const int AutoDisableStreak = 240;   // 约 8 秒 @31Hz
@@ -211,6 +230,20 @@ internal static class GhostGuard
                 {
                     _needRelease = false;
                     ReleaseGhostKey();
+                }
+                // 门控探测：每 5 秒一次（注册表枚举有成本）
+                if (Environment.TickCount64 - _presentCheckedAt > 5000)
+                {
+                    _presentCheckedAt = Environment.TickCount64;
+                    try
+                    {
+                        _remoteCount = Env.PairedRemoteMacs().Count;
+                        // ★ 判据：**在场** + "不歧义"。
+                        //   count == 0 表示"注册表暂时读不到（典型：遥控器休眠/未连接）"，
+                        //   这不能当成"没有遥控器"把功能静默关掉 —— 只有**多只**才算歧义。
+                        _attributeEnabled = Env.RemotePresent() && _remoteCount <= 1;
+                    }
+                    catch { _attributeEnabled = false; }
                 }
                 // ★ 自愈：每 20 秒重装一次钩子。Windows 在"钩子回调超时"时会**静默卸载**，
                 //   而 SetWindowsHookEx 不会报错、也没有通知 —— 只能定期重装兜底。
@@ -424,6 +457,12 @@ internal static class GhostGuard
                     if ((info.flags & 0x10) != 0) return CallNextHookEx(_hook, nCode, wParam, lParam);
                     if (info.vkCode == VK_M)
                     {
+                        // 未满足"唯一遥控器"门控 ⇒ 这个 m 只能是别的键盘打的，绝不吞
+                        if (!_attributeEnabled)
+                        {
+                            _burst = false; _armed = false; _lastMDownAt = 0;
+                            return CallNextHookEx(_hook, nCode, wParam, lParam);
+                        }
                         var now = Environment.TickCount64;
                         LastHookMAt = now;
                         SeenKeyDowns++;

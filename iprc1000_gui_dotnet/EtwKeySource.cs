@@ -16,7 +16,8 @@ namespace Iprc1000Adapter;
 /// </summary>
 internal sealed class EtwKeySource : IDisposable
 {
-    public const int DefaultPort = 31681;
+    // 2026-10-29：端口改为动态（可能被避让），不再硬编码 31681
+    public static int DefaultPort => Env.KeyPort;
 
     /// <summary>HID usage → button id（与 src-tauri/.../iprc1000/bridge.rs 的 BUTTON_TABLE 注释一致）</summary>
     public static readonly Dictionary<byte, string> UsageToButton = new()
