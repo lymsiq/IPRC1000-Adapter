@@ -145,6 +145,13 @@ internal static class Settings
         set { _data.WizardStep = value; Save(); }
     }
 
+    /// <summary>选中的本地 ASR 模型 id。</summary>
+    public static string AsrModel
+    {
+        get => _data.AsrModel ?? "";
+        set { _data.AsrModel = value; Save(); }
+    }
+
     /// <summary>语音输入法档位（doubao / wechat / custom）。见 IPRC1000Adapter.Backend.SetImeProfile。</summary>
     public static string ImeProfile
     {
@@ -342,6 +349,9 @@ internal static class Settings
 
         /// <summary>向导当前进行到第几步（0 基），支持中途退出后续做。</summary>
         public int WizardStep { get; set; }
+
+        /// <summary>选中的本地 ASR 模型 id（空 = 未选）。见 Backend.AsrModels。</summary>
+        public string AsrModel { get; set; } = "";
 
         /// <summary>
         /// **无驱动（降级）模式**：不把遥控器切成普通 HID，而是保持键盘 +

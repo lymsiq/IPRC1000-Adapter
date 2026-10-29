@@ -1021,6 +1021,46 @@ function renderEnv(s) {
 }
 
 /* ───────── 刷新 ───────── */
+// 本地 ASR（环境设置）：引擎状态 + 模型列表 + 下载/选择
+function renderAsr(a) {
+  const kv = $('#asrKv'), note = $('#asrNote'), list = $('#asrModels'), dot = $('#d-asr');
+  if (!kv || !a) return;
+  const engineOk = !!a.engineFound;
+  if (dot) dot.className = 'dot ' + (engineOk ? 'ok' : 'warn');
+  kv.innerHTML =
+    row('识别引擎', engineOk ? '已就位' : '未安装（下一步随包提供）', engineOk) +
+    (a.enginePath ? row('引擎路径', a.enginePath, true) : '') +
+    row('模型目录', a.modelDir || '—', true);
+  if (note) {
+    note.innerHTML = a.downloading
+      ? `正在下载 <b>${a.downloading}</b> · ${a.progress}% · ${a.message || ''}`
+      : (a.message && a.progress >= 100
+          ? `上次操作：<b>${a.message}</b>`
+          : '模型在本地运行，语音不出本机。识别接入还在开发中 —— 这里先提供「选模型 + 下载」。');
+  }
+  if (list) {
+    list.innerHTML = (a.models || []).map(m => `
+      <div class="row">
+        <div class="row-main">
+          <b>${m.name}</b>
+          <span class="sub">${m.mb} MB${m.installed ? ` · 已下载 ${m.sizeMb} MB` : ''} · ${m.note}</span>
+        </div>
+        <div class="row-act">
+          ${m.installed
+            ? (m.active ? '<span class="tag ok">已选用</span>'
+                        : `<button class="btn ghost" data-asr-use="${m.id}">选用</button>`)
+            : `<button class="btn ghost" data-asr-dl="${m.id}">下载</button>`}
+        </div>
+      </div>`).join('');
+    list.querySelectorAll('[data-asr-dl]').forEach(b => {
+      b.onclick = async () => { const r = JSON.parse(await B.asrDownload(b.dataset.asrDl)); toast(r.message, 6000); setTimeout(refresh, 900); };
+    });
+    list.querySelectorAll('[data-asr-use]').forEach(b => {
+      b.onclick = async () => { const r = JSON.parse(await B.asrSelect(b.dataset.asrUse)); toast(r.message, 5000); await refresh(); };
+    });
+  }
+}
+
 async function refresh() {
   if (!B) return;
   try {
@@ -1031,6 +1071,9 @@ async function refresh() {
   renderKeys(state);
   renderEnv(state);
   renderMouse(state);
+  if (hasBridge) {
+    try { renderAsr(JSON.parse(await B.asrState())); } catch (e) { }
+  }
 }
 
 /* ── 窗口藏进托盘后停掉 2 秒轮询 ──
@@ -1320,6 +1363,12 @@ function bindUI() {
     };
   }
   // 导出配置：卸载会删掉配置目录，先让用户能备份
+  const asrRefresh = $('#btnAsrRefresh');
+  if (asrRefresh && hasBridge) {
+    asrRefresh.onclick = async () => {
+      try { renderAsr(JSON.parse(await B.asrState())); toast('已刷新', 2500); } catch (e) { }
+    };
+  }
   const expBtn = $('#btnExportConfig');
   if (expBtn && hasBridge) {
     expBtn.onclick = async () => {
@@ -1592,9 +1641,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.111',
+      version: '1.2.112',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.111（构建于 2026-10-29 16:40）',
+      versionLine: 'v1.2.112（构建于 2026-10-29 17:00）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

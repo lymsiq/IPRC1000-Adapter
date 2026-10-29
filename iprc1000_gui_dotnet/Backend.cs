@@ -1874,6 +1874,123 @@ internal sealed class Backend : IDisposable
         });
     }
 
+    // ── 本地 ASR（HaoLive.cpp）：引擎/模型/下载（2026-10-29）──────────────
+    //  目前只做"选模型 + 下载 + 状态展示"，识别接入留到下一步。
+    //  模型清单只放**我们亲手验证过**的条目 —— 宁可少，不要放一个装上也跑不起来的东西。
+    private static readonly (string id,string name,int mb,string url,string note)[] AsrModels =
+    {
+        ("x-asr-zh-en-q8_0", "X-ASR 中英 · q8_0（推荐）", 160,
+         "https://huggingface.co/cstr/x-asr-zh-en-GGUF/resolve/main/x-asr-zh-en-q8_0.gguf",
+         "已验证：3/3 全对，RTF≈0.19（CPU）"),
+        ("x-asr-zh-en-q4_k", "X-ASR 中英 · q4_k（省空间）", 88,
+         "https://huggingface.co/cstr/x-asr-zh-en-GGUF/resolve/main/x-asr-zh-en-q4_k.gguf",
+         "未验证：体积小 45%，质量待测"),
+    };
+
+    private static string AsrDir => Path.Combine(Env.ConfigDir, "asr");
+    private static string AsrModelDir => Path.Combine(AsrDir, "models");
+    private static volatile string _asrDlId = "";
+    private static volatile int _asrDlPct;
+    private static volatile string _asrDlMsg = "";
+
+    /// <summary>引擎在哪：先看程序目录 assets\haolive，再看用户目录（便于不重装换引擎）。</summary>
+    private static string AsrEnginePath()
+    {
+        var a = Path.Combine(AppContext.BaseDirectory, "assets", "haolive", "haolive-server.exe");
+        if (File.Exists(a)) return a;
+        var b = Path.Combine(AsrDir, "haolive-server.exe");
+        return File.Exists(b) ? b : "";
+    }
+
+    public string AsrState()
+    {
+        var engine = AsrEnginePath();
+        var arr = new JsonArray();
+        foreach (var m in AsrModels)
+        {
+            var file = Path.Combine(AsrModelDir, m.id + ".gguf");
+            var has = File.Exists(file);
+            arr.Add(new JsonObject
+            {
+                ["id"] = m.id, ["name"] = m.name, ["mb"] = m.mb, ["note"] = m.note,
+                ["installed"] = has,
+                ["sizeMb"] = has ? Math.Round(new FileInfo(file).Length / 1048576.0, 1) : 0,
+                ["active"] = Settings.AsrModel == m.id,
+            });
+        }
+        return Env.Json(new
+        {
+            ok = true,
+            engineFound = engine.Length > 0,
+            enginePath = engine,
+            modelDir = AsrModelDir,
+            downloading = _asrDlId,
+            progress = _asrDlPct,
+            message = _asrDlMsg,
+            selected = Settings.AsrModel,
+            models = arr,
+        });
+    }
+
+    /// <summary>下载模型（后台线程；进度由 asrState 轮询显示）。</summary>
+    public string AsrDownload(string? id)
+    {
+        var m = AsrModels.FirstOrDefault(x => x.id == (id ?? ""));
+        if (m.id == null) return Env.Json(new { ok = false, message = "未知模型" });
+        if (_asrDlId.Length > 0) return Env.Json(new { ok = false, message = "已有下载在进行：" + _asrDlId });
+        Directory.CreateDirectory(AsrModelDir);
+        var target = Path.Combine(AsrModelDir, m.id + ".gguf");
+        _asrDlId = m.id; _asrDlPct = 0; _asrDlMsg = "开始下载";
+        Task.Run(async () =>
+        {
+            var tmp = target + ".part";
+            try
+            {
+                using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(30) };
+                using var resp = await http.GetAsync(m.url, System.Net.Http.HttpCompletionOption.ResponseHeadersRead);
+                resp.EnsureSuccessStatusCode();
+                var total = resp.Content.Headers.ContentLength ?? (long)m.mb * 1048576;
+                using (var src = await resp.Content.ReadAsStreamAsync())
+                using (var dst = File.Create(tmp))
+                {
+                    var buf = new byte[81920];
+                    long done = 0; int n;
+                    while ((n = await src.ReadAsync(buf, 0, buf.Length)) > 0)
+                    {
+                        await dst.WriteAsync(buf, 0, n);
+                        done += n;
+                        _asrDlPct = (int)Math.Min(99, done * 100 / Math.Max(1, total));
+                        _asrDlMsg = $"{done / 1048576} / {total / 1048576} MB";
+                    }
+                }
+                if (File.Exists(target)) File.Delete(target);
+                File.Move(tmp, target);
+                _asrDlPct = 100; _asrDlMsg = "下载完成";
+                Settings.AsrModel = m.id;
+                Safe.Note("ASR 模型下载完成：" + m.id);
+            }
+            catch (Exception e)
+            {
+                _asrDlMsg = "下载失败：" + e.Message;
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+                Safe.Note("ASR 模型下载失败：" + e.Message);
+            }
+            finally { _asrDlId = ""; }
+        });
+        return Env.Json(new { ok = true, message = "已开始下载 " + m.name + "（" + m.mb + " MB）" });
+    }
+
+    /// <summary>选择模型（只记录选择；实际使用等识别接入后生效）。</summary>
+    public string AsrSelect(string? id)
+    {
+        var m = AsrModels.FirstOrDefault(x => x.id == (id ?? ""));
+        if (m.id == null) return Env.Json(new { ok = false, message = "未知模型" });
+        var file = Path.Combine(AsrModelDir, m.id + ".gguf");
+        if (!File.Exists(file)) return Env.Json(new { ok = false, message = "还没下载这个模型" });
+        Settings.AsrModel = m.id;
+        return Env.Json(new { ok = true, message = "已选择 " + m.name });
+    }
+
     /// <summary>键源归因报告：`rawInput` / `rawInput reset`</summary>
     private static string RawInputReport(string? arg)
     {
@@ -2167,6 +2284,9 @@ internal sealed class Backend : IDisposable
             "recoverAudio" => RecoverAudio(a0),
             "wizardNext" => WizardNext(),
             "exportConfig" => ExportConfig(),
+            "asrState" => AsrState(),
+            "asrDownload" => AsrDownload(a0),
+            "asrSelect" => AsrSelect(a0),
             "wizardReset" => WizardReset(),
             "repairDriver" => RepairDriver(a0),
             "exportDriverDiag" => ExportDriverDiag(),

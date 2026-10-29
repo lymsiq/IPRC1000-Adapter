@@ -370,6 +370,40 @@
         </details>
       </div>
 
+      <!-- 3.5 鼠标模式（开关从「鼠标模式」页搬来） -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="ic ic-blue"><svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="5"/><path d="M12 7.6v3.9"/></svg></div>
+          <div class="panel-title">
+            <b>鼠标模式</b>
+            <span>遥控器当鼠标用：方向键按住拖动即移动；切换即进出「鼠标模式」配置组</span>
+          </div>
+          <span class="dot" id="d-mouse2"></span>
+        </div>
+        <div class="note" id="mouseToggleNote"></div>
+        <div class="panel-actions">
+          <button class="btn" id="btnMouseToggle">切换到鼠标模式</button>
+        </div>
+      </div>
+
+      <!-- 3.6 本地语音识别（ASR） -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="ic ic-purple"><svg viewBox="0 0 24 24"><path d="M12 3v10" stroke-width="1.8"/><path d="M8 6.5a4 4 0 0 1 8 0" fill="none" stroke-width="1.6"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" fill="none" stroke-width="1.6"/><path d="M12 18v3" stroke-width="1.6"/></svg></div>
+          <div class="panel-title">
+            <b>本地语音识别（ASR）</b>
+            <span>在电脑本地把语音转成文字，语音不出本机 · 目前用于「试听/离线」通道</span>
+          </div>
+          <span class="dot" id="d-asr"></span>
+        </div>
+        <div class="kv" id="asrKv"></div>
+        <div class="note" id="asrNote"></div>
+        <div class="list" id="asrModels"></div>
+        <div class="panel-actions">
+          <button class="btn ghost" id="btnAsrRefresh">刷新状态</button>
+        </div>
+      </div>
+
       <!-- 4. 按键拦截 -->
       <div class="panel">
         <div class="panel-head">
@@ -435,11 +469,11 @@
         <div class="kv" id="mouseKv"></div>
         <!-- 方块键的作用已移到「按键映射」页的组标签那一行（那里才是"配置组"的地盘），
              这里只留一句指路 —— 界面约定：同一份数据不许在两处各放一份控件。 -->
+        <div class="note"><b>鼠标模式的开关已移到「环境设置」</b> —— 同一个开关，只在一处放控件。</div>
         <div class="note" id="mouseNote"><b>鼠标模式就是一个配置组</b> —— 它在「<b>按键映射</b>」页的
           配置组标签里，和别的组一样可以改按键。切到它 = 开鼠标模式，切走 = 关。
           方块键的出厂值就是「切换配置组」，也可以改绑成别的键或鼠标动作。</div>
         <div class="panel-actions">
-          <button class="btn" id="btnMouseToggle">切换到鼠标模式</button>
           <button class="btn ghost" id="btnMouseCalib">重新自校准</button>
         </div>
       </div>
