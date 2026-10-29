@@ -880,8 +880,6 @@ internal sealed class Backend : IDisposable
             {
                 ["mode"] = _keySource,
                 ["stillKeyboard"] = Env.RemoteStillKeyboard(),
-                ["driverFree"] = Settings.DriverFreeMode,
-                ["ghostSwallowed"] = GhostGuard.Swallowed,
                 ["guard"] = _keySourceGuard,
                 // ★ 2026-10-18：`pressed` 以前取"最后一个事件是不是 DOWN"——
                 //   一旦 UP 丢了，面板就永远显示「按住」，看起来像卡键（真机被误判过）。

@@ -913,10 +913,11 @@ function renderEnv(s) {
     // 日志只在打开诊断开关时才有意义；默认关就不显示这一格（否则用户会以为"还有日志"）
     (logOn && ks.logPath ? kvItem('按键日志', '已写入 ' + ks.logPath) : '');
   $('#keySrcNote').className = 'note' + (ks.stillKeyboard ? ' warn' : '');
-  $('#keySrcNote').innerHTML = ks.driverFree
+  // 注意：driverFree / ghostSwallowed 在 **GetState 顶层**（不在 keySrc 子对象里）
+  $('#keySrcNote').innerHTML = s.driverFree
     // 无驱动模式：遥控器**就是键盘**，这里不能再喊"请安装虚拟键盘驱动"（那恰好会推翻本模式）
     ? '<b>无驱动模式</b>：遥控器保持键盘，它自带的 m 由钩子按「连发特征」吞掉' +
-      '（按住时的连发每秒约 31 次，已吞 <b>' + (ks.ghostSwallowed || 0) + '</b> 次；' +
+      '（按住时的连发每秒约 31 次，已吞 <b>' + (s.ghostSwallowed || 0) + '</b> 次；' +
       '开头第 1 个 m 可能漏进来，属正常）。' + (ks.guard ? `<br>${ks.guard}` : '')
     : (ks.stillKeyboard
       ? '⚠⚠ <b>驱动还没换！</b>系统仍把遥控器当键盘 → <b>按遥控器会同时打出 m</b>。' +
