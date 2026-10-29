@@ -76,7 +76,8 @@ internal static class AsrOverlay
         catch { }
     }
 
-    public const int W = 380, H = 104;
+    // 尺寸对齐输入法那种窄条：宽 300 / 高 64（原来 380×104 太大）
+    public const int W = 300, H = 64;
 
     // ── 状态 ──
     private static string _text = "";
@@ -111,6 +112,13 @@ internal static class AsrOverlay
     }
 
     /// <summary>识别阶段（已松手）：波形停下，提示改成"识别中"。</summary>
+    /// <summary>流式 partial：边识别边显示（引擎给的是全量假设，直接替换）。</summary>
+    public static void ShowPartial(string text)
+    {
+        lock (Gate) { _listening = false; _hint = ""; _text = text ?? ""; }
+        Ui(() => _form?.Invalidate());
+    }
+
     public static void Recognizing()
     {
         lock (Gate) { _listening = false; _hint = "识别中…"; }
@@ -171,8 +179,10 @@ internal static class AsrOverlay
                     // ① 光标矩形（准确）
                     var p = new Point(gi.rcCaret.Left, gi.rcCaret.Bottom);
                     ClientToScreen(hwnd, ref p);
-                    x = p.X - 20;
-                    y = p.Y + 10;
+                    // 多屏：屏幕跟着光标走，否则副屏上会跑回主屏
+                    screen = Screen.FromPoint(p).WorkingArea;
+                    x = p.X - 16;
+                    y = p.Y + 8;
                 }
                 else if (GetWindowRect(hwnd, out var wr))
                 {
@@ -231,7 +241,7 @@ internal static class AsrOverlay
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 
-            using (var path = Round(new Rectangle(0, 0, Width - 1, Height - 1), 14))
+            using (var path = Round(new Rectangle(0, 0, Width - 1, Height - 1), 11))
             using (var bg = new SolidBrush(Color.FromArgb(24, 26, 30)))
             using (var pen = new Pen(Color.FromArgb(58, 62, 70), 1))
             {
@@ -241,21 +251,22 @@ internal static class AsrOverlay
 
             // 波形（左侧 96px）：直接用录音缓冲的实时电平
             var bars = AsrCapture.Levels();
-            var bw = 4; var gap = 3; var bx = 16; var baseY = Height / 2 + 6;
-            for (var i = 0; i < bars.Length && i < 18; i++)
+            var bw = 3; var gap = 2; var bx = 12; var baseY = Height / 2 + 4;
+            const int showBars = 12;
+            for (var i = 0; i < bars.Length && i < showBars; i++)
             {
                 var v = Math.Clamp(bars[i], 0f, 1f);
-                var h = 4 + (int)(v * 26);
+                var h = 3 + (int)(v * 18);
                 using var b = new SolidBrush(Color.FromArgb(_listening ? 90 : 60, 130, 200, 255));
                 g.FillRectangle(b, bx + i * (bw + gap), baseY - h / 2,
                                 bw, h);
             }
 
             // 右侧文字
-            var textX = 16 + 18 * (bw + gap) + 8;
-            var rect = new Rectangle(textX, 14, Width - textX - 16, Height - 28);
-            using var fHint = new Font("Microsoft YaHei UI", 9F);
-            using var fText = new Font("Microsoft YaHei UI", 10.5F);
+            var textX = bx + showBars * (bw + gap) + 8;
+            var rect = new Rectangle(textX, 8, Width - textX - 12, Height - 16);
+            using var fHint = new Font("Microsoft YaHei UI", 8.5F);
+            using var fText = new Font("Microsoft YaHei UI", 9.5F);
             // 垂直居中：提示一行、结果最多两行（超出用省略号，不撑破圆角）
             using var fmt = new StringFormat
             {
@@ -279,9 +290,9 @@ internal static class AsrOverlay
             if (_listening)
             {
                 var sec = (Environment.TickCount64 - _shownAt) / 1000.0;
-                var w = (int)Math.Min(Width - 32, (Width - 32) * Math.Min(1.0, sec / 8.0));
+                var w = (int)Math.Min(Width - 24, (Width - 24) * Math.Min(1.0, sec / 8.0));
                 using var b = new SolidBrush(Color.FromArgb(120, 90, 170, 255));
-                g.FillRectangle(b, 16, Height - 8, w, 2);
+                g.FillRectangle(b, 12, Height - 5, w, 2);
             }
         }
 

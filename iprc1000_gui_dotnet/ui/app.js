@@ -1064,8 +1064,8 @@ function renderAsr(s, a) {
     note.innerHTML = a.downloading
       ? `正在下载 <b>${a.downloading}</b> · ${a.progress}% · ${a.message || ''}`
       : (engineOk
-          ? '模型在本地运行，语音不出本机。选「本地 ASR」后：按语音键只录音，'
-            + '<b>松手后整句识别并直接上屏</b>（实测 7.7 秒音频 → 1.2 秒出字）。'
+          ? '模型在本地运行，语音不出本机。选「本地 ASR」后：按住语音键<b>边说边出字</b>，'
+            + '松手即定稿上屏（实测 7.7 秒音频、155 次流式更新）。'
             + (a.gpuAvailable ? '' : ' GPU 需要单独换 GPU 版引擎（随包是 CPU 版）。')
           : '⚠ 引擎文件缺失（assets\\haolive\\haolive-server.exe），请重新安装或点上面的「一键安装 / 修复」。');
   }
@@ -1677,9 +1677,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.118',
+      version: '1.2.119',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.118（构建于 2026-10-29 18:45）',
+      versionLine: 'v1.2.119（构建于 2026-10-29 19:10）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

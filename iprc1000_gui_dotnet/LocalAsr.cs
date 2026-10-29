@@ -23,6 +23,8 @@ internal static class LocalAsr
 {
     private static Process? _srv;
     private static int _port;
+    /// <summary>WebSocket 端口（引擎独立分配，必须从 /health 读）。</summary>
+    public static int WsPort { get; private set; }
     private static string _model = "";
     // ★★ 必须显式禁用代理：.NET 的 HttpClient 会读 HTTP_PROXY/HTTPS_PROXY 环境变量，
     //   而 **127.0.0.1 也会被代理**（我们实测：请求发到本地代理，代理回 404，
@@ -91,6 +93,17 @@ internal static class LocalAsr
                         using var r = Http.GetAsync($"http://127.0.0.1:{_port}/health").GetAwaiter().GetResult();
                         if (r.IsSuccessStatusCode)
                         {
+                            // /health 里带 websocket_port（流式在**另一个端口**）
+                            try
+                            {
+                                var hb = r.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                                using (var hd = JsonDocument.Parse(hb))
+                                {
+                                    if (hd.RootElement.TryGetProperty("websocket_port", out var wp))
+                                        WsPort = wp.GetInt32();
+                                }
+                            }
+                            catch { }
                             // 确认这个端口上真的是**加载了模型的**引擎（不是残留的别的实例）
                             try
                             {
@@ -296,6 +309,7 @@ internal static class AsrCapture
         MemoryStream? buf;
         lock (Gate) { buf = _buf; if (buf == null) return; _bytes += len; }
         try { buf.Write(b, off, len); } catch { }
+        AsrRun.PushLive(b, off, len);   // 流式已连上就同时推过去
         // RMS 单独算：不能锁着 Gate 做浮点循环（音频线程要快）
         try
         {
@@ -311,6 +325,16 @@ internal static class AsrCapture
             lock (Gate) { _levels[_levelPos] = lv; _levelPos = (_levelPos + 1) % LevelSlots; }
         }
         catch { }
+    }
+
+    /// <summary>取当前已攒 PCM 的副本（流式连上后补推用），不清空缓冲。</summary>
+    public static byte[] Snapshot()
+    {
+        lock (Gate)
+        {
+            try { return _buf?.ToArray() ?? Array.Empty<byte>(); }
+            catch { return Array.Empty<byte>(); }
+        }
     }
 
     public static (byte[] wav, double seconds) End()
@@ -339,15 +363,50 @@ internal static class AsrRun
 {
     private static int _busy;
 
+    private static AsrStream? _stream;
+
+    /// <summary>诊断用：最近一次 partial 文本 / 次数 / 是否正在流式。</summary>
+    public static string LastPartial => _stream?.LastPartial ?? "";
+    public static long PartialCount => _stream?.Partials ?? 0;
+    public static bool Streaming => _stream != null;
+
     public static void Begin()
     {
         try
         {
             AsrCapture.Begin();
             AsrOverlay.Show("正在听…");
+            _stream = null;
+            // 后台把引擎和流拉起来：音频先进本地缓冲，连上后把已攒的部分补推过去
+            Task.Run(async () =>
+            {
+                try
+                {
+                    if (Settings.AsrModel.Length == 0) { Safe.Note("ASR 未选择模型"); return; }
+                    var model = System.IO.Path.Combine(Env.ConfigDir, "asr", "models", Settings.AsrModel + ".gguf");
+                    var (ok, msg) = LocalAsr.Ensure(model, Settings.AsrBackend);
+                    if (!ok) { Safe.Note("ASR 引擎不可用：" + msg); return; }
+                    var st = await AsrStream.OpenAsync(LocalAsr.WsPort);
+                    if (st == null) { Safe.Note("ASR 流式不可用，松手后走整段识别"); return; }
+                    st.OnPartial += txt => AsrOverlay.ShowPartial(txt);
+                    _stream = st;
+                    // 补推已经攒下的音频
+                    var pre = AsrCapture.Snapshot();
+                    if (pre.Length > 0) st.Push(pre, pre.Length);
+                    Safe.Note($"ASR 流式已连接（ws {LocalAsr.WsPort}，补推 {pre.Length / 32}ms）");
+                }
+                catch (Exception e) { Safe.Note("ASR 流式启动失败：" + e.Message); }
+            });
             Safe.Note("ASR 开始录音");
         }
         catch (Exception e) { Safe.Note("ASR 录音开始失败：" + e.Message); }
+    }
+
+    /// <summary>音频线程调用：流已连上就实时推（未连上时靠 Snapshot 补推）。</summary>
+    public static void PushLive(byte[] b, int off, int len)
+    {
+        var st = _stream;
+        st?.Push(b, off, len);
     }
 
     /// <summary>松开后延迟一点再取音频（等尾音进缓冲），然后在后台线程识别 + 注入。</summary>
@@ -356,7 +415,35 @@ internal static class AsrRun
         Task.Delay(delayMs).ContinueWith(_ => Run());
     }
 
+    /// <summary>松手后的收尾：有流就走流式（等 final），没有就回落整段。</summary>
     private static void Run()
+    {
+        var st = _stream;
+        if (st != null)
+        {
+            _stream = null;
+            AsrOverlay.Recognizing();
+            try
+            {
+                var text = st.FinishAsync().GetAwaiter().GetResult();
+                var sec = AsrCapture.End().seconds;      // 清空缓冲，顺便拿时长
+                if (text.Length > 0)
+                {
+                    LocalAsr.LastText = text; LocalAsr.LastSec = sec;
+                    LocalAsr.LastAt = Environment.TickCount64; LocalAsr.LastErr = "";
+                    AsrOverlay.ShowResult(text);
+                    Safe.Note($"ASR 流式成功（{st.Partials} 次 partial / {sec:F1}s）：「{text}」");
+                    LocalAsr.TypeText(text);
+                    return;
+                }
+                Safe.Note($"ASR 流式无结果（partial {st.Partials} 次），回落整段");
+            }
+            catch (Exception e) { Safe.Note("ASR 流式收尾异常：" + e.Message); }
+        }
+        RunBatch();
+    }
+
+    private static void RunBatch()
     {
         if (Interlocked.Exchange(ref _busy, 1) == 1) return;   // 上一句还在识别，直接跳过
         try
