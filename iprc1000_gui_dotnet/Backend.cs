@@ -1991,6 +1991,18 @@ internal sealed class Backend : IDisposable
         return Env.Json(new { ok = true, message = "已选择 " + m.name });
     }
 
+    /// <summary>打开模型目录（资源管理器）。目录不存在就先建，避免"点了没反应"。</summary>
+    public string OpenAsrDir()
+    {
+        try
+        {
+            Directory.CreateDirectory(AsrModelDir);
+            System.Diagnostics.Process.Start("explorer.exe", "\"" + AsrModelDir + "\"");
+            return Env.Json(new { ok = true, message = "已打开：" + AsrModelDir });
+        }
+        catch (Exception e) { return Env.Json(new { ok = false, message = "打开失败：" + e.Message }); }
+    }
+
     /// <summary>键源归因报告：`rawInput` / `rawInput reset`</summary>
     private static string RawInputReport(string? arg)
     {
@@ -2287,6 +2299,7 @@ internal sealed class Backend : IDisposable
             "asrState" => AsrState(),
             "asrDownload" => AsrDownload(a0),
             "asrSelect" => AsrSelect(a0),
+            "asrOpenDir" => OpenAsrDir(),
             "wizardReset" => WizardReset(),
             "repairDriver" => RepairDriver(a0),
             "exportDriverDiag" => ExportDriverDiag(),

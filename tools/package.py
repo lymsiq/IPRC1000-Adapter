@@ -348,7 +348,8 @@ SRC_REQUIRED = [
     ("鼠标模式有引擎自检", "iprc1000_gui_dotnet/MouseEngine.cs", "static string SelfTest"),
     ("引擎自检有 CLI 入口", "iprc1000_gui_dotnet/Program.cs", "--mouse-engine-test"),
     # ★ 鼠标模式页（阶段 2）
-    ("鼠标模式页在包内", "iprc1000_gui_dotnet/ui/index.html", "page-mouse"),
+    # 2026-10-29：鼠标参数已并入环境设置，原来的独立页删除 -> 改断言 #mouseParams 容器
+    ("鼠标参数已并入环境设置", "iprc1000_gui_dotnet/ui/index.html", 'id="mouseParams"'),
     ("鼠标页有实时校准区", "iprc1000_gui_dotnet/ui/index.html", "mousePad"),
     ("鼠标页渲染函数存在", "iprc1000_gui_dotnet/ui/app.js", "function renderMouse"),
     ("预览分支也渲染鼠标页", "iprc1000_gui_dotnet/ui/app.js", "renderEnv(demo); renderMouse(demo)"),
