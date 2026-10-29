@@ -329,6 +329,48 @@ internal static class AsrCapture
         catch { }
     }
 
+    /// <summary>最近一次实际使用的增益倍数（1.0 = 未放大）。</summary>
+    public static double LastGain = 1.0;
+
+    /// <summary>
+    /// **安静时自动增益**：遥控器离嘴远、房间安静时，PCM 峰值可能只有几百，
+    /// 引擎的语音前端会判成"没有人在说话" ⇒ 一次 partial 都不出（实测踩到：
+    /// 同样的 17 秒，音量正常的音频 partials=921，音量偏低的 0）。
+    ///
+    /// 保守口径：
+    ///   · 只在 peak &lt; 8000（约 -12 dBFS）时放大，最多 4 倍
+    ///   · 放大后峰值不超过 24000（-3 dBFS），不会削顶
+    ///   · peak 本来够大就**完全不动**（避免把噪声也放大）
+    /// </summary>
+    private static byte[] BoostIfQuiet(byte[] pcm)
+    {
+        LastGain = 1.0;
+        try
+        {
+            var peak = 0;
+            for (var i = 0; i + 1 < pcm.Length; i += 2)
+            {
+                var v = Math.Abs((int)(short)(pcm[i] | (pcm[i + 1] << 8)));
+                if (v > peak) peak = v;
+            }
+            if (peak == 0 || peak >= 8000) return pcm;        // 够响或全静音：不动
+            var gain = Math.Min(4.0, 24000.0 / peak);
+            if (gain < 1.2) return pcm;
+            var outPcm = new byte[pcm.Length];
+            for (var i = 0; i + 1 < pcm.Length; i += 2)
+            {
+                var v = (short)(pcm[i] | (pcm[i + 1] << 8));
+                var x = (int)Math.Clamp(v * gain, -32000, 32000);
+                outPcm[i] = (byte)(x & 0xFF);
+                outPcm[i + 1] = (byte)((x >> 8) & 0xFF);
+            }
+            LastGain = Math.Round(gain, 2);
+            Safe.Note($"ASR 音量偏低（峰值 {peak}），已放大 {LastGain}×");
+            return outPcm;
+        }
+        catch { return pcm; }
+    }
+
     /// <summary>取当前已攒 PCM 的副本（流式连上后补推用），不清空缓冲。</summary>
     public static byte[] Snapshot()
     {
@@ -352,8 +394,9 @@ internal static class AsrCapture
             _buf = null;
             _bytes = 0;
         }
-        return (pcm.Length == 0 ? Array.Empty<byte>() : LocalAsr.WrapWav(pcm),
-                pcm.Length / 2.0 / 16000.0);
+        if (pcm.Length == 0) return (Array.Empty<byte>(), 0);
+        pcm = BoostIfQuiet(pcm);
+        return (LocalAsr.WrapWav(pcm), pcm.Length / 2.0 / 16000.0);
     }
 }
 
@@ -467,10 +510,40 @@ internal static class AsrRun
     /// 为什么需要：带界面的实例没有测试管道，日志又被"记录事件日志"开关挡着，
     /// 出问题只能靠猜 —— 这个文件绕过两者，任何一次识别都能事后回看。
     /// </summary>
-    private static void DumpDiag(string phase, AsrStream? st, int wavBytes, double sec, string extra = "")
+    /// <summary>最近一次录音的电平统计（判断"是不是声音太小导致引擎不出字"）。</summary>
+    private static (double rms, int peak, double clipRatio) AudioStats(byte[] wav)
     {
         try
         {
+            var start = 44;                       // 跳过 WAV 头
+            if (wav.Length <= start) return (0, 0, 0);
+            double sum = 0; var n = 0; var peak = 0; var clip = 0;
+            for (var i = start; i + 1 < wav.Length; i += 2)
+            {
+                var v = Math.Abs((int)(short)(wav[i] | (wav[i + 1] << 8)));
+                if (v > peak) peak = v;
+                if (v >= 32000) clip++;
+                sum += (double)v * v; n++;
+            }
+            return (n == 0 ? 0 : Math.Sqrt(sum / n), peak, n == 0 ? 0 : (double)clip / n);
+        }
+        catch { return (0, 0, 0); }
+    }
+
+    private static void DumpDiag(string phase, AsrStream? st, int wavBytes, double sec, string extra = "", byte[]? wav = null)
+    {
+        try
+        {
+            var (rms, peak, clip) = wav != null ? AudioStats(wav) : (0.0, 0, 0.0);
+            if (wav != null && wav.Length > 44)
+            {
+                try
+                {
+                    System.IO.File.WriteAllBytes(
+                        System.IO.Path.Combine(Env.ConfigDir, "asr-last.wav"), wav);
+                }
+                catch { }
+            }
             var obj = new
             {
                 at = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
@@ -481,6 +554,8 @@ internal static class AsrRun
                 finalSent = st?.FinalSent ?? false,
                 finalRecv = st?.FinalRecv ?? false,
                 wavBytes, sec = Math.Round(sec, 2),
+                bytesPerSec = sec > 0.1 ? (int)(wavBytes / sec) : 0,
+                rms = Math.Round(rms, 1), peak, clipRatio = Math.Round(clip, 4), gain = AsrCapture.LastGain,
                 lastPartial = st?.LastPartial ?? "",
                 lastErr = LocalAsr.LastErr,
                 extra,
@@ -506,7 +581,7 @@ internal static class AsrRun
                 //   上一版是先 FinishAsync 再 End()，失败后音频已丢 ⇒ 兜底必然 0 字节 ⇒ 卡住。
                 var (wav, sec) = AsrCapture.End();
                 var raw = st.FinishAsync().GetAwaiter().GetResult();
-                DumpDiag("stream-finish", st, wav.Length, sec, "raw=" + (raw ?? ""));
+                DumpDiag("stream-finish", st, wav.Length, sec, "raw=" + (raw ?? ""), wav);
                 var text = Finish(raw);
                 if (text.Length > 0)
                 {
@@ -524,7 +599,7 @@ internal static class AsrRun
                     RunBatchWith(wav, sec);
                     return;
                 }
-                DumpDiag("stream-empty-noaudio", st, wav.Length, sec);
+                DumpDiag("stream-empty-noaudio", st, wav.Length, sec, "", wav);
                 AsrOverlay.ShowError("没录到音频");
                 Safe.Note("ASR 流式空结果且无音频");
             }
@@ -552,7 +627,10 @@ internal static class AsrRun
             var text = Finish(raw);
             if (!tok || text.Length == 0)
             {
-                AsrOverlay.ShowError(LocalAsr.LastErr.Length > 0 ? LocalAsr.LastErr : "识别无结果");
+                var (r2, p2, _) = AudioStats(wav);
+                AsrOverlay.ShowError(LocalAsr.LastErr.Length > 0
+                    ? LocalAsr.LastErr
+                    : $"识别无结果（音量 {p2}，{(p2 < 800 ? "偏小，请靠近麦克风" : "正常")}）");
                 return;
             }
             LocalAsr.LastText = text; LocalAsr.LastSec = sec;
