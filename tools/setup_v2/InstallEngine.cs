@@ -659,7 +659,86 @@ namespace IprcSetup2
             }
         }
 
-        internal void Uninstall()
+        /// <summary>删掉我们写进蓝牙配置键的 3 个 ETW 值（只删自己的，不动别人的）。</summary>
+        private void RemoveEtwValues()
+        {
+            try
+            {
+                using (var key = Registry.LocalMachine.OpenSubKey(Product.RegistryKey, true))
+                {
+                    if (key == null) return;
+                    foreach (var name in RegistryNames)
+                    {
+                        try { key.DeleteValue(name, false); } catch { }
+                    }
+                }
+                Report(90, "已清除 ETW 相关注册表值");
+            }
+            catch (Exception e) { Report(90, "清除注册表值失败（可忽略）：" + e.Message); }
+        }
+
+        /// <summary>删掉登录自启项（HKCU\...\Run 下名字含 IPRC1000 的值）。</summary>
+        private void RemoveStartupEntry()
+        {
+            try
+            {
+                using (var run = Registry.CurrentUser.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true))
+                {
+                    if (run == null) return;
+                    foreach (var name in run.GetValueNames())
+                    {
+                        if (name.IndexOf("IPRC1000", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                        try { run.DeleteValue(name, false); Report(91, "已删除自启项：" + name); } catch { }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>尽力卸载 VB-CABLE（用官方安装器的 -u）。找不到或失败都只提示，不阻断卸载。</summary>
+        private void UninstallCableBestEffort()
+        {
+            try
+            {
+                var baseDir = Path.Combine(StateDirectory, "downloads");
+                if (!Directory.Exists(baseDir)) { Report(85, "未找到 VB-CABLE 安装包，跳过声卡卸载"); return; }
+                var setup = Directory.GetFiles(baseDir, "VBCABLE_Setup_x64.exe", SearchOption.AllDirectories).FirstOrDefault();
+                if (setup == null) { Report(85, "未找到 VB-CABLE 卸载程序，请在设备管理器里手动卸载"); return; }
+                Report(85, "正在卸载虚拟声卡 VB-CABLE（官方卸载器）…");
+                var code = RunProcess(setup, "-u", false);
+                Report(87, $"VB-CABLE 卸载返回 {code}（可能需要重启才完全移除）");
+                State.RestartRequired = true;
+            }
+            catch (Exception e) { Report(87, "卸载 VB-CABLE 失败：" + e.Message); }
+        }
+
+        /// <summary>删除本机用户配置（%APPDATA%）与安装状态目录（%ProgramData%），尽力而为。</summary>
+        private void RemoveUserDataBestEffort()
+        {
+            var dirs = new[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "IPRC1000 Adapter"),
+                StateDirectory
+            };
+            foreach (var dir in dirs)
+            {
+                try
+                {
+                    if (!Directory.Exists(dir)) continue;
+                    // 先删文件（日志可能被占用 → 单个失败不影响其他）
+                    foreach (var f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories))
+                    {
+                        try { File.SetAttributes(f, FileAttributes.Normal); File.Delete(f); } catch { }
+                    }
+                    try { Directory.Delete(dir, true); } catch { }
+                    Report(93, "已清除：" + dir);
+                }
+                catch (Exception e) { Report(93, "清除失败（可手动删除）：" + dir + " —— " + e.Message); }
+            }
+        }
+
+        internal void Uninstall(bool removeCable = false, bool removeUserData = false)
         {
             BeginLog("卸载主程序");
             // ★★ 2026-10-28 修：原来这里没有 try/catch —— 任何一步抛异常都会直接冒出去，
@@ -701,11 +780,20 @@ namespace IprcSetup2
                         + string.Join("\n· ", failed.Take(6))
                         + "\n\n请先退出程序（托盘右键 → 退出）后重试。");
                 File.Delete(manifestPath);
+                RemoveEtwValues();          // 我们写进蓝牙配置键的 ETW 值
+                RemoveStartupEntry();       // 登录自启
+                if (removeCable) UninstallCableBestEffort();
+                if (removeUserData) RemoveUserDataBestEffort();
                 var shortcut = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory), Product.DisplayName + ".lnk");
                 if (File.Exists(shortcut)) File.Delete(shortcut);
                 Registry.LocalMachine.DeleteSubKeyTree(Product.UninstallKey, false);
                 RemoveResumeTask();
-                Save($"主程序已卸载（删除 {removed} 个文件）；用户数据、共享驱动与维护程序已保留");
+                var extras = new List<string>();
+                if (removeCable) extras.Add("虚拟声卡");
+                if (removeUserData) extras.Add("本机配置");
+                Save($"主程序已卸载（删除 {removed} 个文件"
+                     + (extras.Count > 0 ? "；另清理：" + string.Join("、", extras) : "；用户数据已保留")
+                     + "）");
                 Report(100, State.Phase);
             }
             catch (Exception error)

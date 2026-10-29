@@ -1788,6 +1788,49 @@ internal sealed class Backend : IDisposable
         return Env.Json(new { ok = true, done = false, step = 0, message = "向导已重置" });
     }
 
+    /// <summary>
+    /// **导出配置**（2026-10-29）：把用户配置复制到桌面一个带时间戳的文件夹里。
+    ///
+    /// 为什么是"复制"而不是"另存为"：卸载会删掉整个配置目录，
+    /// 用户需要的是一个**能直接放回去**的副本 —— 所以连目录结构一起复制，
+    /// 重装后把文件夹里的文件拷回 `%APPDATA%\IPRC1000 Adapter` 即可恢复。
+    /// 只导用户自己的东西（按键映射 / 鼠标参数 / 设置 / 音频选择），不导日志。
+    /// </summary>
+    public string ExportConfig()
+    {
+        try
+        {
+            var src = Env.ConfigDir;
+            var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            var dst = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                                   "IPRC1000-配置备份-" + stamp);
+            Directory.CreateDirectory(dst);
+
+            var wanted = new[] { "settings.json", "keymap.json", "mouse.json", "audio.json" };
+            var copied = new List<string>();
+            foreach (var name in wanted)
+            {
+                var from = Path.Combine(src, name);
+                if (!File.Exists(from)) continue;
+                File.Copy(from, Path.Combine(dst, name), true);
+                copied.Add(name);
+            }
+            if (copied.Count == 0) return Env.Json(new { ok = false, message = "没有可导出的配置（可能还没改过任何设置）" });
+
+            // 附一份说明，免得用户不知道往哪放
+            File.WriteAllText(Path.Combine(dst, "如何恢复.txt"),
+                "重装 IPRC1000 适配器后，把本文件夹里的 json 文件复制回：\r\n" +
+                Path.Combine(src) + "\r\n\r\n" +
+                "然后重启程序即可恢复按键映射、鼠标参数与设置。\r\n" +
+                "导出时间：" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "\r\n",
+                new System.Text.UTF8Encoding(true));
+
+            return Env.Json(new { ok = true, path = dst, files = copied,
+                message = "已导出到桌面：" + Path.GetFileName(dst) + "（" + copied.Count + " 个文件）" });
+        }
+        catch (Exception e) { return Env.Json(new { ok = false, message = "导出失败：" + e.Message }); }
+    }
+
     /// <summary>键源归因报告：`rawInput` / `rawInput reset`</summary>
     private static string RawInputReport(string? arg)
     {
@@ -2080,6 +2123,7 @@ internal sealed class Backend : IDisposable
             "rawInput" => RawInputReport(a0),
             "recoverAudio" => RecoverAudio(a0),
             "wizardNext" => WizardNext(),
+            "exportConfig" => ExportConfig(),
             "wizardReset" => WizardReset(),
             "repairDriver" => RepairDriver(a0),
             "exportDriverDiag" => ExportDriverDiag(),

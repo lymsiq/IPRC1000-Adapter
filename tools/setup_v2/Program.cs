@@ -95,6 +95,9 @@ namespace IprcSetup2
         private readonly LinkLabel _repairLink = new LinkLabel(), _diagLink = new LinkLabel();
         // 2026-10-29：安装时直接选输入法，装完就把「语音键」映射写好（省掉用户进应用再点一次）
         private readonly RadioButton _imeDoubao = new RadioButton(), _imeWechat = new RadioButton();
+
+        // 卸载选项（2026-10-29）：默认全勾（自己人用，倾向"卸干净"）
+        private readonly CheckBox _unCable = new CheckBox(), _unData = new CheckBox();
         private readonly Panel _resultPanel = new Panel();
         private static readonly Color Ink = Color.FromArgb(27, 48, 76);
         private static readonly Color Muted = Color.FromArgb(94, 115, 137);
@@ -222,6 +225,20 @@ namespace IprcSetup2
                 // 否则用户看到的是"上面一块空白 + 下面一段字"，像页面没加载完。
                 // ★ 必须在 Load 里重排：_phase / _result 是**本段之后**才创建的，
                 //   在这里直接设 Bounds 会被它们自己的创建代码覆盖（实测：文字仍在底部）。
+                // 两个清理选项：默认勾选（配置可先导出）
+                _unCable.Text = "同时卸载虚拟声卡 VB-CABLE";
+                _unCable.Bounds = new Rectangle(32, 494, 500, 24);
+                _unCable.Font = new Font("Microsoft YaHei UI", 9.5F);
+                _unCable.Checked = true;
+                _unData.Text = "同时删除本机设置与按键映射（删除后需重新配置）";
+                _unData.Bounds = new Rectangle(32, 520, 560, 24);
+                _unData.Font = new Font("Microsoft YaHei UI", 9.5F);
+                _unData.Checked = true;
+                Controls.Add(_unCable);
+                Controls.Add(_unData);
+                Controls.Add(Label("想保留配置？先在应用「环境设置」点「导出配置」，文件会存到桌面。",
+                    56, 546, 720, 20, 8.5F, Muted));
+
                 Load += (_, _) =>
                 {
                     _install.Bounds = new Rectangle(30, 210, 764, 56);
@@ -232,8 +249,10 @@ namespace IprcSetup2
                 };
                 _phase.Text = isUninstall ? "卸载主程序" : "恢复安装前的蓝牙配置";
                 _result.Text = isUninstall
-                    ? "会删除程序文件并移除「应用和功能」里的条目；\n用户设置、按键映射、共享驱动（虚拟键盘/虚拟声卡）都会保留。\n\n确认无误请点下面的「确认卸载」。"
-                    : "会把蓝牙相关的注册表项恢复成安装前的值，恢复后需要重启。\n\n确认无误请点下面的「确认恢复配置」。";
+                    ? "会删除程序文件，并移除「应用和功能」里的条目、ETW 注册表值、登录自启项。\n"
+                      + "下面两项默认勾选：虚拟声卡（共享组件，其他软件可能在用）与本机配置（含按键映射）。\n"
+                      + "取消勾选即可保留对应的东西。\n\n确认无误请点上面的「确认卸载」。"
+                    : "会把蓝牙相关的注册表项恢复成安装前的值，恢复后需要重启。\n\n确认无误请点上面的「确认恢复配置」。";
                 _result.ForeColor = Color.FromArgb(155, 101, 39);
                 _install.Text = isUninstall ? "确认卸载（程序文件将被删除）" : "确认恢复配置";
             }
@@ -361,7 +380,11 @@ namespace IprcSetup2
                 var state = await Task.Run(() =>
                 {
                     if (operation == "resume") return _engine.InspectAfterRestart();
-                    if (operation == "uninstall") { _engine.Uninstall(); return _engine.State; }
+                    if (operation == "uninstall")
+                    {
+                        _engine.Uninstall(_unCable.Checked, _unData.Checked);
+                        return _engine.State;
+                    }
                     if (operation == "restore") { _engine.RestoreRegistry(); return _engine.State; }
                     return _engine.Install(new InstallOptions());
                 });
