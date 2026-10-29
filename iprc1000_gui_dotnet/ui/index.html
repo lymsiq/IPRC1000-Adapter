@@ -397,63 +397,12 @@
         <div class="note" id="mouseToggleNote"></div>
         <div class="panel-actions">
           <button class="btn" id="btnMouseToggle">切换到鼠标模式</button>
-          <button class="btn ghost" id="btnMouseDetail">手感与自校准 ›</button>
         </div>
       </div>
 
-      <!-- 4. 按键拦截 -->
-      <div class="panel">
-        <div class="panel-head">
-          <div class="ic ic-purple"><svg viewBox="0 0 24 24"><path d="M12 3.5 5 7v5c0 4.2 3 7 7 8.5 4-1.5 7-4.3 7-8.5V7z" fill="none" stroke-width="1.7"/><path d="M9 12l2 2 4-4" stroke-width="1.7" fill="none"/></svg></div>
-          <div class="panel-title">
-            <b>按键拦截 · 按住语音键不出字</b>
-            <span>遥控器是标准蓝牙键盘，不拦截的话语音键会一直输出 m</span>
-          </div>
-          <span class="dot" id="d-uhid"></span><span class="dot hidden" id="d-perm2"></span>
-        </div>
-        <div class="note" id="injectNote"></div>
-        <div class="kv" id="injectKv"></div>
-        <div class="kv" id="keySrcKv"></div>
-        <div class="note" id="keySrcNote"></div>
-        <div class="panel-actions">
-          <button class="btn" id="btnReleaseAll">紧急复位：释放所有按键</button>
-          <button class="btn" id="btnInstallUhid">一键安装 / 修复虚拟键盘驱动</button>
-          <button class="btn ghost" id="btnDriverDiag">复制诊断</button>
-          <button class="btn ghost" id="btnWizardReset">重跑首次设置</button>
-          <button class="btn ghost" id="btnExportConfig">导出配置</button>
-        </div>
-        <div class="kv" id="uhidKv"></div>
-        <div class="note" id="uhidNote"></div>
-        <div class="switches">
-          <!-- 日志总开关：**默认关**。排查问题时打开，会同时打开界面侧与语音桥侧的日志 -->
-          <label class="switch" id="logSwitch"><input type="checkbox" id="logToggle">写入诊断日志<i>排查用，默认关闭</i></label>
-          <!-- 第二级：事件日志（每天几 KB）。关掉它 = 完全不写任何日志。 -->
-          <label class="switch" id="noteSwitch"><input type="checkbox" id="noteToggle">记录事件日志<i>按键/释放等归因，每天几 KB；关掉即完全不记录</i></label>
-          <!-- 无驱动（降级）模式：给装不了 WinUHid 的机器。风险要写在界面上，不能只写文档。 -->
-          <label class="switch" id="driverFreeSwitch"><input type="checkbox" id="driverFreeToggle">无驱动模式（实验·降级）<i>保持遥控器为键盘、靠钩子吞 m。<b>已知不稳</b>：可能刷屏或让键盘暂时打不了字（失控会自动切回驱动模式）。<b>建议优先用「安装虚拟键盘驱动」</b></i></label>
-          <label class="switch" id="zeroGhostSwitch"><input type="checkbox" id="zeroGhostToggle">零漏模式（先吞后补）<i>连第一个 m 也不漏：遥控器刚用过时，单个 m 会晚 60ms 出现</i></label>
-        </div>
-        <div class="note" id="logNote"></div>
-        <details class="adv">
-          <summary>更多选项：测试注入 · 导出驱动手动安装</summary>
-          <div class="panel-actions">
-            <!-- 文案由 app.js 按当前语音键映射动态覆盖，这里给个中性默认值 -->
-            <button class="btn ghost" id="btnTestInject">测试注入语音键</button>
-            <!-- 只在打开诊断日志时出现（发布版默认不写日志，留个"清空"只会让人以为有日志） -->
-            <button class="btn ghost" id="btnClearLog" hidden>清空按键日志</button>
-            <button class="btn ghost" id="btnExportUhid">导出到桌面手动安装</button>
-          </div>
-        </details>
-      </div>
-    </section>
-
-    <section class="page hidden" id="page-mouse">
-      <header class="page-head">
-        <h1>鼠标模式</h1>
-        <p>遥控器当鼠标用：方向键<b>按住拖动</b>即移动（按住越久越快）· 其余按键走「鼠标模式」这个配置组的映射</p>
-      </header>
-
-      <!-- 0. 模式 -->
+      <!-- 鼠标参数（原「鼠标模式」页整体搬入） -->
+      <div id="mouseParams">
+<!-- 0. 模式 -->
       <div class="panel">
         <div class="panel-head">
           <div class="ic ic-blue"><svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="5"/><path d="M12 7.6v3.9"/></svg></div>
@@ -466,7 +415,7 @@
         <div class="kv" id="mouseKv"></div>
         <!-- 方块键的作用已移到「按键映射」页的组标签那一行（那里才是"配置组"的地盘），
              这里只留一句指路 —— 界面约定：同一份数据不许在两处各放一份控件。 -->
-        <div class="note"><b>鼠标模式的开关已移到「环境设置」</b> —— 同一个开关，只在一处放控件。</div>
+        <div class="note"><b>开/关在本页最上方</b>（环境设置 → 鼠标模式）；下面的手感参数改完即时生效。</div>
         <div class="note" id="mouseNote"><b>鼠标模式就是一个配置组</b> —— 它在「<b>按键映射</b>」页的
           配置组标签里，和别的组一样可以改按键。切到它 = 开鼠标模式，切走 = 关。
           方块键的出厂值就是「切换配置组」，也可以改绑成别的键或鼠标动作。</div>
@@ -527,7 +476,54 @@
         </div>
         <div class="kv" id="mouseLiveKv"></div>
       </div>
+      </div>
+
+      <!-- 4. 按键拦截 -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="ic ic-purple"><svg viewBox="0 0 24 24"><path d="M12 3.5 5 7v5c0 4.2 3 7 7 8.5 4-1.5 7-4.3 7-8.5V7z" fill="none" stroke-width="1.7"/><path d="M9 12l2 2 4-4" stroke-width="1.7" fill="none"/></svg></div>
+          <div class="panel-title">
+            <b>按键拦截 · 按住语音键不出字</b>
+            <span>遥控器是标准蓝牙键盘，不拦截的话语音键会一直输出 m</span>
+          </div>
+          <span class="dot" id="d-uhid"></span><span class="dot hidden" id="d-perm2"></span>
+        </div>
+        <div class="note" id="injectNote"></div>
+        <div class="kv" id="injectKv"></div>
+        <div class="kv" id="keySrcKv"></div>
+        <div class="note" id="keySrcNote"></div>
+        <div class="panel-actions">
+          <button class="btn" id="btnReleaseAll">紧急复位：释放所有按键</button>
+          <button class="btn" id="btnInstallUhid">一键安装 / 修复虚拟键盘驱动</button>
+          <button class="btn ghost" id="btnDriverDiag">复制诊断</button>
+          <button class="btn ghost" id="btnWizardReset">重跑首次设置</button>
+          <button class="btn ghost" id="btnExportConfig">导出配置</button>
+        </div>
+        <div class="kv" id="uhidKv"></div>
+        <div class="note" id="uhidNote"></div>
+        <div class="switches">
+          <!-- 日志总开关：**默认关**。排查问题时打开，会同时打开界面侧与语音桥侧的日志 -->
+          <label class="switch" id="logSwitch"><input type="checkbox" id="logToggle">写入诊断日志<i>排查用，默认关闭</i></label>
+          <!-- 第二级：事件日志（每天几 KB）。关掉它 = 完全不写任何日志。 -->
+          <label class="switch" id="noteSwitch"><input type="checkbox" id="noteToggle">记录事件日志<i>按键/释放等归因，每天几 KB；关掉即完全不记录</i></label>
+          <!-- 无驱动（降级）模式：给装不了 WinUHid 的机器。风险要写在界面上，不能只写文档。 -->
+          <label class="switch" id="driverFreeSwitch"><input type="checkbox" id="driverFreeToggle">无驱动模式（实验·降级）<i>保持遥控器为键盘、靠钩子吞 m。<b>已知不稳</b>：可能刷屏或让键盘暂时打不了字（失控会自动切回驱动模式）。<b>建议优先用「安装虚拟键盘驱动」</b></i></label>
+          <label class="switch" id="zeroGhostSwitch"><input type="checkbox" id="zeroGhostToggle">零漏模式（先吞后补）<i>连第一个 m 也不漏：遥控器刚用过时，单个 m 会晚 60ms 出现</i></label>
+        </div>
+        <div class="note" id="logNote"></div>
+        <details class="adv">
+          <summary>更多选项：测试注入 · 导出驱动手动安装</summary>
+          <div class="panel-actions">
+            <!-- 文案由 app.js 按当前语音键映射动态覆盖，这里给个中性默认值 -->
+            <button class="btn ghost" id="btnTestInject">测试注入语音键</button>
+            <!-- 只在打开诊断日志时出现（发布版默认不写日志，留个"清空"只会让人以为有日志） -->
+            <button class="btn ghost" id="btnClearLog" hidden>清空按键日志</button>
+            <button class="btn ghost" id="btnExportUhid">导出到桌面手动安装</button>
+          </div>
+        </details>
+      </div>
     </section>
+
 
   </main>
 </div>

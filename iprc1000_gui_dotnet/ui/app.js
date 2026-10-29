@@ -99,7 +99,8 @@ function goto(page) {
   if (m) m.scrollTop = 0;
   /* ★ 鼠标页的「实时校准区」只在页面可见时轮询。
      本程序是常驻托盘应用 —— 不该在没人看的时候每 50ms 跨进程取一次数据。 */
-  if (page === 'mouse') startMousePad(); else stopMousePad();
+  // 鼠标参数已并入环境设置：进该页才轮询实时校准，离开就停
+  if (page === 'env') startMousePad(); else stopMousePad();
 }
 
 /* ───────── 渲染：功能总览 ───────── */
@@ -1086,7 +1087,7 @@ window.setUiVisible = function (v) {
   if (v) {
     refresh();
     timer = setInterval(refresh, 2000);
-    if (!$('#page-mouse') || !$('#page-mouse').classList.contains('hidden')) startMousePad();
+    if ($('#page-env') && !$('#page-env').classList.contains('hidden')) startMousePad();
   } else {
     stopMousePad();     // 窗口藏起来了就别再轮询校准区
   }
@@ -1119,11 +1120,11 @@ function paintSlider(el) {
   if (b) b.textContent = Number(el.value).toFixed(+(el.dataset.dec || 0)) + (el.dataset.unit || '');
 }
 
-/* 把页面上所有滑条/开关/单选收成一个对象发给宿主（只有鼠标页的，用 #page-mouse 限定作用域） */
+/* 把页面上所有滑条/开关/单选收成一个对象发给宿主（只有鼠标页的，用 #mouseParams 限定作用域） */
 function collectMouseCfg() {
   const o = {};
-  for (const el of $$('#page-mouse input[type=range]')) o[el.dataset.k] = Number(el.value);
-  for (const el of $$('#page-mouse input[type=checkbox]')) o[el.dataset.k] = el.checked;
+  for (const el of $$('#mouseParams input[type=range]')) o[el.dataset.k] = Number(el.value);
+  for (const el of $$('#mouseParams input[type=checkbox]')) o[el.dataset.k] = el.checked;
   return o;
 }
 
@@ -1168,13 +1169,13 @@ function renderMouse(s) {
 
 
   /* 回写控件状态：正在被用户拖动的那一个跳过，免得把他的手指"拽回去" */
-  for (const el of $$('#page-mouse input[type=range]')) {
+  for (const el of $$('#mouseParams input[type=range]')) {
     const k = el.dataset.k;
     if (m[k] === undefined || el.dataset.dirty === '1') continue;
     el.value = m[k];
     paintSlider(el);
   }
-  for (const el of $$('#page-mouse input[type=checkbox]')) {
+  for (const el of $$('#mouseParams input[type=checkbox]')) {
     const k = el.dataset.k;
     if (m[k] === undefined || el.dataset.dirty === '1') continue;
     el.checked = !!m[k];
@@ -1195,7 +1196,7 @@ function renderMouse(s) {
 
 function startMousePad() {
   if (mousePadTimer || !B) return;
-  const page = $('#page-mouse');
+  const page = $('#mouseParams');
   if (!page || page.classList.contains('hidden')) return;
   mouseDotPos = { x: 50, y: 50 };
   const apply = (dot) => { dot.style.left = mouseDotPos.x + '%'; dot.style.top = mouseDotPos.y + '%'; };
@@ -1246,11 +1247,11 @@ function bindUI() {
   $$('.nav-btn').forEach((b) => (b.onclick = () => goto(b.dataset.page)));
 
   /* ── 鼠标模式页 ── */
-  for (const el of $$('#page-mouse input[type=range]')) {
+  for (const el of $$('#mouseParams input[type=range]')) {
     el.addEventListener('input', () => { el.dataset.dirty = '1'; paintSlider(el); });
     el.addEventListener('change', () => { el.dataset.dirty = '0'; pushMouseCfg(true); });
   }
-  for (const el of $$('#page-mouse input[type=checkbox]')) {
+  for (const el of $$('#mouseParams input[type=checkbox]')) {
     el.addEventListener('change', () => {
       const sw = el.closest('.switch');
       if (sw) sw.classList.toggle('on', el.checked);
@@ -1268,8 +1269,8 @@ function bindUI() {
     await refresh();
   };
   $('#btnMouseReset').onclick = async () => {
-    for (const el of $$('#page-mouse input[type=range]')) el.dataset.dirty = '0';
-    for (const el of $$('#page-mouse input[type=checkbox]')) el.dataset.dirty = '0';
+    for (const el of $$('#mouseParams input[type=range]')) el.dataset.dirty = '0';
+    for (const el of $$('#mouseParams input[type=checkbox]')) el.dataset.dirty = '0';
     try { toast(await B.setMouseConfig(JSON.stringify(MOUSE_DEFAULTS)), 3600); }
     catch (e) { toast('恢复失败：' + (e && e.message ? e.message : e), 4000); }
     await refresh();
@@ -1363,10 +1364,6 @@ function bindUI() {
     };
   }
   // 导出配置：卸载会删掉配置目录，先让用户能备份
-  // 手感与自校准：跳回原鼠标页（页面保留，只是侧栏不再列它）
-  const mouseDetail = $('#btnMouseDetail');
-  if (mouseDetail) mouseDetail.onclick = () => goto('mouse');
-
   const asrRefresh = $('#btnAsrRefresh');
   if (asrRefresh && hasBridge) {
     asrRefresh.onclick = async () => {
@@ -1645,9 +1642,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.113',
+      version: '1.2.114',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.113（构建于 2026-10-29 17:10）',
+      versionLine: 'v1.2.114（构建于 2026-10-29 17:20）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

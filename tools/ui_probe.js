@@ -28,11 +28,12 @@ const { chromium } = require('playwright-core');
 
 const ROOT = path.resolve(__dirname, '..');
 const UI = path.join(ROOT, 'iprc1000_gui_dotnet', 'ui');
-const PAGES = ['overview', 'keys', 'env', 'mouse'];
+// 2026-10-29：鼠标参数并入环境设置后，鼠标页已不存在，只剩三页
+const PAGES = ['overview', 'keys', 'env'];
 // 没有侧栏导航、但仍存在的页面（从界面内部跳进去）——
 // 2026-10-29：鼠标模式开关并入环境设置后，侧栏不再列「鼠标模式」，
 // 但 #page-mouse（手感/曲线/自校准）仍保留，由环境设置里的按钮 goto 进去。
-const HIDDEN_PAGES = ['mouse'];
+const HIDDEN_PAGES = [];   // 保留机制：将来若出现"有页面、无侧栏导航"再往里加
 
 const argv = process.argv.slice(2);
 const outIdx = argv.indexOf('--out');
