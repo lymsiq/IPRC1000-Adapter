@@ -83,6 +83,8 @@ internal static class AsrOverlay
     private static string _text = "";
     private static string _hint = "正在听…";
     private static bool _listening;
+    /// <summary>当前展示的是"未定稿"文字（流式 partial）⇒ 画下划线。</summary>
+    private static bool _provisional;
     private static long _shownAt;
 
     public static bool Visible => _form is { Visible: true };
@@ -94,6 +96,7 @@ internal static class AsrOverlay
             _hint = hint;
             _text = "";
             _listening = true;
+            _provisional = false;
             _shownAt = Environment.TickCount64;
             try
             {
@@ -111,11 +114,10 @@ internal static class AsrOverlay
         }
     }
 
-    /// <summary>识别阶段（已松手）：波形停下，提示改成"识别中"。</summary>
     /// <summary>流式 partial：边识别边显示（引擎给的是全量假设，直接替换）。</summary>
     public static void ShowPartial(string text)
     {
-        lock (Gate) { _listening = false; _hint = ""; _text = text ?? ""; }
+        lock (Gate) { _listening = false; _hint = ""; _text = text ?? ""; _provisional = true; }
         Ui(() => _form?.Invalidate());
     }
 
@@ -128,7 +130,7 @@ internal static class AsrOverlay
     /// <summary>显示结果，holdMs 后自动隐藏。</summary>
     public static void ShowResult(string text, int holdMs = 2200)
     {
-        lock (Gate) { _listening = false; _hint = ""; _text = text ?? ""; }
+        lock (Gate) { _listening = false; _hint = ""; _text = text ?? ""; _provisional = false; }
         Ui(() => _form?.Invalidate());
         Task.Delay(holdMs).ContinueWith(_ => Hide());
     }
@@ -283,7 +285,13 @@ internal static class AsrOverlay
             else
             {
                 using var br = new SolidBrush(Color.FromArgb(242, 246, 250));
-                g.DrawString(_text, fText, br, rect, fmt);
+                if (_provisional)
+                {
+                    // 未定稿：带下划线（"还在改"的视觉约定）；定稿后下划线消失
+                    using var fU = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Underline);
+                    g.DrawString(_text, fU, br, rect, fmt);
+                }
+                else g.DrawString(_text, fText, br, rect, fmt);
             }
 
             // 顶部细进度感（听 0~8s 的填充条，纯装饰，提示"在录"）

@@ -1056,7 +1056,8 @@ function renderAsr(s, a) {
                        + chip('本地 ASR', mode === 'asr' && en, 'data-asr-mode', 'asr'), '') +
     kvItem('计算后端', chip('CPU', be === 'cpu', 'data-asr-be', 'cpu', dis)
                      + chip('GPU（Vulkan）', be === 'vulkan', 'data-asr-be', 'vulkan', dis || !gpuOk), '') +
-    kvItem('文本整理', chip('规则润色', !!a.polish, 'data-asr-polish', '1') + chip('原文', !a.polish, 'data-asr-polish', '0'), '') +
+    kvItem('智能整理', chip('开（说完即整理）', !!a.polish, 'data-asr-polish', '1')
+                        + chip('关（保留原文）', !a.polish, 'data-asr-polish', '0'), '') +
     kvItem('术语表', (a.terms || 0) + ' 条规则', '') +
     kvItem('模型目录', (a.modelDir || '—').replace(/^.*\\asr\\/, '…\\asr\\'), '');
 
@@ -1705,9 +1706,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.123',
+      version: '1.2.124',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.123（构建于 2026-10-29 20:35）',
+      versionLine: 'v1.2.124（构建于 2026-10-29 20:55）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

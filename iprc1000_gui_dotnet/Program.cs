@@ -104,6 +104,7 @@ internal static class Program
             for (var i = 0; i < sec * 25; i++)
             {
                 AsrCapture.DebugFeedLevel((float)(0.25 + 0.6 * rnd.NextDouble()));
+                if (i == sec * 8) AsrOverlay.ShowPartial("今天下午三点在会议室开会");   // 未定稿：带下划线
                 if (i == sec * 12) AsrOverlay.Recognizing();
                 Application.DoEvents();
                 Thread.Sleep(40);

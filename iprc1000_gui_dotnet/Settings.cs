@@ -396,7 +396,7 @@ internal static class Settings
         public string AsrModel { get; set; } = "";
 
         /// <summary>本地识别的快捷键（VK 码）。默认 V = 0x56，配 Ctrl+Alt 使用。</summary>
-        public int AsrHotkeyVk { get; set; } = 0x56;
+        public int AsrHotkeyVk { get; set; } = 0x58;   // X（原 V）
 
         /// <summary>规则层润色（去填充词/重复字/标点规整）。默认开。</summary>
         public bool PolishRules { get; set; } = true;
