@@ -1023,6 +1023,54 @@ function renderEnv(s) {
 
 /* ───────── 刷新 ───────── */
 // 本地 ASR（环境设置）：引擎状态 + 模型列表 + 下载/选择
+// 一键体检（2026-10-30）：逐项结果 + 可点的修复动作 + 复制报告
+let doctorReport = '';
+function renderDoctor(d) {
+  const list = $('#doctorList'), subT = $('#doctorSub');
+  if (!list || !d) return;
+  doctorReport = d.report || '';
+  if (subT) {
+    subT.innerHTML = d.ok
+      ? `全部通过（${d.good} 项正常）`
+      : `<b style="color:#b03a28">${d.bad} 项失败</b> · ${d.warn} 项注意 · ${d.good} 项正常`;
+  }
+  const mark = (lv) => lv === 'ok' ? '正常' : lv === 'warn' ? '注意' : '失败';
+  list.innerHTML = (d.items || []).map(it => `
+    <div class="doc-item ${it.level}">
+      <div class="doc-mark">${mark(it.level)}</div>
+      <div class="doc-body">
+        <b>${it.name}</b>
+        <span class="s">${it.detail}</span>
+      </div>
+      <div class="doc-act">${it.fix ? `<button class="btn ghost" data-doc-fix="${it.fix}">${it.fixLabel || '修复'}</button>` : ''}</div>
+    </div>`).join('');
+  list.querySelectorAll('[data-doc-fix]').forEach(b => {
+    b.onclick = async () => {
+      const cmd = b.dataset.docFix;
+      b.disabled = true; b.textContent = '执行中…';
+      try {
+        const r = JSON.parse(await B[cmd]());
+        toast(r.message || '已执行', 6000);
+      } catch (e) { toast('执行失败：' + e.message, 6000); }
+      setTimeout(runDoctor, 1200);      // 修完立刻复检
+    };
+  });
+}
+
+async function runDoctor() {
+  if (!B) return;
+  const list = $('#doctorList'), subT = $('#doctorSub');
+  if (list) list.innerHTML = '<div class="doc-item"><div class="doc-mark">…</div><div class="doc-body"><b>正在检查</b><span class="s">读取本机状态</span></div></div>';
+  try {
+    const d = JSON.parse(await B.doctor());
+    renderDoctor(d);
+    $('#doctorMask')?.classList.remove('hide');
+    $('#doctorModal')?.classList.remove('hidden');
+  } catch (e) {
+    if (subT) subT.textContent = '体检失败：' + e.message;
+  }
+}
+
 async function refresh() {
   if (!B) return;
   try {
@@ -1322,6 +1370,21 @@ function bindUI() {
     };
   }
   // 导出配置：卸载会删掉配置目录，先让用户能备份
+  const docBtn = $('#btnDoctor');
+  if (docBtn && B) docBtn.onclick = runDoctor;
+  const docClose = $('#doctorClose');
+  if (docClose) docClose.onclick = () => {
+    $('#doctorModal')?.classList.add('hidden');
+    $('#doctorMask')?.classList.add('hide');
+  };
+  const docRerun = $('#doctorRerun');
+  if (docRerun) docRerun.onclick = runDoctor;
+  const docCopy = $('#doctorCopy');
+  if (docCopy) docCopy.onclick = async () => {
+    try { await navigator.clipboard.writeText(doctorReport); toast('报告已复制，可直接粘贴发送', 5000); }
+    catch (e) { toast('复制失败：' + e.message, 5000); }
+  };
+
   const expBtn = $('#btnExportConfig');
   if (expBtn && hasBridge) {
     expBtn.onclick = async () => {
@@ -1594,9 +1657,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.133',
+      version: '1.2.134',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.133（构建于 2026-10-30 09:10）',
+      versionLine: 'v1.2.134（构建于 2026-10-30 09:40）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

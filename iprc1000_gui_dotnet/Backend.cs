@@ -1874,6 +1874,154 @@ internal sealed class Backend : IDisposable
         });
     }
 
+    /// <summary>
+    /// **一键体检**（2026-10-30）。
+    ///
+    /// 设计要点：**直接复用 GetState 的结果**判定，不另写一套探测。
+    ///   理由：如果体检自己探测一遍，就会出现"体检说 OK、界面上却红着"的分裂，
+    ///   那种不一致比没有体检更糟。这里保证**体检结论 === 界面状态**。
+    ///
+    /// 每项给：level(ok/warn/bad) + 一句人话 + 可点的修复动作（复用已有命令）。
+    /// 最后附一份**纯文本报告**，用户能直接复制发给我们。
+    /// </summary>
+    public string Doctor()
+    {
+        var st = System.Text.Json.Nodes.JsonNode.Parse(GetState());
+        var items = new System.Text.Json.Nodes.JsonArray();
+        int bad = 0, warn = 0;
+
+        void Add(string name, string level, string detail, string fix = "", string fixLabel = "")
+        {
+            if (level == "bad") bad++; else if (level == "warn") warn++;
+            items.Add(new System.Text.Json.Nodes.JsonObject
+            {
+                ["name"] = name,
+                ["level"] = level,
+                ["detail"] = detail,
+                ["fix"] = fix,
+                ["fixLabel"] = fixLabel,
+            });
+        }
+
+        // 容错取布尔：状态里有的字段是 bool、有的是字符串/数字（历史原因），
+        // 直接 GetValue<bool>() 会抛 "String cannot be converted to Boolean"
+        bool B(string path)
+        {
+            var n = st[path];
+            if (n is null) return false;
+            try { return n.GetValue<bool>(); } catch { }
+            var s2 = n.ToString();
+            return s2.Equals("true", StringComparison.OrdinalIgnoreCase) || s2 == "1";
+        }
+        string S(string path) => st[path]?.ToString() ?? "";
+        var cable = st["cable"];
+        var bridge = st["bridge"];
+        var reg = st["reg"];
+        var device = st["device"];
+
+        // 1 管理员
+        Add("管理员权限", B("admin") ? "ok" : "bad",
+            B("admin") ? "已以管理员运行（安装驱动/改注册表需要）" : "没有管理员权限，装驱动、改注册表都会失败",
+            B("admin") ? "" : "relaunchAdmin", B("admin") ? "" : "以管理员重启");
+
+        // 2 虚拟声卡
+        var cableReady = cable?["ready"]?.GetValue<bool>() ?? false;
+        Add("虚拟声卡 VB-CABLE", cableReady ? "ok" : "bad",
+            cableReady ? "输入/输出端点都在：" + (cable?["version"]?.ToString() ?? "")
+                       : "虚拟声卡不可用（语音传不到输入法）",
+            cableReady ? "" : "installCable", cableReady ? "" : "一键安装声卡");
+
+        // 3 默认麦克风
+        var mic = S("defaultMicName");
+        var micOk = cable?["defaultMic"]?.GetValue<bool>() ?? false;
+        Add("默认麦克风", micOk ? "ok" : "warn",
+            micOk ? mic : "默认麦克风不是 CABLE Output：现在是「" + (mic.Length > 0 ? mic : "未知") + "」",
+            micOk ? "" : "setDefaultMic", micOk ? "" : "改为 CABLE Output");
+
+        // 4 虚拟键盘驱动
+        var uhid = B("uhidReady");
+        Add("虚拟键盘驱动", uhid ? "ok" : "bad",
+            uhid ? "已就绪（注入走虚拟 HID，输入法不会过滤）" : "未就绪：按键只能靠 SendInput，会被输入法过滤",
+            uhid ? "" : "installUhid", uhid ? "" : "一键安装驱动");
+
+        // 5 遥控器设备驱动（remoteKb 是字符串 "NotKeyboard"/"Keyboard"，不是布尔）
+        var remoteKbStr = S("remoteKb");
+        var remoteKb = remoteKbStr.Length > 0 &&
+                       !remoteKbStr.Equals("NotKeyboard", StringComparison.OrdinalIgnoreCase);
+        Add("遥控器设备驱动", remoteKb ? "warn" : "ok",
+            remoteKb ? "遥控器仍被识别为普通键盘：语音键会打出 m（可开启无驱动模式或切换驱动）"
+                     : "已是非键盘 HID 设备：不会串出 m",
+            remoteKb ? "setDeviceDriver" : "", remoteKb ? "切换到驱动模式" : "");
+
+        // 6 语音桥
+        var brRun = bridge?["running"]?.GetValue<bool>() ?? false;
+        var frames = bridge?["frames"]?.GetValue<long>() ?? 0;
+        Add("语音桥", brRun ? "ok" : "bad",
+            brRun ? $"运行中（累计 {frames} 帧）" : "没在运行：按语音键不会有声音",
+            brRun ? "" : "startBridge", brRun ? "" : "启动语音桥");
+
+        // 7 ETW 注册表
+        var regOk = reg?["ok"]?.GetValue<bool>() ?? false;
+        var needReboot = reg?["needReboot"]?.GetValue<bool>() ?? false;
+        Add("蓝牙 ETW 配置", regOk ? "ok" : (needReboot ? "warn" : "bad"),
+            regOk ? "三个关键值已生效" : (needReboot ? "值已写入但**还没重启**，重启后生效" : "值缺失或被改：音频帧会被截断"),
+            regOk ? "" : "applyRegistry", regOk ? "" : "重新应用");
+
+        // 8 注入通道
+        Add("按键注入通道", B("inject") ? "ok" : "bad",
+            B("inject") ? "可用" : "注入不可用：按键发不出去",
+            "", "");
+
+        // 9 配置文件
+        // groups 是对象 { active, items[] }，不是数组（实测踩到：按数组取→误报"没有配置组"）
+        var groups = st["groups"]?["items"] as System.Text.Json.Nodes.JsonArray;
+        var gcount = groups?.Count ?? 0;
+        Add("按键配置", gcount > 0 ? "ok" : "bad",
+            gcount > 0 ? $"共 {gcount} 个配置组" : "没有任何配置组：按键不会生效",
+            gcount > 0 ? "" : "resetKeys", gcount > 0 ? "" : "恢复默认");
+
+        // 10 幽灵键抑制（ghostGate 是对象 {enabled, remotes}）
+        var ghost = st["ghostGate"]?["enabled"] is System.Text.Json.Nodes.JsonNode gn
+                    && (gn.GetValueKind() == System.Text.Json.JsonValueKind.True);
+        var ghostNeeded = remoteKb;          // 只有遥控器"还是键盘"时才需要抑制
+        Add("幽灵键抑制", ghost ? "ok" : (ghostNeeded ? "warn" : "ok"),
+            ghost ? "已启用（按住语音键期间吞掉 m）"
+                  : (ghostNeeded ? "未启用：遥控器当键盘时会串出 m"
+                                 : "不需要（遥控器已是非键盘 HID，不会串 m）"),
+            "", "");
+
+        // 11 遥控器连接
+        var conn = device?["connected"]?.GetValue<bool>() ?? false;
+        Add("遥控器连接", conn ? "ok" : "warn",
+            conn ? "已连接" : "未连接（按一下遥控器任意键唤醒）", "", "");
+
+        // ── 纯文本报告（用户直接复制发给我们）──
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("IPRC1000 体检报告");
+        sb.AppendLine("时间：" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+        sb.AppendLine("版本：" + S("version") + "  构建：" + S("buildStamp"));
+        sb.AppendLine("系统：" + Environment.OSVersion.VersionString + $" x64={Environment.Is64BitOperatingSystem}");
+        sb.AppendLine(new string('-', 46));
+        foreach (var it in items)
+        {
+            var lv = it!["level"]!.ToString();
+            var mark = lv == "ok" ? "[ OK ]" : lv == "warn" ? "[注意]" : "[失败]";
+            sb.AppendLine($"{mark} {it["name"]}：{it["detail"]}");
+        }
+        sb.AppendLine(new string('-', 46));
+        sb.AppendLine($"结论：{items.Count - bad - warn} 项正常 / {warn} 项注意 / {bad} 项失败");
+
+        return Env.Json(new
+        {
+            ok = bad == 0,
+            total = items.Count,
+            bad, warn,
+            good = items.Count - bad - warn,
+            items,
+            report = sb.ToString(),
+        });
+    }
+
     /// <summary>键源归因报告：`rawInput` / `rawInput reset`</summary>
     private static string RawInputReport(string? arg)
     {
@@ -2137,6 +2285,7 @@ internal sealed class Backend : IDisposable
             "exportGroup" => ExportGroup(),
             "importGroup" => ImportGroup(a0),
             "resetKeys" => ResetKeys(),
+            "doctor" => Doctor(),
             "startBridge" => StartBridge(),
             "stopBridge" => StopBridge(),
             "relaunchAdmin" => RelaunchAdmin(),

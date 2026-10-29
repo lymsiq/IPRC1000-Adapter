@@ -445,3 +445,19 @@ body[data-page="keys"] .rail .device .remote{display:none}
 .wizard .btn:disabled{opacity:.5;cursor:not-allowed}
 /* 非当前步骤淡化：让用户知道"现在该做这一步" */
 .jstep.pending{opacity:.5}
+
+/* 一键体检（2026-10-30）：每项一行，左色条表示级别 */
+.doctor-list{display:flex;flex-direction:column;gap:7px;margin:2px 14px 10px;max-height:52vh;overflow:auto}
+.doc-item{display:flex;align-items:flex-start;gap:9px;padding:8px 11px;border-radius:8px;
+  border:1px solid var(--line);background:#fff}
+.doc-item.bad{border-color:rgba(210,80,60,.4);background:rgba(210,80,60,.05)}
+.doc-item.warn{border-color:rgba(200,150,40,.45);background:rgba(200,150,40,.06)}
+.doc-mark{flex:0 0 auto;font-weight:700;font-size:12px;line-height:19px;width:44px;text-align:center;
+  border-radius:6px}
+.doc-item.ok .doc-mark{color:#1a7f43;background:rgba(26,127,67,.1)}
+.doc-item.warn .doc-mark{color:#9a6b00;background:rgba(200,150,40,.15)}
+.doc-item.bad .doc-mark{color:#b03a28;background:rgba(210,80,60,.12)}
+.doc-body{flex:1;min-width:0}
+.doc-body b{font-size:13px;color:var(--txt)}
+.doc-body .s{display:block;font-size:11.8px;color:var(--muted);margin-top:2px;line-height:1.5}
+.doc-act{flex:0 0 auto}

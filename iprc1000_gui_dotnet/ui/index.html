@@ -478,6 +478,7 @@
           <button class="btn" id="btnReleaseAll">紧急复位：释放所有按键</button>
           <button class="btn" id="btnInstallUhid">一键安装 / 修复虚拟键盘驱动</button>
           <button class="btn ghost" id="btnDriverDiag">复制诊断</button>
+          <button class="btn" id="btnDoctor">一键体检</button>
           <button class="btn ghost" id="btnWizardReset">重跑首次设置</button>
           <button class="btn ghost" id="btnExportConfig">导出配置</button>
         </div>
@@ -508,6 +509,24 @@
 
 
   </main>
+
+      <!-- 环境体检弹窗（2026-10-30）：自己的遮罩，别塞进组合键弹窗里 -->
+      <div class="mask hide" id="doctorMask">
+        <div class="modal hidden" id="doctorModal">
+          <div class="modal-head">
+            <div class="modal-head-text">
+              <b>环境体检</b>
+              <span id="doctorSub">逐项检查，失败项可直接修</span>
+            </div>
+            <button class="x" id="doctorClose" title="关闭">✕</button>
+          </div>
+          <div class="doctor-list" id="doctorList"></div>
+          <div class="panel-actions" style="margin-top:4px">
+            <button class="btn" id="doctorCopy">复制报告</button>
+            <button class="btn ghost" id="doctorRerun">重新体检</button>
+          </div>
+        </div>
+      </div>
 </div>
 <script>
   /* 只用一种桥：WebView2（.NET 版）优先；否则加载本地/qrc 的 qwebchannel.js（PySide6 版） */
