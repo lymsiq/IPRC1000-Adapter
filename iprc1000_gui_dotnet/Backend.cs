@@ -1963,6 +1963,8 @@ internal sealed class Backend : IDisposable
             progress = _asrDlPct,
             message = _asrDlMsg,
             selected = Settings.AsrModel,
+            polish = Settings.PolishRules,
+            terms = Glossary.Count,
             enabled = Settings.AsrEnabled,
             framework = Settings.AsrFramework,
             frameworks = new JsonArray(
@@ -2044,6 +2046,26 @@ internal sealed class Backend : IDisposable
         if (!File.Exists(file)) return Env.Json(new { ok = false, message = "还没下载这个模型" });
         Settings.AsrModel = m.id;
         return Env.Json(new { ok = true, message = "已选择 " + m.name });
+    }
+
+    /// <summary>规则层润色开关。</summary>
+    public string AsrSetPolish(string? on)
+    {
+        var v = (on ?? "") == "1";
+        Settings.PolishRules = v;
+        return Env.Json(new { ok = true, polish = v, message = v ? "已开启规则润色（去填充词/重复字/标点规整）" : "已关闭规则润色，输出识别原文" });
+    }
+
+    /// <summary>打开术语表（不存在就先建模板，避免用户猜格式）。</summary>
+    public string AsrOpenTerms()
+    {
+        try
+        {
+            Glossary.EnsureFile();
+            System.Diagnostics.Process.Start("explorer.exe", "\"" + Glossary.FilePath + "\"");
+            return Env.Json(new { ok = true, message = "已打开术语表：" + Glossary.FilePath });
+        }
+        catch (Exception e) { return Env.Json(new { ok = false, message = "打开失败：" + e.Message }); }
     }
 
     /// <summary>本地识别总开关。关掉后语音键完全回到"交给输入法"，不做任何本地识别。</summary>
@@ -2420,6 +2442,8 @@ internal sealed class Backend : IDisposable
             "asrSetMode" => AsrSetMode(a0),
             "asrSetEnabled" => AsrSetEnabled(a0),
             "asrSetFramework" => AsrSetFramework(a0),
+            "asrSetPolish" => AsrSetPolish(a0),
+            "asrOpenTerms" => AsrOpenTerms(),
             "asrSetBackend" => AsrSetBackend(a0),
             "wizardReset" => WizardReset(),
             "repairDriver" => RepairDriver(a0),

@@ -1055,11 +1055,16 @@ function renderAsr(s, a) {
                        + chip('本地 ASR', mode === 'asr' && en, 'data-asr-mode', 'asr'), '') +
     kvItem('计算后端', chip('CPU', be === 'cpu', 'data-asr-be', 'cpu', dis)
                      + chip('GPU（Vulkan）', be === 'vulkan', 'data-asr-be', 'vulkan', dis || !gpuOk), '') +
+    kvItem('文本整理', chip('规则润色', !!a.polish, 'data-asr-polish', '1') + chip('原文', !a.polish, 'data-asr-polish', '0'), '') +
+    kvItem('术语表', (a.terms || 0) + ' 条规则', '') +
     kvItem('模型目录', (a.modelDir || '—').replace(/^.*\\asr\\/, '…\\asr\\'), '');
 
   // 总开关 / 框架
   $$('[data-asr-en]').forEach(el => {
     el.onclick = async () => { const r = JSON.parse(await B.asrSetEnabled(el.dataset.asrEn)); toast(r.message, 7000); await refresh(); };
+  });
+  $$('[data-asr-polish]').forEach(el => {
+    el.onclick = async () => { const r = JSON.parse(await B.asrSetPolish(el.dataset.asrPolish)); toast(r.message, 5000); await refresh(); };
   });
   $$('[data-asr-fw]').forEach(el => {
     el.onclick = async () => { const r = JSON.parse(await B.asrSetFramework(el.dataset.asrFw)); toast(r.message, 6000); await refresh(); };
@@ -1412,6 +1417,10 @@ function bindUI() {
     };
   }
   // 导出配置：卸载会删掉配置目录，先让用户能备份
+  const asrTerms = $('#btnAsrTerms');
+  if (asrTerms && B) {
+    asrTerms.onclick = async () => { const r = JSON.parse(await B.asrOpenTerms()); toast(r.message, 5000); };
+  }
   const asrOpen = $('#btnAsrOpenDir');
   if (asrOpen && B) {
     asrOpen.onclick = async () => { const r = JSON.parse(await B.asrOpenDir()); toast(r.message, 5000); };
@@ -1695,9 +1704,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.121',
+      version: '1.2.122',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.121（构建于 2026-10-29 19:50）',
+      versionLine: 'v1.2.122（构建于 2026-10-29 20:05）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

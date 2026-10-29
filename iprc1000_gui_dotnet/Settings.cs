@@ -152,6 +152,13 @@ internal static class Settings
         set { _data.AsrModel = value; Save(); }
     }
 
+    /// <summary>规则层润色开关。</summary>
+    public static bool PolishRules
+    {
+        get => _data.PolishRules;
+        set { _data.PolishRules = value; Save(); }
+    }
+
     /// <summary>本地识别总开关。</summary>
     public static bool AsrEnabled
     {
@@ -380,6 +387,9 @@ internal static class Settings
 
         /// <summary>选中的本地 ASR 模型 id（空 = 未选）。见 Backend.AsrModels。</summary>
         public string AsrModel { get; set; } = "";
+
+        /// <summary>规则层润色（去填充词/重复字/标点规整）。默认开。</summary>
+        public bool PolishRules { get; set; } = true;
 
         /// <summary>本地识别**总开关**。关掉 = 完全不介入（等价于原来的"交给输入法"）。</summary>
         public bool AsrEnabled { get; set; }

@@ -75,6 +75,22 @@ internal static class Program
             return;
         }
 
+        // 规则润色自检（--polish-test）：不需要模型/遥控器，直接看"原文 → 润色后"
+        if (args.Length > 0 && args[0] == "--polish-test")
+        {
+            var cases = new[]
+            {
+                "嗯，那个，我觉得这个方案应该是可以的啊。",
+                "然后我们然后把这个然后改一下",
+                "我我我觉得就是就是说这个不行",
+                "这个遥控器的语音识别效果怎么样",
+                "把代码改成异步加载,记得加注释",
+            };
+            foreach (var c in cases)
+                Console.WriteLine("  原文：" + c + Environment.NewLine + "  润色：" + TextPolish.Apply(c) + Environment.NewLine);
+            return;
+        }
+
         // 悬浮框外观自检（--overlay-test [秒]）：不需要遥控器/模型，纯粹看渲染与位置
         if (args.Length > 0 && args[0] == "--overlay-test")
         {

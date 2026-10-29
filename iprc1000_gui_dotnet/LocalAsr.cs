@@ -416,6 +416,16 @@ internal static class AsrRun
     }
 
     /// <summary>松手后的收尾：有流就走流式（等 final），没有就回落整段。</summary>
+    /// <summary>识别结果统一出口：术语纠正 → 规则润色。</summary>
+    private static string Finish(string? raw)
+    {
+        var src = raw ?? "";
+        var t = Glossary.Fix(src);
+        if (Settings.PolishRules) t = TextPolish.Apply(t);
+        if (t != src && src.Length > 0) Safe.Note($"润色：{src} → {t}");
+        return t;
+    }
+
     private static void Run()
     {
         var st = _stream;
@@ -425,7 +435,7 @@ internal static class AsrRun
             AsrOverlay.Recognizing();
             try
             {
-                var text = st.FinishAsync().GetAwaiter().GetResult();
+                var text = Finish(st.FinishAsync().GetAwaiter().GetResult());
                 var sec = AsrCapture.End().seconds;      // 清空缓冲，顺便拿时长
                 if (text.Length > 0)
                 {
@@ -463,7 +473,8 @@ internal static class AsrRun
             if (!ok) { Safe.Note("ASR 引擎不可用：" + msg); return; }
 
             LocalAsr.LastCaptureBytes = wav.Length;
-            var (tok, text, ms) = LocalAsr.TranscribeAsync(wav).GetAwaiter().GetResult();
+            var (tok, rawText, ms) = LocalAsr.TranscribeAsync(wav).GetAwaiter().GetResult();
+            var text = Finish(rawText);
             if (!tok) { AsrOverlay.Hide(); Safe.Note($"ASR 转写失败（{sec:F1}s / {wav.Length} 字节）：{LocalAsr.LastErr}"); return; }
             if (text.Length == 0) { LocalAsr.LastErr = "空结果"; Safe.Note($"ASR 空结果（{sec:F1}s 音频 / {ms}ms）"); return; }
 
