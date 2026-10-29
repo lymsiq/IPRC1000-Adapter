@@ -74,6 +74,12 @@
           <span class="journey-h">第一次使用</span>
           <span class="journey-prog" id="journeyProg">0 / 4 项已确认</span>
         </summary>
+        <!-- 向导条：未完成时显示"第 N 步"，当前步没通过就禁用「下一步」 -->
+        <div class="wizard" id="wizardBar" style="display:none">
+          <b id="wizardStep">第 1 / 4 步</b>
+          <span id="wizardHint" class="wizard-hint"></span>
+          <button type="button" class="btn" id="wizardNext">下一步</button>
+        </div>
         <div class="journey-list" id="journeyList">
           <button type="button" class="jstep" data-go="overview">
             <b>01</b>
@@ -382,6 +388,7 @@
           <button class="btn" id="btnReleaseAll">紧急复位：释放所有按键</button>
           <button class="btn" id="btnInstallUhid">一键安装 / 修复虚拟键盘驱动</button>
           <button class="btn ghost" id="btnDriverDiag">复制诊断</button>
+          <button class="btn ghost" id="btnWizardReset">重跑首次设置</button>
         </div>
         <div class="kv" id="uhidKv"></div>
         <div class="note" id="uhidNote"></div>

@@ -435,3 +435,13 @@ body[data-page="keys"] .rail .device .remote{display:none}
 .ime-seg button:hover{background:var(--blue-l);color:var(--ink)}
 .ime-seg button.on{background:var(--blue);color:#fff;font-weight:600}
 .ime-hint{font-style:normal;font-size:12px;color:var(--muted);flex:1 1 240px;min-width:0}
+
+/* 首次设置向导条（2026-10-29）：贴着"第一次使用"清单顶部 */
+.wizard{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 14px 10px;
+  padding:10px 12px;border-radius:10px;background:rgba(47,128,237,.06);border:1px solid rgba(47,128,237,.18)}
+.wizard>b{color:var(--blue);white-space:nowrap}
+.wizard-hint{flex:1 1 300px;min-width:0;font-size:12.5px;color:var(--muted)}
+.wizard .btn{padding:5px 14px;font-size:12.5px;white-space:nowrap}
+.wizard .btn:disabled{opacity:.5;cursor:not-allowed}
+/* 非当前步骤淡化：让用户知道"现在该做这一步" */
+.jstep.pending{opacity:.5}

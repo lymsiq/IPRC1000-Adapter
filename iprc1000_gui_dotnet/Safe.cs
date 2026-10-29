@@ -27,7 +27,11 @@ internal static class Safe
     private static DateTime _lastAt = DateTime.MinValue;
     private static int _repeat;
 
-    private const long MaxBytes = 20L * 1024 * 1024;   // 20 MB
+    // 2026-10-29：从"20MB 截断保尾 1MB"改为"10MB 换新文件"。
+    //   截断会把**旧现场**直接丢掉（跨天的问题无法回溯），而换新能把历史分段留下；
+    //   并且**基础文件永远是当前文件** —— 报障只需要发这一个。
+    private const long MaxBytes = 10L * 1024 * 1024;   // 10 MB
+    private const int KeepFiles = 3;                   // 保留 .1/.2/.3 三份历史
     private static DateTime _purgedFor = DateTime.MinValue;
 
     private static string Dir => Env.ConfigDir;
@@ -177,21 +181,50 @@ internal static class Safe
         catch { }
     }
 
-    /// <summary>超过 20MB 就截断成"尾部 1MB"，保住最近的现场。</summary>
+    /// <summary>
+    /// 超过 10MB 就**换新文件**：把当前文件改名为 `name.1.log`，历史依次后移，最多留 3 份。
+    ///
+    /// 与旧的"截断保尾 1MB"相比：
+    ///   · 旧现场不再丢失（截断是不可恢复的）；
+    ///   · **基础文件名永远是当前文件** —— 用户报障只需发 `errors.log` 这一个；
+    ///   · 目录总量有上界（4 × 10MB = 40MB），不会无限增长。
+    ///
+    /// 为什么安全：写入走 `File.AppendAllText`（每次开-写-关，不长期持有句柄），
+    /// 所以这里改名不会撞上自己的写锁；失败的每一步都单独 try，最坏情况是"这次不换"。
+    /// </summary>
     private static void Cap(string path)
     {
         try
         {
             var fi = new FileInfo(path);
             if (!fi.Exists || fi.Length <= MaxBytes) return;
-            const int keep = 1024 * 1024;
-            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            fs.Seek(-keep, SeekOrigin.End);
-            var buf = new byte[keep];
-            var n = fs.Read(buf, 0, keep);
-            fs.Close();
-            File.WriteAllBytes(path, buf[..n]);
-            Log($"日志超过 20MB，已截断保留尾部 1MB：{Path.GetFileName(path)}");
+
+            var dir = fi.DirectoryName ?? Dir;
+            var name = Path.GetFileNameWithoutExtension(path);   // errors
+            var ext = Path.GetExtension(path);                   // .log
+            string Part(int i) => Path.Combine(dir, name + "." + i + ext);
+
+            // ① 删最老的一份
+            try { if (File.Exists(Part(KeepFiles))) File.Delete(Part(KeepFiles)); } catch { }
+            // ② 依次后移：.2→.3、.1→.2
+            for (var i = KeepFiles - 1; i >= 1; i--)
+            {
+                try
+                {
+                    var from = Part(i);
+                    if (File.Exists(from)) File.Move(from, Part(i + 1), true);
+                }
+                catch { }
+            }
+            // ③ 当前 → .1
+            try
+            {
+                if (File.Exists(Part(1))) File.Delete(Part(1));
+                File.Move(path, Part(1), true);
+            }
+            catch { return; }   // 改不动就放弃（下次再试），绝不能把当前日志搞丢
+
+            Log($"日志超过 {MaxBytes / 1024 / 1024}MB，已换新文件（保留 {KeepFiles} 份历史）：{Path.GetFileName(path)}");
         }
         catch { }
     }

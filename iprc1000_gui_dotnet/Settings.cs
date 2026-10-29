@@ -131,6 +131,20 @@ internal static class Settings
         set { _data.ZeroGhost = value; Save(); }
     }
 
+    /// <summary>首次设置向导是否已完成。</summary>
+    public static bool WizardDone
+    {
+        get => _data.WizardDone;
+        set { _data.WizardDone = value; Save(); }
+    }
+
+    /// <summary>向导当前步骤（0 基，支持中途退出续做）。</summary>
+    public static int WizardStep
+    {
+        get => _data.WizardStep;
+        set { _data.WizardStep = value; Save(); }
+    }
+
     /// <summary>语音输入法档位（doubao / wechat / custom）。见 IPRC1000Adapter.Backend.SetImeProfile。</summary>
     public static string ImeProfile
     {
@@ -322,6 +336,12 @@ internal static class Settings
         /// 默认**关**（会让 m 延迟 60ms，虽然只在遥控器活跃的 8 秒内）。
         /// </summary>
         public bool ZeroGhost { get; set; }
+
+        /// <summary>首次设置向导是否已完成（完成后再启动不自动弹出）。</summary>
+        public bool WizardDone { get; set; }
+
+        /// <summary>向导当前进行到第几步（0 基），支持中途退出后续做。</summary>
+        public int WizardStep { get; set; }
 
         /// <summary>
         /// **无驱动（降级）模式**：不把遥控器切成普通 HID，而是保持键盘 +

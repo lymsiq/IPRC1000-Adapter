@@ -867,6 +867,27 @@ function renderEnv(s) {
   const zgSw = $('#zeroGhostSwitch');
   if (zgSw) zgSw.classList.toggle('on', s.zeroGhost === true);
 
+  // 向导条：未完成时显示当前步骤；当前步没通过就禁用「下一步」
+  (() => {
+    const bar = $('#wizardBar');
+    if (!bar) return;
+    const wz = s.wizard;
+    const done = !wz || wz.done;
+    bar.style.display = done ? 'none' : '';
+    if (!done) {
+      const total = wz.total || 4;
+      const idx = Math.min(wz.passed || 0, total - 1);
+      const cur = (wz.items || [])[idx] || {};
+      const st = $('#wizardStep'); if (st) st.textContent = `第 ${idx + 1} / ${total} 步`;
+      const hint = $('#wizardHint'); if (hint) hint.textContent = cur.hint || '';
+      const btn = $('#wizardNext');
+      if (btn) { btn.disabled = !wz.canAdvance; btn.textContent = wz.canAdvance ? '下一步' : '先完成这一步'; }
+      $$('#journeyList .jstep').forEach((el, i) => el.classList.toggle('pending', i !== idx));
+    } else {
+      $$('#journeyList .jstep').forEach((el) => el.classList.remove('pending'));
+    }
+  })();
+
   // 无驱动模式开关
   const dfT = $('#driverFreeToggle');
   if (dfT) dfT.checked = s.driverFree === true;
@@ -1289,6 +1310,24 @@ function bindUI() {
     };
   }
 
+  // 向导：下一步 / 重跑
+  const wzBtn = $('#wizardNext');
+  if (wzBtn && hasBridge) {
+    wzBtn.onclick = async () => {
+      const r = JSON.parse(await B.wizardNext());
+      toast(r.message, 7000);
+      await refresh();
+    };
+  }
+  const wzReset = $('#btnWizardReset');
+  if (wzReset && hasBridge) {
+    wzReset.onclick = async () => {
+      if (!confirm('重新走一遍首次设置向导？')) return;
+      const r = JSON.parse(await B.wizardReset());
+      toast(r.message, 5000); await refresh();
+    };
+  }
+
   // 零漏模式：先吞后补
   const zgT2 = $('#zeroGhostToggle');
   if (zgT2 && hasBridge) {
@@ -1545,9 +1584,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.106',
+      version: '1.2.107',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.106（构建于 2026-10-29 15:20）',
+      versionLine: 'v1.2.107（构建于 2026-10-29 15:50）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

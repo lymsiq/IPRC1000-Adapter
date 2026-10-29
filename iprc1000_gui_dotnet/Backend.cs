@@ -896,6 +896,7 @@ internal sealed class Backend : IDisposable
             ["imeProfile"] = Settings.ImeProfile,
             ["driverFree"] = Settings.DriverFreeMode,
             ["ports"] = new JsonObject { ["pcm"] = Env.PcmPort, ["key"] = Env.KeyPort },
+            ["wizard"] = WizardState(),
             ["driverVersion"] = WinUhidInjector.DriverVersion,
             ["uhidReady"] = _uhidReady,
             ["lastRepair"] = _lastRepair.at == default ? null : new JsonObject
@@ -1719,6 +1720,74 @@ internal sealed class Backend : IDisposable
         catch (Exception e) { Safe.Note("系统事件订阅失败（不影响主功能）：" + e.Message); }
     }
 
+    /// <summary>
+    /// **首次设置向导**（2026-10-29）：把"清单"升级成"每步验证通过才放行"。
+    ///
+    /// 判据全部复用现有探测（不新增臆造字段）：
+    ///   ① 遥控器已配对/在场 ② 驱动+声卡就绪 ③ 默认麦克风是 CABLE ④ 真的收到过音频
+    /// 状态里给出 `step`（第一个未通过的序号）与 `canAdvance`，界面据此禁用"下一步"。
+    /// </summary>
+    private JsonObject WizardState()
+    {
+        var steps = new (string id, bool ok, string hint)[]
+        {
+            ("remote", Env.RemotePresent() || Env.PairedRemoteMacs().Count > 0,
+                "配对遥控器（按住「下 + LAST」进搜索，再到系统蓝牙里添加 IPRC1000）"),
+            ("runtime", _uhidReady && _cableReady,
+                "装虚拟键盘驱动 + 虚拟声卡（点「一键完成全部」）"),
+            ("mic", _micOk,
+                "把默认录音设备设为 CABLE Output（或在输入法里单独选它）"),
+            ("audio", _router.Packets > 0,
+                "按住遥控器语音键说一句话，确认面板「最近收到音频」在动"),
+        };
+        var doneFlags = steps.Select(x => x.ok).ToArray();
+        var step = Array.IndexOf(doneFlags, false);        // 第一个没通过的
+        if (step < 0) step = steps.Length;
+        var done = Settings.WizardDone || step >= steps.Length;
+        return new JsonObject
+        {
+            ["done"] = done,
+            ["step"] = Math.Min(step, steps.Length - 1 < 0 ? 0 : steps.Length - 1),
+            ["passed"] = step,
+            ["total"] = steps.Length,
+            ["canAdvance"] = step < steps.Length && doneFlags[Math.Min(step, steps.Length - 1)],
+            ["items"] = new JsonArray(steps.Select(x => (JsonNode)new JsonObject
+            {
+                ["id"] = x.id, ["ok"] = x.ok, ["hint"] = x.hint
+            }).ToArray()),
+        };
+    }
+
+    /// <summary>向导「下一步」：当前步未通过则拒绝（返回 ok=false + 原因）。</summary>
+    public string WizardNext()
+    {
+        var st = WizardState();
+        if (st["done"]!.GetValue<bool>()) return Env.Json(new { ok = true, done = true, message = "向导已完成" });
+        if (!st["canAdvance"]!.GetValue<bool>())
+        {
+            var items = st["items"]!.AsArray();
+            var idx = st["passed"]!.GetValue<int>();
+            var hint = idx < items.Count ? items[idx]!["hint"]!.GetValue<string>() : "";
+            return Env.Json(new { ok = false, done = false, message = "这一步还没通过：" + hint });
+        }
+        var next = st["passed"]!.GetValue<int>() + 1;
+        Settings.WizardStep = next;
+        if (next >= st["total"]!.GetValue<int>())
+        {
+            Settings.WizardDone = true;
+            return Env.Json(new { ok = true, done = true, message = "全部通过，向导完成" });
+        }
+        return Env.Json(new { ok = true, done = false, step = next, message = "已进入下一步" });
+    }
+
+    /// <summary>重跑向导（设置页入口）。</summary>
+    public string WizardReset()
+    {
+        Settings.WizardDone = false;
+        Settings.WizardStep = 0;
+        return Env.Json(new { ok = true, done = false, step = 0, message = "向导已重置" });
+    }
+
     /// <summary>键源归因报告：`rawInput` / `rawInput reset`</summary>
     private static string RawInputReport(string? arg)
     {
@@ -2010,6 +2079,8 @@ internal sealed class Backend : IDisposable
             // 键源归因：返回"哪个设备发了什么键"。调试用，界面上没有入口。
             "rawInput" => RawInputReport(a0),
             "recoverAudio" => RecoverAudio(a0),
+            "wizardNext" => WizardNext(),
+            "wizardReset" => WizardReset(),
             "repairDriver" => RepairDriver(a0),
             "exportDriverDiag" => ExportDriverDiag(),
             "setAutoSwitchDriver" => SetAutoSwitchDriver(a0),

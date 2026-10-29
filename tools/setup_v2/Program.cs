@@ -100,6 +100,10 @@ namespace IprcSetup2
             ClientSize = new Size(824, 692);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterScreen;
+            // ★ 2026-10-29 换机风险：窗口固定 824×692 且 AutoScaleMode.Dpi，
+            //   在 **1366×768 + 125%** 的笔记本上会超出屏幕、底部按钮点不到。
+            //   这里按工作区收敛，并开滚动，保证任何屏幕上都能操作到"立即安装"。
+            Load += (_, _) => ClampToWorkingArea();
             MaximizeBox = false;
             AutoScaleMode = AutoScaleMode.Dpi;
             BackColor = Color.FromArgb(245, 249, 254);
@@ -256,6 +260,26 @@ namespace IprcSetup2
                     if (_engine != null && _engine.State.ComponentsReady && _engine.State.DoubaoInstalled && !_engine.State.RestartRequired) OpenApplication();
                 }
             };
+        }
+
+        /// <summary>把窗口收敛到当前屏幕工作区内；装不下就开滚动，不裁掉任何控件。</summary>
+        private void ClampToWorkingArea()
+        {
+            try
+            {
+                var wa = Screen.FromControl(this).WorkingArea;
+                var changed = false;
+                if (Height > wa.Height - 16) { Height = Math.Max(480, wa.Height - 16); changed = true; }
+                if (Width > wa.Width - 16) { Width = Math.Max(640, wa.Width - 16); changed = true; }
+                if (changed)
+                {
+                    AutoScroll = true;              // 允许滚动到被挡住的部分
+                    StartPosition = FormStartPosition.Manual;
+                    Left = wa.Left + (wa.Width - Width) / 2;
+                    Top = wa.Top + Math.Max(0, (wa.Height - Height) / 2);
+                }
+            }
+            catch { }
         }
 
         private static Label Label(string text, int x, int y, int width, int height, float size, Color color, bool bold = false)
