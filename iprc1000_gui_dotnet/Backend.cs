@@ -1886,7 +1886,8 @@ internal sealed class Backend : IDisposable
     /// </summary>
     public string Doctor()
     {
-        var st = System.Text.Json.Nodes.JsonNode.Parse(GetState());
+        var st = System.Text.Json.Nodes.JsonNode.Parse(GetState())
+                 ?? new System.Text.Json.Nodes.JsonObject();
         var items = new System.Text.Json.Nodes.JsonArray();
         int bad = 0, warn = 0;
 
