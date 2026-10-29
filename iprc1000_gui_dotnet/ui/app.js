@@ -1706,9 +1706,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.125',
+      version: '1.2.126',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.125（构建于 2026-10-29 21:15）',
+      versionLine: 'v1.2.126（构建于 2026-10-29 21:30）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

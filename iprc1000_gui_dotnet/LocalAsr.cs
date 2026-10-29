@@ -371,6 +371,9 @@ internal static class AsrRun
     public static string LastPartial => _stream?.LastPartial ?? "";
     public static long PartialCount => _stream?.Partials ?? 0;
     public static bool Streaming => _stream != null;
+    public static string WsState => _stream?.State ?? "";
+    public static bool WsFinalSent => _stream?.FinalSent ?? false;
+    public static bool WsFinalRecv => _stream?.FinalRecv ?? false;
 
     /// <summary>Begin 被调用的次数（诊断用：按语音键/快捷键后这个数涨不涨，一眼判断闸门通不通）。</summary>
     public static long BeginCount;

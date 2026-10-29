@@ -25,13 +25,20 @@ internal sealed class AsrStream : IDisposable
 {
     private readonly ClientWebSocket _ws = new();
     private readonly CancellationTokenSource _cts = new();
-    private readonly BlockingCollection<byte[]> _sendQueue = new(2000);
+    /// <summary>发送队列：每项都带"是不是文本帧"。
+    /// ★ 协议要求控制消息（{"event":"final"}）必须是 **Text 帧**，音频必须是 Binary；
+    ///   之前全部按 Binary 发，引擎把 final 当音频吃掉了 —— 永远不回 type:"final"，
+    ///   于是收尾干等、界面卡在「识别中…」（实测踩到）。</summary>
+    private readonly BlockingCollection<(byte[] data, bool text)> _sendQueue = new(2000);
     private readonly TaskCompletionSource<string> _final = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _closed, _dropped;
 
     public string SessionId { get; } = Guid.NewGuid().ToString("N").Substring(0, 16);
     public string LastPartial { get; private set; } = "";
     public long Partials { get; private set; }
+    public bool FinalSent { get; private set; }
+    public bool FinalRecv { get; private set; }
+    public string State => _ws.State.ToString();
     public int Dropped => _dropped;
 
     public event Action<string>? OnPartial;
@@ -65,17 +72,18 @@ internal sealed class AsrStream : IDisposable
         if (_closed != 0 || len <= 0) return;
         var copy = new byte[len];
         Buffer.BlockCopy(pcm, off, copy, 0, len);
-        if (!_sendQueue.TryAdd(copy)) Interlocked.Increment(ref _dropped);   // 队列满就丢最旧，不阻塞音频
+        if (!_sendQueue.TryAdd((copy, false))) Interlocked.Increment(ref _dropped);   // 队列满就丢，不阻塞音频
     }
 
     /// <summary>松手：发 final，等定稿（超时返回已有 partial）。</summary>
-    public async Task<string> FinishAsync(int timeoutMs = 15000)
+    public async Task<string> FinishAsync(int timeoutMs = 5000)
     {
         try
         {
             var msg = Encoding.UTF8.GetBytes("{\"event\":\"final\"}");
-            // 直接发：此时音频已经全部入队，发送循环可能还在追，交给它顺序处理更安全
-            _sendQueue.Add(msg);
+            // 必须排在所有音频之后，且**作为文本帧**发出
+            _sendQueue.Add((msg, true));
+            FinalSent = true;
             var done = await Task.WhenAny(_final.Task, Task.Delay(timeoutMs));
             if (done == _final.Task) return await _final.Task;
             Safe.Note($"ASR 流式收尾超时（{timeoutMs}ms），用已有 partial");
@@ -93,10 +101,11 @@ internal sealed class AsrStream : IDisposable
     {
         try
         {
-            foreach (var buf in _sendQueue.GetConsumingEnumerable(_cts.Token))
+            foreach (var (buf, isText) in _sendQueue.GetConsumingEnumerable(_cts.Token))
             {
                 if (_ws.State != WebSocketState.Open) break;
-                await _ws.SendAsync(new ArraySegment<byte>(buf), WebSocketMessageType.Binary, true, _cts.Token);
+                await _ws.SendAsync(new ArraySegment<byte>(buf),
+                    isText ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, _cts.Token);
             }
         }
         catch { }
@@ -145,6 +154,7 @@ internal sealed class AsrStream : IDisposable
             var type = root.TryGetProperty("type", out var ty) ? ty.GetString() : "";
             if (type == "final")
             {
+                FinalRecv = true;
                 LastPartial = text;
                 _final.TrySetResult(text);
                 return;
