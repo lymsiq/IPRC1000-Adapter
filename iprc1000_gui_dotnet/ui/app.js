@@ -1446,7 +1446,7 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.84',
+      version: '1.2.85',
       buildStamp: '2026-10-16 09:50',
       versionLine: 'v1.2.69（构建于 2026-10-26 14:45）',
       device: {

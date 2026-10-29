@@ -565,10 +565,76 @@ impl Activity {
     }
 }
 
+/// 蓝牙设备名里是否含 "IPRC"（与 C# 侧 RemoteNameHint 一致）
+///
+/// 读 `HKLM\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\<MAC>\Name`，
+/// 值是 UTF-8 字节串（可能有结尾 NUL）。这是"配对过的蓝牙设备名"的权威来源。
+#[cfg(target_os = "windows")]
+fn bth_device_name_present() -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "advapi32")]
+    extern "system" {
+        fn RegOpenKeyExW(h: usize, sub: *const u16, opt: u32, sam: u32, out: *mut usize) -> i32;
+        fn RegEnumKeyExW(h: usize, idx: u32, name: *mut u16, len: *mut u32,
+                         res: *mut u32, class: *mut u16, clen: *mut u32, ft: *mut u8) -> i32;
+        fn RegQueryValueExW(h: usize, name: *const u16, res: *mut u32, ty: *mut u32,
+                            data: *mut u8, len: *mut u32) -> i32;
+        fn RegCloseKey(h: usize) -> i32;
+    }
+    const HKEY_LOCAL_MACHINE: usize = 0x8000_0002;
+    const KEY_READ: u32 = 0x2_0019;
+    let root: Vec<u16> = std::ffi::OsStr::new("SYSTEM\\CurrentControlSet\\Services\\BTHPORT\\Parameters\\Devices")
+        .encode_wide().chain(std::iter::once(0)).collect();
+    let val: Vec<u16> = std::ffi::OsStr::new("Name").encode_wide().chain(std::iter::once(0)).collect();
+    unsafe {
+        let mut hk: usize = 0;
+        if RegOpenKeyExW(HKEY_LOCAL_MACHINE, root.as_ptr(), 0, KEY_READ, &mut hk) != 0 { return false; }
+        let mut buf = [0u16; 256];
+        let mut i = 0u32;
+        let mut found = false;
+        loop {
+            let mut len = buf.len() as u32;
+            let rc = RegEnumKeyExW(hk, i, buf.as_mut_ptr(), &mut len,
+                                   std::ptr::null_mut(), std::ptr::null_mut(),
+                                   std::ptr::null_mut(), std::ptr::null_mut());
+            if rc != 0 { break; }
+            let mac: Vec<u16> = buf[..len as usize].to_vec();
+            let mut sub: usize = 0;
+            if RegOpenKeyExW(hk, mac.as_ptr(), 0, KEY_READ, &mut sub) == 0 {
+                let mut data = [0u8; 128];
+                let mut dlen: u32 = data.len() as u32;
+                let mut ty: u32 = 0;
+                if RegQueryValueExW(sub, val.as_ptr(), std::ptr::null_mut(), &mut ty,
+                                    data.as_mut_ptr(), &mut dlen) == 0 && dlen > 0 {
+                    let text = String::from_utf8_lossy(&data[..dlen as usize]).to_lowercase();
+                    if text.contains("iprc") { found = true; }
+                }
+                RegCloseKey(sub);
+            }
+            if found { break; }
+            i += 1;
+        }
+        RegCloseKey(hk);
+        found
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn bth_device_name_present() -> bool { true }
+
 /// 遥控器是否还在系统里（只看注册表，1 秒最多查一次）
 #[cfg(target_os = "windows")]
 fn remote_present() -> bool {
     use std::os::windows::ffi::OsStrExt;
+
+    // ★★ 2026-10-29：**按蓝牙名称识别**（用户确认：设备名固定为 IPRC1000）。
+    //   原来的判据是 `Enum\HID` 里出现 `0a5c` && `8502` —— 那是 Broadcom 的 VID/PID，
+    //   换一只不同批次/不同芯片的遥控器就会**误判成"未连接"**。
+    //   名称在 `Services\BTHPORT\Parameters\Devices\<MAC>\Name`（UTF-8 字节串），
+    //   与 C# 侧 Env.PairedRemoteMacs() 用的是同一个来源，两边判据保持一致。
+    if bth_device_name_present() { return true; }
+
+    // 兜底：老逻辑（有些堆栈不写 BTHPORT\Name）
     let path: Vec<u16> = std::ffi::OsStr::new("SYSTEM\\CurrentControlSet\\Enum\\HID")
         .encode_wide().chain(std::iter::once(0)).collect();
     #[link(name = "advapi32")]

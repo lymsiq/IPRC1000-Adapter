@@ -49,8 +49,35 @@ def m_sync_down():
 
 
 def device_present():
-    """遥控器是否还在：注册表 Enum\\HID 下仍有 0a5c/8502 的节点"""
+    r"""遥控器是否还在：**按蓝牙名称**（IPRC）判断，VID/PID 仅作兜底
+
+    2026-10-29：原来是 `Enum\HID` 里找 0a5c+8502（Broadcom）。
+    换一只不同批次/芯片的遥控器就会误判"不在"。名称固定为 IPRC1000，
+    所以优先查 BTHPORT\Parameters\Devices\<MAC>\Name。
+    """
     import winreg
+    # ① 名称优先（多个遥控器都能认出来）
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r"SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices",
+                            0, winreg.KEY_READ) as k:
+            for i in range(64):
+                try:
+                    mac = winreg.EnumKey(k, i)
+                except OSError:
+                    break
+                try:
+                    with winreg.OpenKey(k, mac) as d:
+                        v, _ = winreg.QueryValueEx(d, "Name")
+                        name = v.decode("utf-8", "replace") if isinstance(v, bytes) else str(v)
+                        if "iprc" in name.lower():
+                            return True
+                except OSError:
+                    pass
+    except Exception:
+        pass
+
+    # ② 兜底：老的 VID/PID 判据
     base = r"SYSTEM\CurrentControlSet\Enum\HID"
     try:
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base, 0, winreg.KEY_READ) as k:

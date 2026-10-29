@@ -57,8 +57,31 @@ def down_vks():
 
 
 def remote_present():
-    r"""遥控器是否还在系统里（注册表 Enum\HID 下有 0a5c/8502 节点）"""
+    r"""遥控器是否还在：**按蓝牙名称**（IPRC）判断，VID/PID 仅兜底
+
+    2026-10-29：名称固定为 IPRC1000，比 Broadcom 的 0a5c/8502 更可靠
+    （换一只遥控器仍能认出来）。
+    """
     import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r"SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices",
+                            0, winreg.KEY_READ) as k:
+            for i in range(64):
+                try:
+                    mac = winreg.EnumKey(k, i)
+                except OSError:
+                    break
+                try:
+                    with winreg.OpenKey(k, mac) as d:
+                        v, _ = winreg.QueryValueEx(d, "Name")
+                        name = v.decode("utf-8", "replace") if isinstance(v, bytes) else str(v)
+                        if "iprc" in name.lower():
+                            return True
+                except OSError:
+                    pass
+    except Exception:
+        pass
     try:
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
                             r"SYSTEM\CurrentControlSet\Enum\HID", 0, winreg.KEY_READ) as k:
