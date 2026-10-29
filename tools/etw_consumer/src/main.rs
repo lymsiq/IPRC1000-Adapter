@@ -1134,10 +1134,17 @@ impl Bridge {
                             .unwrap_or(0);
                         let expected_ms = (n as u64) * 20;
                         s.seq_jumps += 1;
+                        // ★★ 2026-10-30 修正「总账变分账」：
+                        //   原来这两行是**互斥**的 —— 静音期的跳号只进 seq_silence，
+                        //   不再进 seq_lost。于是"少了 4 帧"这个**客观事实**在总账里消失了，
+                        //   只剩"其中 4 帧归因于静音"。自检的断言（按注释语义期望 seq_lost=4）
+                        //   因此永远红着 —— 而真正的问题是指标语义被悄悄改了。
+                        //
+                        //   现在：seq_lost = 总缺失（不论原因）；seq_silence = 其中静音造成的。
+                        //   真丢 = seq_lost - seq_silence。两个数一起看才有意义。
+                        s.seq_lost += n - 1;
                         if gap_ms + 150 >= expected_ms {
                             s.seq_silence += n - 1;
-                        } else {
-                            s.seq_lost += n - 1;
                         }
                     }
                     }
