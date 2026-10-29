@@ -188,39 +188,58 @@ internal static class AsrOverlay
     {
         try
         {
-            var screen = Screen.FromPoint(Cursor.Position).WorkingArea;
             var hwnd = GetForegroundWindow();
-            var x = screen.Right - W - 24;
-            var y = screen.Bottom - H - 24;
+
+            // ── 第一步：先确定「该在哪块屏」──
+            //   多屏时唯一正确的依据是**焦点所在**，不是鼠标位置。
+            //   之前用 Cursor.Position 判断屏幕：你在主屏打字、鼠标停在副屏，
+            //   浮层就会跑到副屏去（实测 3209,1205 —— 正好在第二块屏上）。
+            Screen target = Screen.PrimaryScreen ?? Screen.FromPoint(Cursor.Position);
+            var caretPt = (Point?)null;
 
             if (hwnd != IntPtr.Zero)
             {
-                GetWindowThreadProcessId(hwnd, out _);
                 var tid = GetWindowThreadProcessId(hwnd, out _);
                 var gi = new GUITHREADINFO { cbSize = Marshal.SizeOf<GUITHREADINFO>() };
-                if (GetGUIThreadInfo(tid, ref gi) && gi.hwndCaret != IntPtr.Zero && gi.rcCaret.Bottom > gi.rcCaret.Top)
+                if (GetGUIThreadInfo(tid, ref gi) && gi.hwndCaret != IntPtr.Zero
+                    && gi.rcCaret.Bottom > gi.rcCaret.Top)
                 {
-                    // ① 光标矩形（准确）
                     var p = new Point(gi.rcCaret.Left, gi.rcCaret.Bottom);
                     ClientToScreen(hwnd, ref p);
-                    // 多屏：屏幕跟着光标走，否则副屏上会跑回主屏
-                    screen = Screen.FromPoint(p).WorkingArea;
-                    x = p.X - 16;
-                    y = p.Y + 8;
+                    caretPt = p;
+                    target = Screen.FromPoint(p);              // ① 光标在哪个屏就在哪个屏
                 }
                 else if (GetWindowRect(hwnd, out var wr))
                 {
-                    // ② 焦点窗口底部中央
-                    x = (wr.Left + wr.Right) / 2 - W / 2;
-                    y = wr.Bottom - H - 60;
+                    target = Screen.FromRectangle(Rectangle.FromLTRB(wr.Left, wr.Top, wr.Right, wr.Bottom));  // ② 焦点窗口所在屏
                 }
             }
 
-            // 夹到工作区内（含上方翻转）
-            if (y + H > screen.Bottom - 8) y = Math.Max(screen.Top + 8, y - H - 34);
-            x = Math.Max(screen.Left + 8, Math.Min(x, screen.Right - W - 8));
-            y = Math.Max(screen.Top + 8, Math.Min(y, screen.Bottom - H - 8));
+            var wa = target.WorkingArea;
+            int x, y;
+            if (caretPt != null)
+            {
+                x = caretPt.Value.X - 16;
+                y = caretPt.Value.Y + 8;
+            }
+            else if (hwnd != IntPtr.Zero && GetWindowRect(hwnd, out var w2))
+            {
+                x = (w2.Left + w2.Right) / 2 - W / 2;
+                y = w2.Bottom - H - 60;                        // ② 窗口底部中央
+            }
+            else
+            {
+                x = wa.Right - W - 24;                         // ③ 该屏右下角
+                y = wa.Bottom - H - 24;
+            }
+
+            // ── 第二步：夹到**目标屏**的工作区内（含上下翻转）──
+            if (y + H > wa.Bottom - 8) y = Math.Max(wa.Top + 8, caretPt != null ? caretPt.Value.Y - H - 26 : wa.Bottom - H - 24);
+            x = Math.Max(wa.Left + 8, Math.Min(x, wa.Right - W - 8));
+            y = Math.Max(wa.Top + 8, Math.Min(y, wa.Bottom - H - 8));
+
             f.Location = new Point(x, y);
+            Safe.Note($"ASR 浮层定位：{target.DeviceName} ({x},{y}) 依据={(caretPt != null ? "caret" : (hwnd != IntPtr.Zero ? "焦点窗口" : "屏幕右下"))}");
         }
         catch { }
     }

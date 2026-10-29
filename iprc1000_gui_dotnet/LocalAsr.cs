@@ -302,7 +302,7 @@ internal static class AsrCapture
         {
             _buf = new MemoryStream(16000 * 2 * 30);   // 预留 30 秒
             _bytes = 0;
-            _probe.Clear(); _ds2 = null;               // 每次重新判定上采样
+            _probe.Clear(); _pending.Clear(); _ds2 = null;   // 每次重新判定上采样
         }
     }
 
@@ -311,8 +311,27 @@ internal static class AsrCapture
     {
         MemoryStream? buf;
         lock (Gate) { buf = _buf; if (buf == null) return; _bytes += len; }
-        // ★ 判定是否是"被上采样 2 倍"的音频（只在前 4096 样本做一次）
-        ProbeAndDecide(b, off, len);
+        // ① 还没判定完：先攒着（一个字节都不往下走，避免前后倍率不一致）
+        if (_ds2 == null)
+        {
+            for (var i = off; i < off + len; i++) _pending.Add(b[i]);
+            ProbeAndDecide(b, off, len);
+            if (_ds2 == null) return;                       // 还不够 4096 样本，继续攒
+
+            // 判定出来了：把攒下的**全部**按统一倍率吐出
+            var all = _pending.ToArray();
+            _pending.Clear();
+            var flushed = _ds2 == true ? Decimate2(all, 0, all.Length) : all;
+            if (flushed.Length > 0)
+            {
+                try { buf.Write(flushed, 0, flushed.Length); } catch { }
+                AsrRun.PushLive(flushed, 0, flushed.Length);
+            }
+            Safe.Note($"ASR 判定完成（{(_ds2 == true ? "32k→16k 抽取" : "16k 原样")}），补发 {flushed.Length / 32}ms");
+            return;
+        }
+
+        // ② 已判定：按固定倍率处理
         if (_ds2 == true)
         {
             var dec = Decimate2(b, off, len);
@@ -356,6 +375,14 @@ internal static class AsrCapture
     /// </summary>
     private static bool? _ds2;          // null = 还没判定
     private static readonly List<short> _probe = new(4096);
+    /// <summary>
+    /// 判定前暂存的**原始字节**。
+    /// ★ 为什么必须缓存：如果在流中途才切换"是否降采样"，
+    ///   前半段是一倍时长、后半段是减半时长 ⇒ 音频拼接错乱
+    ///   ⇒ 表现为「卡顿」和「没说完就断」。所以判定完成前一个字节都不写进缓冲，
+    ///   判定后用**同一个倍率**把暂存部分一次性吐出，保证音频连续。
+    /// </summary>
+    private static readonly List<byte> _pending = new(64 * 1024);
     public static bool Downsampled => _ds2 == true;
 
     private static void ProbeAndDecide(byte[] b, int off, int len)
@@ -363,7 +390,7 @@ internal static class AsrCapture
         if (_ds2 != null) return;
         for (var i = off; i + 1 < off + len && _probe.Count < 4096; i += 2)
             _probe.Add((short)(b[i] | (b[i + 1] << 8)));
-        if (_probe.Count < 4096) return;
+        if (_probe.Count < 2048) return;
 
         var hit = 0; var tot = 0;
         for (var i = 2; i + 2 < _probe.Count; i += 2)

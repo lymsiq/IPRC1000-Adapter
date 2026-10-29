@@ -30,7 +30,7 @@
     <!-- ── 版本信息 ──
          改版本只需要改下面这一个 <Version>：程序内显示、exe 文件属性、
          发布包文件名（package.py 会读它）都从这里取，避免多处各写一份而漂移。 -->
-    <Version>1.2.129</Version>
+    <Version>1.2.130</Version>
     <!-- 让 exe 的「文件版本」也等于发布版本；否则 FileVersion 停在默认 1.2.0.0，
          安装器的"已安装版本"提示会读错（2026-10-29 实测踩到） -->
     <FileVersion>$(Version)</FileVersion>
