@@ -2078,6 +2078,9 @@ internal sealed class Backend : IDisposable
         var m = (mode ?? "").ToLowerInvariant();
         if (m != "hotkey" && m != "asr") return Env.Json(new { ok = false, message = "未知通道" });
         Settings.AsrMode = m;
+        // ★ 选了「本地 ASR」就把总开关一起打开 —— 否则用户点了通道却什么都不发生
+        //   （上一版就是这里：总开关默认关，闸门要 enabled && mode 同时成立，点了没反应）
+        if (m == "asr") Settings.AsrEnabled = true;
         var hasModel = Settings.AsrModel.Length > 0 &&
                        File.Exists(Path.Combine(AsrModelDir, Settings.AsrModel + ".gguf"));
         return Env.Json(new
@@ -2085,8 +2088,8 @@ internal sealed class Backend : IDisposable
             ok = true, mode = m,
             message = m == "asr"
                 ? (hasModel
-                    ? "已切到「本地识别」：按语音键只录音，松手后由本地引擎整句识别并直接上屏（约 0.5~1.5 秒）。"
-                    : "已切到「本地识别」，但还没下载模型 —— 先在上面下载一个。")
+                    ? "已启用本地识别：按住语音键边说边出字，松手即定稿上屏（不再唤起输入法）。"
+                    : "已启用本地识别，但还没下载模型 —— 先在上面下载一个，否则按语音键只会弹出波形框、不出字。")
                 : "已切到「交给输入法」（豆包/微信）"
         });
     }
