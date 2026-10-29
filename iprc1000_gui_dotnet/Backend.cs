@@ -179,10 +179,14 @@ internal sealed class Backend : IDisposable
             DeviceLog("按键来源 → ETW（唯一来源）");
         }
 
-        _keySourceGuard = stillKb
-            ? "设备仍是键盘：ETW 能读到按键，但系统也会把它当键盘，按键会漏成字符 —— "
-              + "请点「安装虚拟键盘驱动」把驱动换成 HID-compliant device"
-            : "设备已不是键盘 ✓ 按键走 BthPort ETW（不装钩子、不吞键、无卡键风险）";
+        _keySourceGuard = Settings.DriverFreeMode
+            // 无驱动模式：遥控器**就该**是键盘，不能再引导用户去装驱动（那会推翻本模式）
+            ? "无驱动模式：遥控器保持键盘，它自带的 m 由钩子按「连发特征」吞掉"
+              + $"（已吞 {GhostGuard.Swallowed} 次；开头第 1 个 m 可能漏，属正常）"
+            : stillKb
+              ? "设备仍是键盘：ETW 能读到按键，但系统也会把它当键盘，按键会漏成字符 —— "
+                + "请点「安装虚拟键盘驱动」把驱动换成 HID-compliant device"
+              : "设备已不是键盘 ✓ 按键走 BthPort ETW（不装钩子、不吞键、无卡键风险）";
     }
 
         public void NoteKey(int vk)

@@ -167,13 +167,18 @@ function renderOverview(s) {
   const stillKb = !!ks0.stillKeyboard;
   // ★ 判据用「钩子是否真的在拦」，不是「捕获器是否在跑」——
   //   否则切成 ETW 但驱动没换时，会误报「拦截已生效」而 m 其实在漏。
-  const protectedOk = hookOn || !stillKb;
+  // 无驱动模式：遥控器是键盘，但有钩子在吞 m —— 也算"受保护"
+  const driverFreeOn = !!(state && state.driverFree);
+  const protectedOk = driverFreeOn || hookOn || !stillKb;
   setDot('#d-perm', protectedOk ? 'on' : 'err');
   $('#v-perm').textContent = protectedOk
-    ? (hookOn ? (sw.deviceSeen ? '拦截已生效' : '拦截已就绪 · 等遥控器') : '系统不认它是键盘')
+    ? (driverFreeOn ? '无驱动模式 · 钩子吞 m'
+       : hookOn ? (sw.deviceSeen ? '拦截已生效' : '拦截已就绪 · 等遥控器') : '系统不认它是键盘')
     : '⚠ 未受保护：m 会漏进应用';
   // 概览卡片副标题：按模式给不同信息（ETW 模式下「已拦截/放行」没有意义）
-  $('#v-perm').nextElementSibling.textContent = !protectedOk
+  $('#v-perm').nextElementSibling.textContent = driverFreeOn
+    ? `无驱动模式：遥控器保持键盘，它自带的 m 由钩子按连发吞掉（已吞 ${(state&&state.ghostSwallowed)||0} 次）`
+    : !protectedOk
     ? `遥控器仍被系统当作<b>键盘</b>（驱动未切换）→ 按键会直接打进窗口（随机冒出字母）` +
       (ks0.guard ? `　【${ks0.guard}】` : '')
     // 2026-10-20：钩子已彻底移除（Start 里只走 ETW），hookMode 恒为 false，
@@ -813,10 +818,12 @@ function renderEnv(s) {
   setDot('#d-perm2', rk === 'NotKeyboard' ? 'on' : (rk === 'Keyboard' ? 'bad' : 'warn'));
   $('#injectNote').className = 'note' + (rk === 'Keyboard' ? ' warn' : '');
   if (rk === 'Keyboard') {
-    $('#injectNote').innerHTML =
-      `⚠ 遥控器仍被系统当作 <b>键盘</b> → 按键会直接打出字符（按住语音键就是一串 <b>m</b>）。<br>` +
-      `请在下面点「<b>切换设备驱动</b>」（需要管理员；先把遥控器按醒）。` +
-      `按键仍从 <b>BthPort ETW</b> 读取，但系统这一层拦不住。`;
+    $('#injectNote').innerHTML = (state && state.driverFree)
+      ? `无驱动模式：遥控器保持键盘，它自带的 <b>m</b> 由钩子按「连发特征」吞掉` +
+        `（已吞 <b>${(state && state.ghostSwallowed) || 0}</b> 次；开头第 1 个可能漏，属正常）。`
+      : `⚠ 遥控器仍被系统当作 <b>键盘</b> → 按键会直接打出字符（按住语音键就是一串 <b>m</b>）。<br>` +
+        `请在下面点「<b>切换设备驱动</b>」（需要管理员；先把遥控器按醒）。` +
+        `按键仍从 <b>BthPort ETW</b> 读取，但系统这一层拦不住。`;
   } else if (rk === 'Absent') {
     $('#injectNote').innerHTML =
       `遥控器<b>当前未连接</b>（休眠 / 未配对）→ <b>无法判断</b>驱动是否已切换。<br>` +
@@ -1496,9 +1503,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.95',
+      version: '1.2.96',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.95（构建于 2026-10-29 10:58）',
+      versionLine: 'v1.2.96（构建于 2026-10-29 11:08）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

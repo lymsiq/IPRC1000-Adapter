@@ -75,6 +75,7 @@ internal static class GhostGuard
     private const int BurstHoldMs = 200;    // 抑制状态保持多久（无新 m）
     private static long _lastMDownAt;
     private static volatile bool _burst;
+    private static long _burstAt;           // 进入连发抑制的时刻（硬性兜底用）
     private static volatile int _graceGen;
 
     private static IntPtr _hook;
@@ -118,6 +119,8 @@ internal static class GhostGuard
     {
         Enabled = false;
         _armed = false;
+        _burst = false;
+        _lastMDownAt = 0;
         if (_hook != IntPtr.Zero) { try { UnhookWindowsHookEx(_hook); } catch { } _hook = IntPtr.Zero; }
     }
 
@@ -187,11 +190,21 @@ internal static class GhostGuard
                     {
                         var now = Environment.TickCount64;
 
-                        // 连发特征：距上一次 m 按下 < 80ms ⇒ 是自动重复
-                        if (_lastMDownAt != 0 && now - _lastMDownAt < BurstGapMs) _burst = true;
-                        _lastMDownAt = now;
-                        // 抑制状态：200ms 内没有新的 m 就自动过期
+                        // ★★★ 顺序很重要（2026-10-29 真 bug，用户键盘 m 打不出来）：
+                        //     必须先按"距上次的间隔"判过期，**再**更新 _lastMDownAt。
+                        //     原来写成先更新再比较，差值恒为 0 ⇒ _burst 永远清不掉 ⇒
+                        //     一整串吞到 1900 次，连物理键盘的 m 都被吃掉。
                         if (_burst && now - _lastMDownAt > BurstHoldMs) _burst = false;
+                        // 硬性兜底：抑制最多持续 3 秒（防止任何时间戳异常把它钉死）
+                        if (_burst && now - _burstAt > 3000) _burst = false;
+
+                        // 连发特征：距上一次 m 按下 < 80ms ⇒ 是自动重复
+                        if (_lastMDownAt != 0 && now - _lastMDownAt < BurstGapMs && !_burst)
+                        {
+                            _burst = true;
+                            _burstAt = now;
+                        }
+                        _lastMDownAt = now;
 
                         if (_armed || _burst)
                         {
