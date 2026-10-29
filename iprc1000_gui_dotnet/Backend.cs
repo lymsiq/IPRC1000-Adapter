@@ -448,6 +448,10 @@ internal sealed class Backend : IDisposable
             // 无驱动模式：恢复幽灵键抑制（钩子不随进程持久，重启后要重新装）
             if (Settings.DriverFreeMode) { try { GhostGuard.Enabled = true; GhostGuard.Start(); } catch { } }
 
+            // ★★ 2026-10-29：先清**上一次进程残留的任意卡键**（真机事故：用户键盘 m 打不出来，
+            //   系统按 31Hz 自动重复它，拔遥控器电池也停不了）。只在真有键按着时才动手。
+            try { var stuck = KeyFilter.ReleaseStuckKeys(); if (stuck > 0) DeviceLog($"启动清理卡键 {stuck} 个"); } catch { }
+
             // ★ 启动兜底：清掉上一次异常退出（例如被强杀）残留的「按着不放」的注入键。
             //   最要命的是右 Alt(AltGr) —— 卡住会让字母键输出特殊字符、中文输入法失效。
             try { KeyFilter.ReleaseAllInjected(); } catch { }
@@ -879,6 +883,9 @@ internal sealed class Backend : IDisposable
             ["ghostSwallowed"] = GhostGuard.Swallowed,
             ["ghostReleased"] = GhostGuard.ForcedReleases,
             ["ghostBursts"] = GhostGuard.Bursts,
+            // -1 = 从未拦过；否则=距最近一次拦截的秒数（不变化 = 现在已经不发 m）
+            ["ghostLastAgo"] = GhostGuard.LastSwallowAt == 0 ? -1
+                : (int)((Environment.TickCount64 - GhostGuard.LastSwallowAt) / 1000),
             ["imeVoice"] = Keys.FormatSymbols(Keymaps.Get("voice") ?? Array.Empty<int>()),
             ["imeDetected"] = new JsonObject
             {
@@ -1529,6 +1536,7 @@ internal sealed class Backend : IDisposable
         try { _filter?.ClearHeld("切换驱动模式，先放掉按住的键"); } catch { }
 
         Settings.DriverFreeMode = want;
+        GhostGuard.ResetStats();          // 切换即清零：避免旧累计数字被误读成"还在发"
         if (want) { GhostGuard.Enabled = true; GhostGuard.Start(); }
         else GhostGuard.Stop();
 

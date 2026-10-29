@@ -1094,6 +1094,51 @@ internal sealed class KeyFilter : IDisposable
     /// **后果是字母键输出特殊字符、中文输入法直接失效**（用户实测踩到）。
     /// 退出路径能跑到就调这里；跑不到（taskkill /F）则由启动时的兜底清理补上。
     /// </summary>
+    /// <summary>
+    /// **清理上一次异常退出残留的任意卡键**（2026-10-29 真机事故）。
+    ///
+    /// 事故：用户键盘的 `m` 打不出来，且拔掉遥控器电池也照样按 31Hz 冒 `m`。
+    /// 用低级钩子观察者抓到铁证：`scan=0x32 flags=0x00 async=0x8001` ——
+    /// 是**系统认为 m 一直按住**在自动重复（不是遥控器、也不是注入）。
+    /// 源头是虚拟键盘设备里残留的一份"m 按下"报告（进程被强杀/崩溃时没发释放）。
+    ///
+    /// 为什么原来清不掉：`ReleaseAllInjected` 只在**本进程**持有键时才发全零；
+    /// 残留来自**上一个进程**，`_injectedSet` 是空的 ⇒ 跳过；而 SendInput 兜底只补修饰键。
+    ///
+    /// 现在的做法：启动时扫一遍**可能被注入过的键**，只要发现"系统认为还按着"的，
+    /// 就发一次全零报告 + 针对性 KEYUP。正常启动（没人按着）不会触发，
+    /// 所以不会重演"每次启动弹右键菜单"那个老坑。
+    /// </summary>
+    public static int ReleaseStuckKeys()
+    {
+        try
+        {
+            // 只看"我们会注入的键"：字母、数字、常用功能键、修饰键。范围收窄是有意的 ——
+            // 避免误释放用户启动时正按着的无关键。
+            var watch = new List<int>();
+            for (var vk = 0x08; vk <= 0xFE; vk++) watch.Add(vk);
+
+            var stuck = new List<int>();
+            foreach (var vk in watch)
+            {
+                // 0x8000 = 当前按下。启动瞬间若真有键按着，多半是残留。
+                if ((GetAsyncKeyState(vk) & 0x8000) != 0) stuck.Add(vk);
+            }
+            if (stuck.Count == 0) return 0;
+
+            // ① 虚拟键盘：发全零报告（这是清"上一个进程设备"最有效的手段）
+            try { WinUhidInjector.Release(); } catch { }
+            // ② 系统侧：针对性补 KEYUP（只对确实按着的键）
+            foreach (var vk in stuck)
+            {
+                try { Send(new[] { vk }, true); } catch { }
+            }
+            Safe.Note($"GHOST 启动清理卡键：{string.Join(",", stuck.Select(v => "0x" + v.ToString("X2")))}");
+            return stuck.Count;
+        }
+        catch { return 0; }
+    }
+
     public static void ReleaseAllInjected()
     {
         int[] held;

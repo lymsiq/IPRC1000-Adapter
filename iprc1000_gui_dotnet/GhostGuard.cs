@@ -145,6 +145,13 @@ internal static class GhostGuard
     /// 按住 1 秒就会吞 31 下，面板显示"已吞 2640 次"会让用户以为出大问题。</summary>
     public static long Bursts;
 
+    /// <summary>最近一次拦截的时刻（TickCount64）。拔掉遥控器/不按键时这个值**不再变化**，
+    /// 界面用它回答"现在还发不发 m"，比累计数字有用得多。</summary>
+    public static long LastSwallowAt;
+
+    /// <summary>清零统计（切换模式时调用，避免累计数字被误读成"还在发"）</summary>
+    public static void ResetStats() { Swallowed = 0; Bursts = 0; ForcedReleases = 0; LastSwallowAt = 0; }
+
     /// <summary>语音键按下 → 开始吞 m。</summary>
     public static void Arm(long nowMs)
     {
@@ -238,6 +245,7 @@ internal static class GhostGuard
                         if (_armed || _burst)
                         {
                             Swallowed++;
+                            LastSwallowAt = now;
                             return (IntPtr)1;      // 吞掉：不传给后续（包括输入法）
                         }
                     }
