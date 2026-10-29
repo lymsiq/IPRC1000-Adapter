@@ -1967,6 +1967,13 @@ internal sealed class Backend : IDisposable
             backend = Settings.AsrBackend,
             backends = AsrCompiledBackends(),
             gpuAvailable = AsrCompiledBackends().Any(b => b is "vulkan" or "cuda" or "metal"),
+            engineRunning = LocalAsr.Running,
+            lastText = LocalAsr.LastText,
+            lastErr = LocalAsr.LastErr,
+            captureBytes = LocalAsr.LastCaptureBytes,
+            lastMs = LocalAsr.LastMs,
+            lastSec = Math.Round(LocalAsr.LastSec, 2),
+            lastAgo = LocalAsr.LastAt == 0 ? -1 : (int)((Environment.TickCount64 - LocalAsr.LastAt) / 1000),
             models = arr,
         });
     }
@@ -2043,7 +2050,7 @@ internal sealed class Backend : IDisposable
             ok = true, mode = m,
             message = m == "asr"
                 ? (hasModel
-                    ? "已切到「本地识别」。注意：识别接入仍在开发中，当前按语音键仍会走输入法。"
+                    ? "已切到「本地识别」：按语音键只录音，松手后由本地引擎整句识别并直接上屏（约 0.5~1.5 秒）。"
                     : "已切到「本地识别」，但还没下载模型 —— 先在上面下载一个。")
                 : "已切到「交给输入法」（豆包/微信）"
         });

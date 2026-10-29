@@ -674,6 +674,17 @@ internal sealed class KeyFilter : IDisposable
         if (bid == "voice")
             Safe.Note($"VOICE {(pressed ? "DOWN" : "UP")}  来源={src}" + (holdMs >= 0 ? $"  按住 {holdMs:F0} ms" : ""));
 
+        // ★★ ASR 模式：语音键**只录音，不注入组合键**。
+        //   否则会同时唤起"输入法 + 本地引擎" → 双重录音、两份文字抢着上屏。
+        //   抖动对（<25ms）不当成一次说话，避免把半句话当成整句送去识别。
+        if (bid == "voice" && Settings.AsrMode == "asr")
+        {
+            if (pressed) AsrRun.Begin();
+            else if (holdMs < 0 || holdMs >= DebounceMs) AsrRun.Schedule(VoiceTailMs + 40);
+            else Safe.Note("ASR 忽略抖动对（按住过短）");
+            return;   // 不注入、不走去抖/尾音窗口
+        }
+
         // ★★★ 语音键"抖动对"去抖（2026-10-19 全键抓包确认的真实报文形态）：
         //   遥控器在**按住开始**时会先发一个极短的 DOWN→UP（实测 3 / 18 / 34 ms），
         //   41~163 ms 之后才是真正持续的 DOWN。
