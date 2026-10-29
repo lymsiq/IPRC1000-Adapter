@@ -258,6 +258,27 @@ internal static class AsrCapture
     private static readonly object Gate = new();
     private static long _bytes;
 
+    // 波形用：最近 18 个 RMS 电平（0..1）。音频线程写入，UI 线程读取。
+    private const int LevelSlots = 18;
+    private static readonly float[] _levels = new float[LevelSlots];
+    private static int _levelPos;
+
+    /// <summary>仅供外观自检：直接塞一个电平值（不经过音频链）。</summary>
+    public static void DebugFeedLevel(float v)
+    {
+        lock (Gate) { _levels[_levelPos] = Math.Clamp(v, 0, 1); _levelPos = (_levelPos + 1) % LevelSlots; }
+    }
+
+    public static float[] Levels()
+    {
+        lock (Gate)
+        {
+            var copy = new float[LevelSlots];
+            for (var i = 0; i < LevelSlots; i++) copy[i] = _levels[(_levelPos + i) % LevelSlots];
+            return copy;
+        }
+    }
+
     public static bool Active { get { lock (Gate) return _buf != null; } }
 
     public static void Begin()
@@ -275,6 +296,21 @@ internal static class AsrCapture
         MemoryStream? buf;
         lock (Gate) { buf = _buf; if (buf == null) return; _bytes += len; }
         try { buf.Write(b, off, len); } catch { }
+        // RMS 单独算：不能锁着 Gate 做浮点循环（音频线程要快）
+        try
+        {
+            double sum = 0; var n = len / 2;
+            for (var i = 0; i + 1 < len; i += 2)
+            {
+                var v = (short)(b[off + i] | (b[off + i + 1] << 8));
+                sum += (double)v * v;
+            }
+            var rms = n > 0 ? Math.Sqrt(sum / n) / 32768.0 : 0;
+            // 人耳感知更接近对数：换算成 0..1 的显示值
+            var lv = (float)Math.Clamp(Math.Log10(1 + rms * 60) / 1.6, 0, 1);
+            lock (Gate) { _levels[_levelPos] = lv; _levelPos = (_levelPos + 1) % LevelSlots; }
+        }
+        catch { }
     }
 
     public static (byte[] wav, double seconds) End()
@@ -308,6 +344,7 @@ internal static class AsrRun
         try
         {
             AsrCapture.Begin();
+            AsrOverlay.Show("正在听…");
             Safe.Note("ASR 开始录音");
         }
         catch (Exception e) { Safe.Note("ASR 录音开始失败：" + e.Message); }
@@ -324,6 +361,7 @@ internal static class AsrRun
         if (Interlocked.Exchange(ref _busy, 1) == 1) return;   // 上一句还在识别，直接跳过
         try
         {
+            AsrOverlay.Recognizing();
             var (wav, sec) = AsrCapture.End();
             if (wav.Length == 0) { Safe.Note("ASR 没录到音频（检查音频链是否在跑）"); return; }
             if (sec < 0.25) { Safe.Note($"ASR 跳过：太短（{sec:F2}s）"); return; }
@@ -339,9 +377,10 @@ internal static class AsrRun
 
             LocalAsr.LastCaptureBytes = wav.Length;
             var (tok, text, ms) = LocalAsr.TranscribeAsync(wav).GetAwaiter().GetResult();
-            if (!tok) { Safe.Note($"ASR 转写失败（{sec:F1}s / {wav.Length} 字节）：{LocalAsr.LastErr}"); return; }
+            if (!tok) { AsrOverlay.Hide(); Safe.Note($"ASR 转写失败（{sec:F1}s / {wav.Length} 字节）：{LocalAsr.LastErr}"); return; }
             if (text.Length == 0) { LocalAsr.LastErr = "空结果"; Safe.Note($"ASR 空结果（{sec:F1}s 音频 / {ms}ms）"); return; }
 
+            AsrOverlay.ShowResult(text);
             LocalAsr.LastText = text; LocalAsr.LastMs = ms; LocalAsr.LastSec = sec;
             LocalAsr.LastAt = Environment.TickCount64; LocalAsr.LastErr = "";
             Safe.Note($"ASR 成功：{sec:F1}s 音频 → {ms}ms，「{text}」");
