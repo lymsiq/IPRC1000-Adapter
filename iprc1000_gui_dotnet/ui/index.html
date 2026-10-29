@@ -35,10 +35,6 @@
         <svg viewBox="0 0 24 24"><path d="M3 13.5h3l2-5.5 3.2 10L14 11l1.9 2.5H21" stroke-width="1.9" fill="none"/></svg>
         <span class="nav-txt">环境设置</span>
       </button>
-      <button class="nav-btn" data-page="mouse" title="鼠标模式">
-        <svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="5" stroke-width="1.7" fill="none"/><path d="M12 7.6v3.9" stroke-width="1.9" fill="none"/></svg>
-        <span class="nav-txt">鼠标模式</span>
-      </button>
     </nav>
 
     <div class="device">
@@ -250,6 +246,24 @@
         <p>本机运行环境检查与一键修复</p>
       </header>
 
+      <!-- 3.6 本地语音识别（ASR） -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="ic ic-purple"><svg viewBox="0 0 24 24"><path d="M12 3v10" stroke-width="1.8"/><path d="M8 6.5a4 4 0 0 1 8 0" fill="none" stroke-width="1.6"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" fill="none" stroke-width="1.6"/><path d="M12 18v3" stroke-width="1.6"/></svg></div>
+          <div class="panel-title">
+            <b>本地语音识别（ASR）</b>
+            <span>在电脑本地把语音转成文字，语音不出本机 · 目前用于「试听/离线」通道</span>
+          </div>
+          <span class="dot" id="d-asr"></span>
+        </div>
+        <div class="kv" id="asrKv"></div>
+        <div class="note" id="asrNote"></div>
+        <div class="list" id="asrModels"></div>
+        <div class="panel-actions">
+          <button class="btn ghost" id="btnAsrRefresh">刷新状态</button>
+        </div>
+      </div>
+
       <!-- 0. 环境自检 · 一键就绪 -->
       <div class="panel">
         <div class="panel-head">
@@ -383,24 +397,7 @@
         <div class="note" id="mouseToggleNote"></div>
         <div class="panel-actions">
           <button class="btn" id="btnMouseToggle">切换到鼠标模式</button>
-        </div>
-      </div>
-
-      <!-- 3.6 本地语音识别（ASR） -->
-      <div class="panel">
-        <div class="panel-head">
-          <div class="ic ic-purple"><svg viewBox="0 0 24 24"><path d="M12 3v10" stroke-width="1.8"/><path d="M8 6.5a4 4 0 0 1 8 0" fill="none" stroke-width="1.6"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" fill="none" stroke-width="1.6"/><path d="M12 18v3" stroke-width="1.6"/></svg></div>
-          <div class="panel-title">
-            <b>本地语音识别（ASR）</b>
-            <span>在电脑本地把语音转成文字，语音不出本机 · 目前用于「试听/离线」通道</span>
-          </div>
-          <span class="dot" id="d-asr"></span>
-        </div>
-        <div class="kv" id="asrKv"></div>
-        <div class="note" id="asrNote"></div>
-        <div class="list" id="asrModels"></div>
-        <div class="panel-actions">
-          <button class="btn ghost" id="btnAsrRefresh">刷新状态</button>
+          <button class="btn ghost" id="btnMouseDetail">手感与自校准 ›</button>
         </div>
       </div>
 

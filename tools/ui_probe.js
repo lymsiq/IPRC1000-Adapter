@@ -29,6 +29,10 @@ const { chromium } = require('playwright-core');
 const ROOT = path.resolve(__dirname, '..');
 const UI = path.join(ROOT, 'iprc1000_gui_dotnet', 'ui');
 const PAGES = ['overview', 'keys', 'env', 'mouse'];
+// 没有侧栏导航、但仍存在的页面（从界面内部跳进去）——
+// 2026-10-29：鼠标模式开关并入环境设置后，侧栏不再列「鼠标模式」，
+// 但 #page-mouse（手感/曲线/自校准）仍保留，由环境设置里的按钮 goto 进去。
+const HIDDEN_PAGES = ['mouse'];
 
 const argv = process.argv.slice(2);
 const outIdx = argv.indexOf('--out');
@@ -132,7 +136,7 @@ const PROBE = () => {
   if (missingIds.length) bad('缺少页面 id：' + missingIds.map((p) => 'page-' + p).join(', ') + '（goto() 按 page- 前缀拼接找页，缺一个就会全页隐藏）');
   else ok('页面 id 齐全（' + PAGES.map((p) => 'page-' + p).join(' / ') + '）');
 
-  const badNav = PAGES.filter((p) => !s.navPages.includes(p));
+  const badNav = PAGES.filter((p) => !HIDDEN_PAGES.includes(p) && !s.navPages.includes(p));
   if (badNav.length) bad('导航按钮缺 data-page：' + badNav.join(', '));
   else ok('导航按钮 data-page 齐全');
 
@@ -190,7 +194,11 @@ const PROBE = () => {
 
   /* ── 2. 逐页切换 ── */
   for (const name of PAGES) {
-    await page.click(`.nav-btn[data-page="${name}"]`);
+    if (HIDDEN_PAGES.includes(name)) {
+      await page.evaluate((n) => window.goto ? window.goto(n) : null, name);
+    } else {
+      await page.click(`.nav-btn[data-page="${name}"]`);
+    }
     await page.waitForTimeout(320);
     const t = await page.evaluate(PROBE);
     const want = 'page-' + name;
@@ -198,7 +206,11 @@ const PROBE = () => {
     else if (t.visibleIds[0] !== want) bad('切到 ' + name + ' 后显示的是 ' + t.visibleIds[0]);
     else if (t.visibleHeight[0] < 200) bad('切到 ' + name + ' 后高度仅 ' + t.visibleHeight[0] + 'px');
     else ok('切到 ' + name + ' 正常（' + t.visibleHeight[0] + 'px / ' + t.visibleText[0] + ' 字）');
-    if (t.activeNav.length === 1 && t.activeNav[0] === name) ok('  ' + name + ' 导航高亮正确');
+    // 无侧栏导航的页面（HIDDEN_PAGES）本来就没有按钮可高亮，跳过这条
+    if (HIDDEN_PAGES.includes(name)) {
+      if (t.activeNav.length === 0) ok('  ' + name + ' 无侧栏导航（按设计）');
+      else bad('  ' + name + ' 不应有导航高亮：' + JSON.stringify(t.activeNav));
+    } else if (t.activeNav.length === 1 && t.activeNav[0] === name) ok('  ' + name + ' 导航高亮正确');
     else bad('  ' + name + ' 导航高亮异常：' + JSON.stringify(t.activeNav));
     // ★ 发布版默认不写日志：任何页面上都不该出现"按键日志/清空按键日志"
     if (t.hasLogUi) bad('  ' + name + ' 页面仍出现"日志"字样（发布版默认不写日志，应隐藏）');

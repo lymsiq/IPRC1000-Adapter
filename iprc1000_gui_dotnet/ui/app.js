@@ -1363,6 +1363,10 @@ function bindUI() {
     };
   }
   // 导出配置：卸载会删掉配置目录，先让用户能备份
+  // 手感与自校准：跳回原鼠标页（页面保留，只是侧栏不再列它）
+  const mouseDetail = $('#btnMouseDetail');
+  if (mouseDetail) mouseDetail.onclick = () => goto('mouse');
+
   const asrRefresh = $('#btnAsrRefresh');
   if (asrRefresh && hasBridge) {
     asrRefresh.onclick = async () => {
@@ -1641,9 +1645,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.112',
+      version: '1.2.113',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.112（构建于 2026-10-29 17:00）',
+      versionLine: 'v1.2.113（构建于 2026-10-29 17:10）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
