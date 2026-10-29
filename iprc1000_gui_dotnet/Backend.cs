@@ -880,6 +880,8 @@ internal sealed class Backend : IDisposable
             {
                 ["mode"] = _keySource,
                 ["stillKeyboard"] = Env.RemoteStillKeyboard(),
+                ["driverFree"] = Settings.DriverFreeMode,
+                ["ghostSwallowed"] = GhostGuard.Swallowed,
                 ["guard"] = _keySourceGuard,
                 // ★ 2026-10-18：`pressed` 以前取"最后一个事件是不是 DOWN"——
                 //   一旦 UP 丢了，面板就永远显示「按住」，看起来像卡键（真机被误判过）。
@@ -1223,8 +1225,11 @@ internal sealed class Backend : IDisposable
         /// <summary>环境自检清单（安装/就绪向导用）</summary>
     private JsonObject SetupStatus()
     {
-        // 「按键受保护」= 要么设备已不是键盘，要么钩子正在拦截（两者都不会漏 m / 漏键）
-        var devOk = !Env.RemoteStillKeyboard() || (_filter is { Running: true, KeySourceIsEtw: false });
+        // 「按键受保护」= 要么设备已不是键盘，要么钩子正在拦截，要么是**无驱动模式**（钩子按连发特征吞 m）
+        //   ★ 2026-10-29：原来只认前两种 ⇒ 无驱动模式下遥控器是键盘，这项一直报"✗ 遥控器不是键盘"，
+        //     还引导用户去"安装虚拟键盘驱动"—— 恰好会把无驱动模式推翻。
+        var driverFreeOn = Settings.DriverFreeMode && GhostGuard.Running;
+        var devOk = driverFreeOn || !Env.RemoteStillKeyboard() || (_filter is { Running: true, KeySourceIsEtw: false });
         return new JsonObject
         {
             ["cable"] = new JsonObject { ["ok"] = _cableReady, ["hint"] = "虚拟声卡 VB-CABLE" },
@@ -1239,7 +1244,8 @@ internal sealed class Backend : IDisposable
                         ? "WinUHid 设备槽位被占，稍后会自愈重试"
                         : "WinUHid 驱动未生效 —— 请重启 Windows（不重启注入只能走 SendInput，豆包会过滤）" },
             ["device"] = new JsonObject { ["ok"] = devOk,
-                ["hint"] = !Env.RemoteStillKeyboard() ? "遥控器已不是键盘（零 m）"
+                ["hint"] = driverFreeOn ? $"无驱动模式：键盘 + 钩子吞 m（已吞 {GhostGuard.Swallowed}）"
+                       : !Env.RemoteStillKeyboard() ? "遥控器已不是键盘（零 m）"
                        : (devOk ? "键盘模式 + 钩子拦截中（低延迟）" : "遥控器仍在输出 m") },
             ["bridge"] = new JsonObject { ["ok"] = BridgeRunning, ["hint"] = "语音桥运行中" },
             ["ready"] = _cableReady && _micOk && _uhidReady && devOk,

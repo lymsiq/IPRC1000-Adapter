@@ -913,12 +913,17 @@ function renderEnv(s) {
     // 日志只在打开诊断开关时才有意义；默认关就不显示这一格（否则用户会以为"还有日志"）
     (logOn && ks.logPath ? kvItem('按键日志', '已写入 ' + ks.logPath) : '');
   $('#keySrcNote').className = 'note' + (ks.stillKeyboard ? ' warn' : '');
-  $('#keySrcNote').innerHTML = ks.stillKeyboard
-    ? '⚠⚠ <b>驱动还没换！</b>系统仍把遥控器当键盘 → <b>按遥控器会同时打出 m</b>。' +
-      '请点下面的「<b>安装虚拟键盘驱动</b>」，把它的驱动从「HID Keyboard Device」换成' +
-      '「HID-compliant device」。' + (ks.guard ? `<br>${ks.guard}` : '')
-    : '设备已不是键盘 ✓ 按键从 <b>BthPort ETW</b> 读取，不装键盘钩子、不吞键 —— <b>没有卡键风险</b>。' +
-      (ke.error ? `<br>采集器错误：${ke.error}` : '');
+  $('#keySrcNote').innerHTML = ks.driverFree
+    // 无驱动模式：遥控器**就是键盘**，这里不能再喊"请安装虚拟键盘驱动"（那恰好会推翻本模式）
+    ? '<b>无驱动模式</b>：遥控器保持键盘，它自带的 m 由钩子按「连发特征」吞掉' +
+      '（按住时的连发每秒约 31 次，已吞 <b>' + (ks.ghostSwallowed || 0) + '</b> 次；' +
+      '开头第 1 个 m 可能漏进来，属正常）。' + (ks.guard ? `<br>${ks.guard}` : '')
+    : (ks.stillKeyboard
+      ? '⚠⚠ <b>驱动还没换！</b>系统仍把遥控器当键盘 → <b>按遥控器会同时打出 m</b>。' +
+        '请点下面的「<b>安装虚拟键盘驱动</b>」，把它的驱动从「HID Keyboard Device」换成' +
+        '「HID-compliant device」。' + (ks.guard ? `<br>${ks.guard}` : '')
+      : '设备已不是键盘 ✓ 按键从 <b>BthPort ETW</b> 读取，不装键盘钩子、不吞键 —— <b>没有卡键风险</b>。' +
+        (ke.error ? `<br>采集器错误：${ke.error}` : ''));
 
   // ── 环境自检 ──
   const st = s.setup || {};
@@ -1490,9 +1495,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.94',
+      version: '1.2.95',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.94（构建于 2026-10-29 10:45）',
+      versionLine: 'v1.2.95（构建于 2026-10-29 10:58）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

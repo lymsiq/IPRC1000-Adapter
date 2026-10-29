@@ -63,6 +63,18 @@ internal static class GhostGuard
 
     private static volatile bool _armed;
     private static long _armedAt;
+
+    // ── 连发特征判定（2026-10-29 补）────────────────────────────────
+    //   ★ 用户实测的真相：**语音键在 HID 层就是 `m`(0x10)**，所以"按下语音键"和
+    //     "第一个幽灵 m"是**同一个事件**。靠 ETW 收到 voice 再武装，永远慢一拍，
+    //     而且一旦 ETW 没通（面板"0 个事件"那次），就完全武装不了 ⇒ m 一串全放行。
+    //   兜底：**靠 m 自己的连发特征**判断 —— 遥控器按住时以约 31Hz（≈32ms）连发；
+    //     人手打字两下 m 通常 ≥100ms。所以"两次 m 间隔 < 80ms"基本只能是自动重复。
+    //   命中后进入"连发抑制"，200ms 内没有新的 m 才解除。
+    private const int BurstGapMs = 80;      // 两次 m 间隔小于它 → 认为是连发
+    private const int BurstHoldMs = 200;    // 抑制状态保持多久（无新 m）
+    private static long _lastMDownAt;
+    private static volatile bool _burst;
     private static volatile int _graceGen;
 
     private static IntPtr _hook;
@@ -139,13 +151,15 @@ internal static class GhostGuard
         Start();
         if (!Running) return -1;
         var before = Swallowed;
-        Arm(Environment.TickCount64);
-        // 注入 3 个 m（自身也会走 LL 钩子，正好用来验证"能不能拦"）
-        for (var i = 0; i < 3; i++)
+        _lastMDownAt = 0; _burst = false;   // 只靠"连发特征"判定，验证兜底路径
+        // 连发 6 次（间隔 ~40ms，模拟遥控器 31Hz）；前 1 个应放行、其余应被吞
+        // 连发 6 次、间隔 ~40ms（模拟遥控器 31Hz）。预期：第 1 个放行、后 5 个被吞。
+        const int n = 6;
+        for (var i = 0; i < n; i++)
         {
             keybd_event(0x4D, 0, 0, UIntPtr.Zero);
             keybd_event(0x4D, 0, 2 /*KEYEVENTF_KEYUP*/, UIntPtr.Zero);
-            Thread.Sleep(120);
+            Thread.Sleep(40);
         }
         Thread.Sleep(200);
         _armed = false;
@@ -160,17 +174,26 @@ internal static class GhostGuard
     {
         try
         {
-            if (nCode >= 0 && Enabled && _armed)
+            if (nCode >= 0 && Enabled)
             {
-                // 安全阀：万一"松开"事件丢了（遥控器断连），15 秒后自动解除，避免 m 永远打不出来
-                if (Environment.TickCount64 - _armedAt > 15000) { _armed = false; }
-                else
+                // 安全阀：万一"松开"事件丢了（遥控器断连），15 秒后自动解除
+                if (_armed && Environment.TickCount64 - _armedAt > 15000) _armed = false;
+
+                var msg = wParam.ToInt32();
+                if (msg is WM_KEYDOWN or WM_SYSKEYDOWN)
                 {
-                    var msg = wParam.ToInt32();
-                    if (msg is WM_KEYDOWN or WM_SYSKEYDOWN)
+                    var info = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
+                    if (info.vkCode == VK_M)
                     {
-                        var info = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
-                        if (info.vkCode == VK_M)
+                        var now = Environment.TickCount64;
+
+                        // 连发特征：距上一次 m 按下 < 80ms ⇒ 是自动重复
+                        if (_lastMDownAt != 0 && now - _lastMDownAt < BurstGapMs) _burst = true;
+                        _lastMDownAt = now;
+                        // 抑制状态：200ms 内没有新的 m 就自动过期
+                        if (_burst && now - _lastMDownAt > BurstHoldMs) _burst = false;
+
+                        if (_armed || _burst)
                         {
                             Swallowed++;
                             return (IntPtr)1;      // 吞掉：不传给后续（包括输入法）
