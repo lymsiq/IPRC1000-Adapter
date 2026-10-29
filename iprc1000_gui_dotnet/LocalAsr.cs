@@ -391,6 +391,7 @@ internal static class AsrRun
             // ★ 必须先打开音频会话：快捷键不是遥控器事件，不预热的话
             //   CableRouter 不会把 PCM 送进缓冲（录到 0 字节，表现为"没声音/没字"）
             KeyFilter.RaiseVoiceKeyDown();
+            WatchSilence();
             // 后台把引擎和流拉起来：音频先进本地缓冲，连上后把已攒的部分补推过去
             Task.Run(async () =>
             {
@@ -417,6 +418,27 @@ internal static class AsrRun
     }
 
     /// <summary>音频线程调用：流已连上就实时推（未连上时靠 Snapshot 补推）。</summary>
+
+    /// <summary>
+    /// 说话期间"一点音频都没进来"的看门狗：1.5 秒还没有任何字节，
+    /// 直接在浮层上写原因（否则用户只看到波形不动、以为卡住）。
+    /// 常见原因：遥控器没按住 / 桥没在跑 / CABLE 没被占用。
+    /// </summary>
+    private static void WatchSilence()
+    {
+        Task.Delay(1500).ContinueWith(_ =>
+        {
+            try
+            {
+                if (!AsrCapture.Active) return;             // 已经收尾了
+                if (AsrCapture.LiveBytes > 0) return;       // 有音频，正常
+                AsrOverlay.ShowError("没收到音频：检查遥控器是否按住 / 语音桥是否在跑");
+                Safe.Note("ASR 看门狗：1.5s 内没有音频进来");
+                DumpDiag("silence", null, 0, 0);
+            }
+            catch { }
+        });
+    }
     public static void PushLive(byte[] b, int off, int len)
     {
         var st = _stream;
@@ -440,6 +462,37 @@ internal static class AsrRun
         return t;
     }
 
+    /// <summary>
+    /// 把"这一次识别"的现场写成 json（成功/失败都写）。
+    /// 为什么需要：带界面的实例没有测试管道，日志又被"记录事件日志"开关挡着，
+    /// 出问题只能靠猜 —— 这个文件绕过两者，任何一次识别都能事后回看。
+    /// </summary>
+    private static void DumpDiag(string phase, AsrStream? st, int wavBytes, double sec, string extra = "")
+    {
+        try
+        {
+            var obj = new
+            {
+                at = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
+                phase,
+                streaming = st != null,
+                partials = st?.Partials ?? 0,
+                wsState = st?.State ?? "",
+                finalSent = st?.FinalSent ?? false,
+                finalRecv = st?.FinalRecv ?? false,
+                wavBytes, sec = Math.Round(sec, 2),
+                lastPartial = st?.LastPartial ?? "",
+                lastErr = LocalAsr.LastErr,
+                extra,
+            };
+            var path = System.IO.Path.Combine(Env.ConfigDir, "asr-last.json");
+            System.IO.File.AppendAllText(path,
+                System.Text.Json.JsonSerializer.Serialize(obj) + Environment.NewLine,
+                new System.Text.UTF8Encoding(true));
+        }
+        catch { }
+    }
+
     private static void Run()
     {
         var st = _stream;
@@ -449,8 +502,12 @@ internal static class AsrRun
             AsrOverlay.Recognizing();
             try
             {
-                var text = Finish(st.FinishAsync().GetAwaiter().GetResult());
-                var sec = AsrCapture.End().seconds;      // 清空缓冲，顺便拿时长
+                // ★ 先取音频并**保住**：流式失败时还要用它走整段兜底。
+                //   上一版是先 FinishAsync 再 End()，失败后音频已丢 ⇒ 兜底必然 0 字节 ⇒ 卡住。
+                var (wav, sec) = AsrCapture.End();
+                var raw = st.FinishAsync().GetAwaiter().GetResult();
+                DumpDiag("stream-finish", st, wav.Length, sec, "raw=" + (raw ?? ""));
+                var text = Finish(raw);
                 if (text.Length > 0)
                 {
                     LocalAsr.LastText = text; LocalAsr.LastSec = sec;
@@ -460,11 +517,52 @@ internal static class AsrRun
                     LocalAsr.TypeText(text);
                     return;
                 }
-                Safe.Note($"ASR 流式无结果（partial {st.Partials} 次），回落整段");
+                // 流式没拿到最终文本 ⇒ 用保住的音频走整段
+                if (wav.Length > 0)
+                {
+                    Safe.Note($"ASR 流式空结果（partial {st.Partials}，ws={st.State}），改用整段识别兜底");
+                    RunBatchWith(wav, sec);
+                    return;
+                }
+                DumpDiag("stream-empty-noaudio", st, wav.Length, sec);
+                AsrOverlay.ShowError("没录到音频");
+                Safe.Note("ASR 流式空结果且无音频");
             }
-            catch (Exception e) { Safe.Note("ASR 流式收尾异常：" + e.Message); }
+            catch (Exception e)
+            {
+                AsrOverlay.ShowError("流式收尾异常：" + e.Message);
+                Safe.Note("ASR 流式收尾异常：" + e.Message);
+            }
+            return;    // 走到这里说明已有结论，不要再落到 RunBatch（音频已被取走）
         }
+        DumpDiag("batch-enter", null, 0, 0);
         RunBatch();
+    }
+
+    /// <summary>用给定的 wav 走整段识别（流式兜底用）。</summary>
+    private static void RunBatchWith(byte[] wav, double sec)
+    {
+        if (Interlocked.Exchange(ref _busy, 1) == 1) return;
+        try
+        {
+            var model = System.IO.Path.Combine(Env.ConfigDir, "asr", "models", Settings.AsrModel + ".gguf");
+            var (ok, msg) = LocalAsr.Ensure(model, Settings.AsrBackend);
+            if (!ok) { AsrOverlay.ShowError("引擎不可用：" + msg); return; }
+            var (tok, raw, ms) = LocalAsr.TranscribeAsync(wav).GetAwaiter().GetResult();
+            var text = Finish(raw);
+            if (!tok || text.Length == 0)
+            {
+                AsrOverlay.ShowError(LocalAsr.LastErr.Length > 0 ? LocalAsr.LastErr : "识别无结果");
+                return;
+            }
+            LocalAsr.LastText = text; LocalAsr.LastSec = sec;
+            LocalAsr.LastAt = Environment.TickCount64; LocalAsr.LastErr = "";
+            AsrOverlay.ShowResult(text);
+            Safe.Note($"ASR 整段兜底成功（{sec:F1}s / {ms}ms）：「{text}」");
+            LocalAsr.TypeText(text);
+        }
+        catch (Exception e) { AsrOverlay.ShowError("兜底异常：" + e.Message); }
+        finally { Interlocked.Exchange(ref _busy, 0); }
     }
 
     private static void RunBatch()

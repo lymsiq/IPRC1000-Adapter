@@ -97,6 +97,8 @@ internal static class AsrOverlay
     private static bool _listening;
     /// <summary>当前展示的是"未定稿"文字（流式 partial）⇒ 画下划线。</summary>
     private static bool _provisional;
+    /// <summary>当前显示的是错误原因（画成警示色）。</summary>
+    private static bool _error;
     private static long _shownAt;
 
     public static bool Visible => _form is { Visible: true };
@@ -129,7 +131,7 @@ internal static class AsrOverlay
     /// <summary>流式 partial：边识别边显示（引擎给的是全量假设，直接替换）。</summary>
     public static void ShowPartial(string text)
     {
-        lock (Gate) { _listening = false; _hint = ""; _text = text ?? ""; _provisional = true; }
+        lock (Gate) { _listening = false; _hint = ""; _text = text ?? ""; _provisional = true; _error = false; }
         Ui(() => _form?.Invalidate());
     }
 
@@ -142,9 +144,17 @@ internal static class AsrOverlay
     /// <summary>显示结果，holdMs 后自动隐藏。</summary>
     public static void ShowResult(string text, int holdMs = 2200)
     {
-        lock (Gate) { _listening = false; _hint = ""; _text = text ?? ""; _provisional = false; }
+        lock (Gate) { _listening = false; _hint = ""; _text = text ?? ""; _provisional = false; _error = false; }
         Ui(() => _form?.Invalidate());
         Task.Delay(holdMs).ContinueWith(_ => Hide());
+    }
+
+    /// <summary>失败时把原因直接显示在浮层上（否则用户只看到"识别中…"卡着，什么都查不了）。</summary>
+    public static void ShowError(string reason)
+    {
+        lock (Gate) { _listening = false; _hint = ""; _text = "⚠ " + (reason ?? "识别失败"); _provisional = false; _error = true; }
+        Ui(() => _form?.Invalidate());
+        Task.Delay(4000).ContinueWith(_ => Hide());
     }
 
     public static void Hide()
@@ -296,7 +306,7 @@ internal static class AsrOverlay
             }
             else
             {
-                using var br = new SolidBrush(Color.FromArgb(242, 246, 250));
+                using var br = new SolidBrush(_error ? Color.FromArgb(255, 150, 120) : Color.FromArgb(242, 246, 250));
                 if (_provisional)
                 {
                     // 未定稿：带下划线（"还在改"的视觉约定）；定稿后下划线消失
