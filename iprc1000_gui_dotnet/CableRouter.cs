@@ -13,7 +13,10 @@ namespace Iprc1000Adapter;
 /// </summary>
 internal sealed class CableRouter : IDisposable
 {
-    private readonly UdpClient _udp = new(new IPEndPoint(IPAddress.Loopback, Env.PcmPort));
+    // ★★ 2026-10-29：**不要**在字段初始化里绑端口 —— 那样只要 new 了 CableRouter 就占住 UDP 31680，
+    //   宿主进程（--ui-client）虽然不 Start，也会被"端口已占用"直接崩掉（实测 10048）。
+    //   改为 Start() 里绑：不 Start 就不占端口。
+    private UdpClient? _udp;
     private WasapiOut? _out;
     /// <summary>有界抖动缓冲（替代原来的 BufferedWaveProvider）</summary>
     private JitterBuffer? _jit;
@@ -75,6 +78,7 @@ internal sealed class CableRouter : IDisposable
     public void Start()
     {
         if (_running) return;
+        _udp ??= new UdpClient(new IPEndPoint(IPAddress.Loopback, Env.PcmPort));
         _running = true;
         _thread = new Thread(Loop) { IsBackground = true, Name = "cable-router" };
         _thread.Start();
@@ -293,18 +297,20 @@ internal sealed class CableRouter : IDisposable
 
     private void Loop()
     {
-        _udp.Client.ReceiveTimeout = 200;
+        var udp = _udp;
+        if (udp == null) return;
+        udp.Client.ReceiveTimeout = 200;
         var asm = new byte[65536];
         while (_running)
         {
             try
             {
-                if (_udp.Client.Poll(150_000, SelectMode.SelectRead))
+                if (udp.Client.Poll(150_000, SelectMode.SelectRead))
                 {
                     EndPoint ep = new IPEndPoint(IPAddress.Any, 0);
-                    var n = _udp.Client.ReceiveFrom(asm, ref ep);
+                    var n = udp.Client.ReceiveFrom(asm, ref ep);
                     if (n == 4 && asm[0] == (byte)'P' && asm[1] == (byte)'I')
-                        _udp.Send(new byte[] { (byte)'P', (byte)'O', (byte)'N', (byte)'G' }, 4,
+                        udp.Send(new byte[] { (byte)'P', (byte)'O', (byte)'N', (byte)'G' }, 4,
                                   (IPEndPoint)ep);
                     else if (n == 5 && asm[0] == (byte)'C')      // CLEAR
                     {
@@ -393,6 +399,7 @@ internal sealed class CableRouter : IDisposable
         _running = false;
         try { _thread?.Join(500); } catch { }
         CloseSink();
-        _udp.Dispose();
+        _udp?.Dispose();
+        _udp = null;
     }
 }

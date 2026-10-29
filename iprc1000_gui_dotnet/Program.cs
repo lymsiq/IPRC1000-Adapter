@@ -51,6 +51,18 @@ internal static class Program
             return;
         }
 
+        // 键源归因：旁听 N 秒，按设备列出谁在发键（--raw-input [秒]）
+        if (args.Length > 0 && args[0] == "--raw-input")
+        {
+            var sec = args.Length > 1 && int.TryParse(args[1], out var s0) ? Math.Clamp(s0, 1, 60) : 8;
+            KeySourceDiag.Start();
+            if (!KeySourceDiag.Running) { Console.WriteLine("Raw Input 注册失败"); return; }
+            Console.WriteLine($"旁听 {sec} 秒，请在此期间按几个键……");
+            Thread.Sleep(sec * 1000);
+            Console.WriteLine(KeySourceDiag.Snapshot());
+            return;
+        }
+
         // 无驱动模式的钩子自检（不动设备驱动）：注入 3 个 m，看被吞掉几个
         if (args.Length > 0 && args[0] == "--ghost-test")
         {
@@ -233,7 +245,9 @@ internal static class Program
         try
         {
             singleInstance = new Mutex(true, MainForm.SingleInstanceMutex, out var createdNew);
-            if (!createdNew)
+            // ★ 2026-10-29：`--ui-client` 是"连业务进程的宿主"，必须能与 --headless 共存，
+            //   否则一启动就被判"已在运行"直接退出（实测：窗口根本不出现）。
+            if (!createdNew && !MainForm.ClientMode)
             {
                 try { EventWaitHandle.OpenExisting(MainForm.ShowWindowEvent).Set(); }
                 catch (Exception e)

@@ -6,6 +6,7 @@ using System.IO;
 using System.Reflection;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Linq;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
@@ -282,7 +283,24 @@ namespace IprcSetup2
                 _phase.Text = "这次还没装好，我们帮你继续";
                 _phase.ForeColor = Color.FromArgb(155, 101, 39);
                 _result.Text = "请检查网络连接，或完成弹出的安装窗口后重试。\n具体原因可在下方的故障详情中查看。";
-                _details.Text = error.Message + "\r\n\r\n日志：" + (_engine == null ? "尚未开始安装" : _engine.LogPath);
+                // ★ 2026-10-29：失败时**自动附上诊断建议**（复用 -Mode Status 的 Advice 段），
+                //   让用户当场就知道下一步该点什么，而不是只看到一句英文异常。
+                var advice = "";
+                try
+                {
+                    if (_engine != null)
+                    {
+                        var (_, text, _) = _engine.CollectDiagnostics();
+                        var lines = text.Replace("\r\n", "\n").Split('\n')
+                                        .Where(l => l.Contains("Phase: Advice |"))
+                                        .Select(l => l.Substring(l.IndexOf("|", StringComparison.Ordinal) + 1).Trim())
+                                        .Where(l => l.Length > 0 && !l.StartsWith("----"))
+                                        .ToArray();
+                        if (lines.Length > 0) advice = "【建议】\r\n· " + String.Join("\r\n· ", lines) + "\r\n\r\n";
+                    }
+                }
+                catch { }
+                _details.Text = advice + error.Message + "\r\n\r\n日志：" + (_engine == null ? "尚未开始安装" : _engine.LogPath);
                 _detailsLink.Visible = true;
                 _logLink.Visible = _engine != null && File.Exists(_engine.LogPath);
                 _install.Text = "重试安装";

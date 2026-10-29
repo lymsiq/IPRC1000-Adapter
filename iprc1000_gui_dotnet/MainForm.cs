@@ -36,8 +36,13 @@ internal sealed class MainForm : Form
     private bool _webInitBusy;
     private bool _releaseDisabled;      // 一旦重建失败就永久停用释放，避免反复出错
     private long _releaseCount;
-    private readonly Backend _backend = new();
-    private readonly KeyFilter _filter;
+    // client 模式不启音频（UDP 31680/31681 归业务进程独占，否则两进程抢端口）
+    private readonly Backend _backend = new(startAudio: !ClientMode);
+    /// <summary>`--ui-client`：宿主只做 UI，业务在独立进程（命名管道通信）</summary>
+    internal static readonly bool ClientMode =
+        Environment.GetCommandLineArgs().Any(a => a == "--ui-client");
+
+    private readonly KeyFilter? _filter;
     private readonly NotifyIcon _tray;
     /// <summary>是否已经提示过"收进托盘"（每轮启动只提示一次）</summary>
     private bool _trayHintShown;
@@ -174,9 +179,14 @@ internal sealed class MainForm : Form
             Load += (_, _) => { if (WindowState == FormWindowState.Minimized) Hide(); };
         }
 
-        _filter = new KeyFilter();
-        _filter.OnButton += (bid, pressed) => _backend.NoteButton(bid, pressed);
-        _backend.AttachFilter(_filter);
+        // ★★ 2026-10-29 进程拆分收尾：`--ui-client` 时宿主**只做 UI**，
+        //    不建 KeyFilter、不监听 UDP、不注入、不启音频 —— 全部交给业务进程（--headless）。
+        if (!ClientMode)
+        {
+            _filter = new KeyFilter();
+            _filter.OnButton += (bid, pressed) => _backend.NoteButton(bid, pressed);
+            _backend.AttachFilter(_filter);
+        }
 
         // ★ 模式指示必须显眼：托盘提示 + 气泡。否则用户按到方块键切了模式却不知道，
         //   会以为遥控器坏了（方向键不动了 / 反过来光标乱跑）。
@@ -208,7 +218,7 @@ internal sealed class MainForm : Form
             StartupMark("Load 触发（窗口句柄就绪）");
             // 2026-10-27：这里原来写"装 Raw Input + 键盘钩子" —— 两者都已删除
             //   （钩子 v1.2.63 移除、Raw Input v1.2.70 移除），日志文案会误导排查。
-            _filter.Start(Handle);
+            _filter?.Start(Handle);   // client 模式下没有本地 KeyFilter（业务在别的进程）
             StartupMark("按键来源已启动（ETW；无钩子、无 Raw Input）");
 
             // ★ 启动兜底：清掉**上一个实例**被强杀时留在系统里的卡住修饰键
@@ -270,7 +280,8 @@ internal sealed class MainForm : Form
 
         // ★ 窗口显示之后再在后台做重活：探针 → 自动切驱动（约 1~2 秒）→ 拉起语音桥。
         //   原来这些都在界面线程上跑，所以启动后要卡一两秒；现在界面立即可用。
-        Shown += (_, _) => Task.Run(() => _backend.InitAsync());
+        // client 模式下**不初始化本地业务**（UDP/音频/注入都在业务进程里）
+        if (!ClientMode) Shown += (_, _) => Task.Run(() => _backend.InitAsync());
 
         // 进程退出兜底：无论如何都把注入的键放掉（正常关闭走 Dispose，异常退出走这里）
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>
@@ -658,7 +669,10 @@ internal sealed class MainForm : Form
         }
 
         // ★ 2026-10-29：命令分发已抽到 Backend.Dispatch（宿主与无界面进程共用同一份）。
-        string result = _backend.Dispatch(method, Arg(0), Arg(1));
+        // client 模式：命令发到业务进程（命名管道），宿主自己什么都不执行
+        string result = ClientMode
+            ? ServiceClient.Call(method, Arg(0), Arg(1), 15000)
+            : _backend.Dispatch(method, Arg(0), Arg(1));
 
         var resp = new JsonObject { ["id"] = idNode, ["result"] = result };
         // 界面进程可能已被释放（窗口在托盘里）—— 这时候没有页面在等回包，直接丢弃
@@ -943,7 +957,7 @@ internal sealed class MainForm : Form
         {
             _tray.Visible = false;
             _tray.Dispose();
-            _filter.Dispose();
+            _filter?.Dispose();
             _backend.Dispose();
         }
         base.Dispose(disposing);

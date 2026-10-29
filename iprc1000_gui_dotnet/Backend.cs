@@ -42,11 +42,12 @@ internal sealed class Backend : IDisposable
     /// <summary>来源自动选择/安全兜底触发时的说明（给界面显示）</summary>
     public string? _keySourceGuard;
 
-    public Backend()
+    public Backend(bool startAudio = true)
     {
         // ★ 2026-10-27：事件日志总闸跟随设置（默认开）。关掉后 Safe.Note 变成空操作。
         Safe.NotesEnabled = Settings.KeepEventLog;
-        _router.Start();   // 常驻：随时接收语音桥推来的 PCM
+        // client 模式（宿主只做 UI）不启音频路由：UDP 31680 由业务进程独占
+        if (startAudio) _router.Start();   // 常驻：随时接收语音桥推来的 PCM
     }
 
     /// <summary>鼠标模式引擎：方向键按住拖动 = 移动（自适应增速）｜确认 = 左键｜info = 右键</summary>
@@ -440,6 +441,9 @@ internal sealed class Backend : IDisposable
     {
         try
         {
+            // 键源归因：旁听所有键盘事件（只读、不拦截）。出问题时一条命令就能看出"谁在发键"。
+            try { KeySourceDiag.Start(); } catch { }
+
             // 先按**已保存的档位**补应用映射（安装器可能在安装时就选好了输入法）
             EnsureImeProfileApplied();
             // 再考虑"首次启动自动预选"（只做一次）
@@ -1569,6 +1573,17 @@ internal sealed class Backend : IDisposable
     ///
     /// 只在"当前映射还是某个档位的默认值"时才自动改写 —— 用户手工改过就不动。
     /// </summary>
+    /// <summary>键源归因报告：`rawInput` / `rawInput reset`</summary>
+    private static string RawInputReport(string? arg)
+    {
+        if (arg is "reset" or "clear")
+        {
+            KeySourceDiag.Reset();
+            return Env.Json(new { ok = true, message = "已清空键源统计" });
+        }
+        return Env.Json(new { ok = true, running = KeySourceDiag.Running, text = KeySourceDiag.Snapshot() });
+    }
+
     /// <summary>无驱动模式的「零漏」开关：遥控器活跃时 m 先吞后补，代价是 60ms 延迟。</summary>
     public string SetZeroGhost(string? on)
     {
@@ -1846,6 +1861,8 @@ internal sealed class Backend : IDisposable
             "setImeProfile" => SetImeProfile(a0),
             "setDriverFree" => SetDriverFreeMode(a0),
             "setZeroGhost" => SetZeroGhost(a0),
+            // 键源归因：返回"哪个设备发了什么键"。调试用，界面上没有入口。
+            "rawInput" => RawInputReport(a0),
             "setAutoSwitchDriver" => SetAutoSwitchDriver(a0),
             "setAutoKeepMic" => SetAutoKeepMic(a0),
             "checkCaptureDevice" => CheckCaptureDevice(),
