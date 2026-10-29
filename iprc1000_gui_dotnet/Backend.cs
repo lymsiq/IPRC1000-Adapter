@@ -1967,6 +1967,8 @@ internal sealed class Backend : IDisposable
             hotkeyReady = AsrHotkey.Ready,
             hotkeySeen = AsrHotkey.Seen,
             hotkeyHits = AsrHotkey.Hits,
+            beginCount = AsrRun.BeginCount,
+            voiceGateHits = AsrRun.VoiceGateHits,
             recording = AsrCapture.Active,
             liveBytes = AsrCapture.LiveBytes,
             polish = Settings.PolishRules,

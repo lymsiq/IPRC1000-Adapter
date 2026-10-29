@@ -689,6 +689,7 @@ internal sealed class KeyFilter : IDisposable
         //   抖动对（<25ms）不当成一次说话，避免把半句话当成整句送去识别。
         if (bid == "voice" && Settings.AsrEnabled && Settings.AsrMode == "asr")
         {
+            AsrRun.VoiceGateHits++;
             if (pressed) AsrRun.Begin();
             else if (holdMs < 0 || holdMs >= DebounceMs) AsrRun.Schedule(VoiceTailMs + 40);
             else Safe.Note("ASR 忽略抖动对（按住过短）");

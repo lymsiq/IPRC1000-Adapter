@@ -152,11 +152,26 @@ internal static class Settings
         set { _data.AsrModel = value; Save(); }
     }
 
-    /// <summary>本地识别快捷键（VK 码）。0 = 关闭快捷键。</summary>
+    /// <summary>
+    /// 本地识别快捷键（VK 码）。0 = 关闭快捷键。
+    ///
+    /// ★ 这里带一次性迁移：老配置里写的是 0x56(V) —— 改代码默认值**对已存在的
+    ///   settings.json 无效**（这是踩过的坑：改完默认值，界面还显示旧键）。
+    ///   只迁一次，之后用户自己改过就不再覆盖。
+    /// </summary>
     public static int AsrHotkeyVk
     {
-        get => _data.AsrHotkeyVk;
-        set { _data.AsrHotkeyVk = value; Save(); }
+        get
+        {
+            if (!_data.AsrHotkeyMigrated)
+            {
+                _data.AsrHotkeyMigrated = true;
+                if (_data.AsrHotkeyVk == 0x56) _data.AsrHotkeyVk = 0x58;   // V → X
+                Save();
+            }
+            return _data.AsrHotkeyVk;
+        }
+        set { _data.AsrHotkeyVk = value; _data.AsrHotkeyMigrated = true; Save(); }
     }
 
     /// <summary>规则层润色开关。</summary>
@@ -397,6 +412,9 @@ internal static class Settings
 
         /// <summary>本地识别的快捷键（VK 码）。默认 V = 0x56，配 Ctrl+Alt 使用。</summary>
         public int AsrHotkeyVk { get; set; } = 0x58;   // X（原 V）
+
+        /// <summary>快捷键迁移标记：老配置里存的是 V(0x56)，只迁一次，之后用户改了就不再动。</summary>
+        public bool AsrHotkeyMigrated { get; set; }
 
         /// <summary>规则层润色（去填充词/重复字/标点规整）。默认开。</summary>
         public bool PolishRules { get; set; } = true;

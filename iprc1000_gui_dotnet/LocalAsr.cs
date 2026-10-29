@@ -372,8 +372,14 @@ internal static class AsrRun
     public static long PartialCount => _stream?.Partials ?? 0;
     public static bool Streaming => _stream != null;
 
+    /// <summary>Begin 被调用的次数（诊断用：按语音键/快捷键后这个数涨不涨，一眼判断闸门通不通）。</summary>
+    public static long BeginCount;
+    /// <summary>语音键闸门命中的次数（含按下/松开）。</summary>
+    public static long VoiceGateHits;
+
     public static void Begin()
     {
+        Interlocked.Increment(ref BeginCount);
         try
         {
             AsrCapture.Begin();

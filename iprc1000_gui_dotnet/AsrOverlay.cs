@@ -21,6 +21,11 @@ internal static class AsrOverlay
 {
     private static OverlayForm? _form;
     private static Thread? _uiThread;
+    /// <summary>浮层线程的同步上下文：**所有 UI 操作都 Post 到这里**。
+    /// 不能只靠 BeginInvoke —— 首次显示时窗口句柄还没创建，
+    /// 那样会在调用线程（线程池）上直接改 Visible，跨线程操作会被静默吞掉，
+    /// 表现就是"该弹的浮层不弹"。</summary>
+    private static SynchronizationContext? _uiCtx;
     private static readonly object Gate = new();
 
     /// <summary>
@@ -40,7 +45,11 @@ internal static class AsrOverlay
                 try
                 {
                     Application.EnableVisualStyles();
+                    // Application.Run 会安装 WindowsFormsSynchronizationContext；先自己装一个保证可用
+                    SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+                    _uiCtx = SynchronizationContext.Current;
                     _form = new OverlayForm();
+                    _form.CreateControl();          // 提前建句柄，后续 Invoke 才不会走错线程
                     ready.Set();
                     // 隐藏宿主窗体只是为了给消息循环一个宿主
                     using var host = new Form
@@ -68,9 +77,12 @@ internal static class AsrOverlay
     {
         try
         {
+            var ctx = _uiCtx;
+            if (ctx != null) { ctx.Post(_ => { try { a(); } catch { } }, null); return; }
+            // 上下文还没建好（极早期）：退回直接执行，至少不会丢
             var f = _form;
-            if (f == null || !f.IsHandleCreated) { a(); return; }
-            if (f.InvokeRequired) f.BeginInvoke(a);
+            if (f == null) { a(); return; }
+            if (f.IsHandleCreated && f.InvokeRequired) f.BeginInvoke(a);
             else a();
         }
         catch { }
