@@ -113,11 +113,13 @@ namespace IprcSetup2
             Controls.Add(location);
 
             var help = Card(30, 283, 764, 180);
-            help.Controls.Add(Label("搭配语音输入法使用（豆包 / 微信输入法，任选其一）", 20, 15, 560, 25, 10.5F, Ink, true));
-            var doubao = new LinkLabel { Text = "下载豆包  ↗", Bounds = new Rectangle(470, 17, 88, 24), LinkColor = Blue, ActiveLinkColor = Blue };
+            // ★ 2026-10-29 修：标题 Label 宽 560 会**盖住**右侧链接（Control 先加=在上层），
+            //   于是"下载豆包"整个被遮住，只剩微信那个露在外面。现在标题只占 420，链接排在它右边。
+            help.Controls.Add(Label("搭配语音输入法使用（豆包 / 微信输入法，任选其一）", 20, 15, 424, 25, 10.5F, Ink, true));
+            var doubao = new LinkLabel { Text = "下载豆包  ↗", Bounds = new Rectangle(448, 17, 84, 24), LinkColor = Blue, ActiveLinkColor = Blue };
             doubao.LinkClicked += (s, e) => OpenLink(Product.DoubaoUrl);
             help.Controls.Add(doubao);
-            var weixin = new LinkLabel { Text = "下载微信输入法  ↗", Bounds = new Rectangle(562, 17, 130, 24), LinkColor = Blue, ActiveLinkColor = Blue };
+            var weixin = new LinkLabel { Text = "下载微信输入法  ↗", Bounds = new Rectangle(536, 17, 132, 24), LinkColor = Blue, ActiveLinkColor = Blue };
             weixin.LinkClicked += (s, e) => OpenLink(Product.WeixinImeUrl);
             help.Controls.Add(weixin);
             help.Controls.Add(Label("豆包长按右 Alt；微信输入法长按 Ctrl+Win。两者都要把「麦克风」选成 CABLE Output。", 20, 47, 730, 24, 9.5F, Muted));
