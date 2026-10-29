@@ -480,3 +480,11 @@ body[data-page="keys"] .rail .device .remote{display:none}
 .btn-zone{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 2px}
 .btn-zone+.btn-zone{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)}
 .zone-label{width:100%;font-size:11.5px;color:var(--muted);margin:0 0 2px 1px}
+
+/* ── 合并卡（2026-10-30）：把两张卡视觉上合成一张 ──
+   声音通路 = 虚拟声卡 + 语音桥：原来两张独立卡，各占一屏，信息还被切开。
+   这里只合并**外观**（外圈圆角 + 中间虚线分隔），内容与 id 一行未动。 */
+.card-merge{display:flex;flex-direction:column}
+.card-merge>.panel{border-radius:0;margin:0}
+.card-merge>.panel:first-child{border-radius:12px 12px 0 0}
+.card-merge>.panel:last-child{border-radius:0 0 12px 12px;border-top:1px dashed var(--line)}

@@ -324,7 +324,9 @@
       </div>
 
       <!-- 2. 虚拟声卡 -->
-      <div class="panel" style="order:20">
+      <!-- 声音通路：声卡 + 语音桥合并为一张卡（2026-10-30），避免两个半张卡 -->
+      <div class="card-merge" style="order:20">
+      <div class="panel">
         <div class="panel-head">
           <div class="ic ic-indigo"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="3" fill="none" stroke-width="1.8"/><circle cx="9" cy="12" r="2.2" fill="none" stroke-width="1.8"/><path d="M14 10h4M14 14h4" stroke-width="1.8" fill="none"/></svg></div>
           <div class="panel-title">
@@ -350,7 +352,7 @@
       </div>
 
       <!-- 3. 音频桥 -->
-      <div class="panel" style="order:21">
+      <div class="panel">
         <div class="panel-head">
           <div class="ic ic-amber"><svg viewBox="0 0 24 24"><path d="M4 12h3l2-5 3 10 3-8 2 3h3" stroke-width="1.8" fill="none"/></svg></div>
           <div class="panel-title">
@@ -379,6 +381,7 @@
             <button class="btn ghost" id="btnAdmin">以管理员身份重启本程序</button>
           </div>
         </details>
+      </div>
       </div>
 
       <!-- 3.5 鼠标模式（开关从「鼠标模式」页搬来） -->
