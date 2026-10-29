@@ -124,6 +124,23 @@ internal static class GhostGuard
         if (_hook != IntPtr.Zero) { try { UnhookWindowsHookEx(_hook); } catch { } _hook = IntPtr.Zero; }
     }
 
+    /// <summary>
+    /// 主动补一个 `m` 的 KEYUP —— 用来打断"键一直被按住"的自动重复。
+    /// 只在判定为连发（或语音键松开）时调用，不会影响用户正常打字。
+    /// </summary>
+    private static void ReleaseGhostKey()
+    {
+        try
+        {
+            keybd_event(VK_M, 0, 2 /*KEYEVENTF_KEYUP*/, UIntPtr.Zero);
+            ForcedReleases++;
+        }
+        catch { }
+    }
+
+    /// <summary>已主动补发的 keyup 次数（面板可观测）</summary>
+    public static long ForcedReleases;
+
     /// <summary>语音键按下 → 开始吞 m。</summary>
     public static void Arm(long nowMs)
     {
@@ -137,6 +154,8 @@ internal static class GhostGuard
     public static void Disarm()
     {
         if (!Enabled) return;
+        // 语音键松开：若刚才在连发状态，补一次 keyup 确保键状态干净（不残留"按住"）
+        if (_burst) { ReleaseGhostKey(); _burst = false; _lastMDownAt = 0; }
         var gen = ++_graceGen;
         Task.Delay(400).ContinueWith(_ =>
         {
@@ -203,6 +222,11 @@ internal static class GhostGuard
                         {
                             _burst = true;
                             _burstAt = now;
+                            // ★★ 2026-10-29（用户提议，确实更彻底）：
+                            //   光"吞 keydown"是拦不住自动重复的 —— 系统认为这个键**一直按着**，
+                            //   于是按 31Hz 持续产生新的 keydown。**只有把键松开**才能终止重复。
+                            //   所以这里主动补一个 m 的 KEYUP：打断重复链，之后不再刷屏。
+                            ReleaseGhostKey();
                         }
                         _lastMDownAt = now;
 

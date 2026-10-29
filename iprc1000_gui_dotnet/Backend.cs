@@ -849,6 +849,7 @@ internal sealed class Backend : IDisposable
             ["imeProfile"] = Settings.ImeProfile,
             ["driverFree"] = Settings.DriverFreeMode,
             ["ghostSwallowed"] = GhostGuard.Swallowed,
+            ["ghostReleased"] = GhostGuard.ForcedReleases,
             ["imeVoice"] = Keys.FormatSymbols(Keymaps.Get("voice") ?? Array.Empty<int>()),
             ["imeDetected"] = new JsonObject
             {
