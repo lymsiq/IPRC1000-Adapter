@@ -643,6 +643,22 @@ namespace IprcSetup2
             foreach (dynamic task in folder.GetTasks(0))
                 if (String.Equals((string)task.Name, ResumeTaskName(), StringComparison.OrdinalIgnoreCase)) { folder.DeleteTask(ResumeTaskName(), 0); break; }
         }
+        /// <summary>
+        /// 卸载前停掉语音桥子进程（2026-10-29）。
+        /// 桥是我们自己 spawn 的，杀掉**没有**蓝牙栈风险（风险在于强杀主程序）；
+        /// 但不停它，`assets\etw_consumer.exe` 被占用 ⇒ 删不掉 ⇒ 用户觉得"卸载不了"。
+        /// </summary>
+        private static void StopBridgeProcess()
+        {
+            foreach (var p in Process.GetProcessesByName("etw_consumer"))
+            {
+                using (p)
+                {
+                    try { p.Kill(); p.WaitForExit(3000); } catch { }
+                }
+            }
+        }
+
         internal void Uninstall()
         {
             BeginLog("卸载主程序");
@@ -651,6 +667,7 @@ namespace IprcSetup2
             try
             {
                 EnsureAppClosed();
+                StopBridgeProcess();
                 var manifestPath = Path.Combine(_target, "package-manifest.json");
                 if (!File.Exists(manifestPath))
                 {
@@ -663,17 +680,32 @@ namespace IprcSetup2
                 var manifest = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<PackageManifest>(File.ReadAllText(manifestPath));
                 if (manifest == null || manifest.Product != Product.DirectoryName || manifest.Files == null)
                     throw new InvalidDataException("安装清单无效，已停止卸载。");
+                // ★ 2026-10-29：原来任何一个文件删不掉就抛异常 → 整个卸载中断，
+                //   用户看到"卸载失败"却不知道是哪几个文件、为什么。现在**逐条删、逐条记**，
+                //   最后一次性列出失败的（通常是被占用的 exe/dll）。
+                var failed = new List<string>();
+                var removed = 0;
                 foreach (var file in manifest.Files)
                 {
-                    var path = SetupCore.SafeDestination(_target, file.Path);
-                    if (File.Exists(path)) File.Delete(path);
+                    try
+                    {
+                        var path = SetupCore.SafeDestination(_target, file.Path);
+                        if (!File.Exists(path)) continue;
+                        File.Delete(path);
+                        removed++;
+                    }
+                    catch (Exception e) { failed.Add(file.Path + "（" + e.GetType().Name + "）"); }
                 }
+                if (failed.Count > 0)
+                    throw new IOException($"还有 {failed.Count} 个文件删不掉（可能仍在运行）：\n· "
+                        + string.Join("\n· ", failed.Take(6))
+                        + "\n\n请先退出程序（托盘右键 → 退出）后重试。");
                 File.Delete(manifestPath);
                 var shortcut = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory), Product.DisplayName + ".lnk");
                 if (File.Exists(shortcut)) File.Delete(shortcut);
                 Registry.LocalMachine.DeleteSubKeyTree(Product.UninstallKey, false);
                 RemoveResumeTask();
-                Save("主程序已卸载；用户数据、共享驱动与维护程序已保留");
+                Save($"主程序已卸载（删除 {removed} 个文件）；用户数据、共享驱动与维护程序已保留");
                 Report(100, State.Phase);
             }
             catch (Exception error)

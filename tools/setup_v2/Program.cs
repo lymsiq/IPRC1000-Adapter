@@ -48,6 +48,13 @@ namespace IprcSetup2
                     try
                     {
                         var engine = new InstallEngine(target, null);
+                        // 静默卸载：与安装同一入口，便于批量/脚本化排查
+                        if (Array.IndexOf(args, "--uninstall") >= 0)
+                        {
+                            engine.Uninstall();
+                            Console.WriteLine("[silent] 已卸载：" + target);
+                            return 0;
+                        }
                         var st = engine.Install(new InstallOptions());
                         Console.WriteLine("[silent] 安装目录：" + st.InstallDir);
                         Console.WriteLine("[silent] 版本：" + st.Version + " 组件就绪：" + st.ComponentsReady);
@@ -251,7 +258,11 @@ namespace IprcSetup2
                 if (uninstall || restore)
                 {
                     var action = uninstall ? "卸载主程序，保留用户数据和共享组件？" : "恢复安装前的蓝牙配置？恢复后需要重启。";
-                    if (MessageBox.Show(action, Product.DisplayName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                    // ★ 2026-10-29：原来用无 owner 的重载，确认框可能被主窗口盖住 ——
+                    //   用户点"卸载"后看不到任何反应，就以为"无法卸载"。这里指定 owner。
+                    if (MessageBox.Show(this, action, Product.DisplayName,
+                            MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                            MessageBoxDefaultButton.Button2) == DialogResult.Yes)
                         await RunWork(uninstall ? "uninstall" : "restore");
                 }
                 else if (resume)
@@ -346,7 +357,10 @@ namespace IprcSetup2
             {
                 _phase.Text = "这次还没装好，我们帮你继续";
                 _phase.ForeColor = Color.FromArgb(155, 101, 39);
-                _result.Text = "请检查网络连接，或完成弹出的安装窗口后重试。\n具体原因可在下方的故障详情中查看。";
+                // 卸载/恢复失败时，原因必须**直接可见** —— 否则用户只知道"点了没用"
+                _result.Text = (operation == "uninstall" || operation == "restore")
+                    ? "没能完成：" + error.Message + "\n可以直接再点一次，或把下方详情发给我们。"
+                    : "请检查网络连接，或完成弹出的安装窗口后重试。\n具体原因可在下方的故障详情中查看。";
                 // ★ 2026-10-29：失败时**自动附上诊断建议**（复用 -Mode Status 的 Advice 段），
                 //   让用户当场就知道下一步该点什么，而不是只看到一句英文异常。
                 var advice = "";
