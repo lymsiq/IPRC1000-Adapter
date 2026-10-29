@@ -1887,6 +1887,41 @@ internal sealed class Backend : IDisposable
          "未验证：体积小 45%，质量待测"),
     };
 
+    private static string[] _asrBackends = Array.Empty<string>();
+    private static DateTime _asrBackendsAt = DateTime.MinValue;
+
+    /// <summary>
+    /// 引擎**实际编译**了哪些后端（cpu / vulkan / metal / cuda）。
+    /// 必须真跑一次 `--list-compiled-backends`：随包只有 CPU 版，用户选了 GPU 也跑不起来，
+    /// 这种"选了不生效"比不给选项更糟。
+    /// </summary>
+    private static string[] AsrCompiledBackends()
+    {
+        if ((DateTime.UtcNow - _asrBackendsAt).TotalSeconds < 60 && _asrBackends.Length > 0) return _asrBackends;
+        _asrBackendsAt = DateTime.UtcNow;
+        try
+        {
+            var exe = AsrEnginePath();
+            if (exe.Length == 0) return _asrBackends = Array.Empty<string>();
+            var psi = new System.Diagnostics.ProcessStartInfo(exe, "--list-compiled-backends")
+            {
+                UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true
+            };
+            using var p = System.Diagnostics.Process.Start(psi)!;
+            var outp = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(4000);
+            var m = System.Text.RegularExpressions.Regex.Match(outp, "\\[[^\\]]*\\]");
+            if (m.Success)
+            {
+                var arr = System.Text.Json.JsonSerializer.Deserialize<string[]>(m.Value) ?? Array.Empty<string>();
+                _asrBackends = arr;
+            }
+        }
+        catch { }
+        return _asrBackends;
+    }
+
     private static string AsrDir => Path.Combine(Env.ConfigDir, "asr");
     private static string AsrModelDir => Path.Combine(AsrDir, "models");
     private static volatile string _asrDlId = "";
@@ -1928,6 +1963,10 @@ internal sealed class Backend : IDisposable
             progress = _asrDlPct,
             message = _asrDlMsg,
             selected = Settings.AsrModel,
+            mode = Settings.AsrMode,
+            backend = Settings.AsrBackend,
+            backends = AsrCompiledBackends(),
+            gpuAvailable = AsrCompiledBackends().Any(b => b is "vulkan" or "cuda" or "metal"),
             models = arr,
         });
     }
@@ -1989,6 +2028,39 @@ internal sealed class Backend : IDisposable
         if (!File.Exists(file)) return Env.Json(new { ok = false, message = "还没下载这个模型" });
         Settings.AsrModel = m.id;
         return Env.Json(new { ok = true, message = "已选择 " + m.name });
+    }
+
+    /// <summary>选择识别通道：hotkey（交给输入法）/ asr（本地引擎）。</summary>
+    public string AsrSetMode(string? mode)
+    {
+        var m = (mode ?? "").ToLowerInvariant();
+        if (m != "hotkey" && m != "asr") return Env.Json(new { ok = false, message = "未知通道" });
+        Settings.AsrMode = m;
+        var hasModel = Settings.AsrModel.Length > 0 &&
+                       File.Exists(Path.Combine(AsrModelDir, Settings.AsrModel + ".gguf"));
+        return Env.Json(new
+        {
+            ok = true, mode = m,
+            message = m == "asr"
+                ? (hasModel
+                    ? "已切到「本地识别」。注意：识别接入仍在开发中，当前按语音键仍会走输入法。"
+                    : "已切到「本地识别」，但还没下载模型 —— 先在上面下载一个。")
+                : "已切到「交给输入法」（豆包/微信）"
+        });
+    }
+
+    /// <summary>选择计算后端。若引擎没编译该后端，明确拒绝（避免"选了不生效"）。</summary>
+    public string AsrSetBackend(string? backend)
+    {
+        var b = (backend ?? "").ToLowerInvariant();
+        if (b != "cpu" && b != "vulkan" && b != "cuda") return Env.Json(new { ok = false, message = "未知后端" });
+        var avail = AsrCompiledBackends();
+        if (avail.Length > 0 && !avail.Contains(b))
+            return Env.Json(new { ok = false, backends = avail,
+                message = "当前引擎不支持 " + b + "（随包是 CPU 版）。要用 GPU 需换 GPU 版引擎。" });
+        Settings.AsrBackend = b;
+        return Env.Json(new { ok = true, backend = b,
+            message = b == "cpu" ? "已设为 CPU 推理" : "已设为 " + b + " 推理（需要对应显卡驱动）" });
     }
 
     /// <summary>打开模型目录（资源管理器）。目录不存在就先建，避免"点了没反应"。</summary>
@@ -2300,6 +2372,8 @@ internal sealed class Backend : IDisposable
             "asrDownload" => AsrDownload(a0),
             "asrSelect" => AsrSelect(a0),
             "asrOpenDir" => OpenAsrDir(),
+            "asrSetMode" => AsrSetMode(a0),
+            "asrSetBackend" => AsrSetBackend(a0),
             "wizardReset" => WizardReset(),
             "repairDriver" => RepairDriver(a0),
             "exportDriverDiag" => ExportDriverDiag(),

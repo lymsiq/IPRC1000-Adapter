@@ -152,6 +152,20 @@ internal static class Settings
         set { _data.AsrModel = value; Save(); }
     }
 
+    /// <summary>识别通道：hotkey / asr。</summary>
+    public static string AsrMode
+    {
+        get => string.IsNullOrEmpty(_data.AsrMode) ? "hotkey" : _data.AsrMode;
+        set { _data.AsrMode = value; Save(); }
+    }
+
+    /// <summary>本地引擎计算后端：cpu / vulkan。</summary>
+    public static string AsrBackend
+    {
+        get => string.IsNullOrEmpty(_data.AsrBackend) ? "cpu" : _data.AsrBackend;
+        set { _data.AsrBackend = value; Save(); }
+    }
+
     /// <summary>语音输入法档位（doubao / wechat / custom）。见 IPRC1000Adapter.Backend.SetImeProfile。</summary>
     public static string ImeProfile
     {
@@ -352,6 +366,12 @@ internal static class Settings
 
         /// <summary>选中的本地 ASR 模型 id（空 = 未选）。见 Backend.AsrModels。</summary>
         public string AsrModel { get; set; } = "";
+
+        /// <summary>识别通道：hotkey = 交给输入法（豆包/微信）；asr = 本地引擎。默认 hotkey。</summary>
+        public string AsrMode { get; set; } = "hotkey";
+
+        /// <summary>本地引擎计算后端：cpu / vulkan。默认 cpu（随包只有 CPU 版）。</summary>
+        public string AsrBackend { get; set; } = "cpu";
 
         /// <summary>
         /// **无驱动（降级）模式**：不把遥控器切成普通 HID，而是保持键盘 +

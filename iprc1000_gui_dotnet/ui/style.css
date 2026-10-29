@@ -456,3 +456,12 @@ body[data-page="keys"] .rail .device .remote{display:none}
 .tag-ok{flex:0 0 auto;font-size:11.6px;font-weight:600;color:#1a7f43;
   background:rgba(26,127,67,.1);border:1px solid rgba(26,127,67,.25);
   padding:2px 9px;border-radius:6px}
+
+/* ASR 选择 chip（2026-10-29）：通道 / 计算后端 */
+.chip{display:inline-flex;align-items:center;padding:3px 11px;margin-right:8px;
+  font-size:12.4px;border:1px solid var(--line);border-radius:999px;
+  color:var(--muted);background:#fff;cursor:pointer;transition:.15s}
+.chip:hover{border-color:rgba(47,128,237,.45);color:var(--blue)}
+.chip.on{border-color:var(--blue);color:var(--blue);background:var(--blue-l);font-weight:600}
+.chip.off{opacity:.45;cursor:not-allowed}
+.chip.off:hover{border-color:var(--line);color:var(--muted)}

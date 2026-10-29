@@ -1035,18 +1035,37 @@ function renderAsr(s, a) {
   const imeName = ime === 'doubao' ? '豆包输入法' : ime === 'wechat' ? '微信输入法' : (ime ? ime : '未选择');
   const voiceMap = (s && s.mouseMode !== undefined) ? '' : '';
 
+  const mode = a.mode || 'hotkey';
+  const be = a.backend || 'cpu';
+  const gpuOk = !!a.gpuAvailable;
+  const chip = (txt, active, attr, val, disabled) =>
+    `<span class="chip${active ? ' on' : ''}${disabled ? ' off' : ''}" ${disabled ? '' : attr + '="' + val + '"'}`
+    + ` title="${disabled ? '当前引擎未编译该后端' : ''}">${txt}</span>`;
+
   kv.innerHTML =
-    kvItem('识别引擎', engineOk ? '已就位' : '未安装', engineOk ? 'ok' : 'bad') +
-    kvItem('语音快捷键', '按住遥控器语音键 → 交给 ' + imeName, '') +
-    kvItem('启动方式', engineOk ? '随本程序启动（本地进程，无需联网）' : '装好模型后随程序启动', engineOk ? 'ok' : '') +
+    kvItem('识别引擎', (engineOk ? '已就位' : '未安装') +
+           (a.backends && a.backends.length ? ` · 后端 ${a.backends.join('/')}` : ''), engineOk ? 'ok' : 'bad') +
+    kvItem('语音快捷键', chip('交给输入法（' + imeName + '）', mode === 'hotkey', 'data-asr-mode', 'hotkey')
+                       + chip('本地 ASR', mode === 'asr', 'data-asr-mode', 'asr'), '') +
+    kvItem('计算后端', chip('CPU', be === 'cpu', 'data-asr-be', 'cpu')
+                     + chip('GPU（Vulkan）', be === 'vulkan', 'data-asr-be', 'vulkan', !gpuOk), '') +
     kvItem('模型目录', (a.modelDir || '—').replace(/^.*\\asr\\/, '…\\asr\\'), '');
+
+  // 通道 / 后端切换
+  $$('[data-asr-mode]').forEach(el => {
+    el.onclick = async () => { const r = JSON.parse(await B.asrSetMode(el.dataset.asrMode)); toast(r.message, 7000); await refresh(); };
+  });
+  $$('[data-asr-be]').forEach(el => {
+    el.onclick = async () => { const r = JSON.parse(await B.asrSetBackend(el.dataset.asrBe)); toast(r.message, 7000); await refresh(); };
+  });
 
   if (note) {
     note.className = 'note' + (engineOk ? '' : ' warn');
     note.innerHTML = a.downloading
       ? `正在下载 <b>${a.downloading}</b> · ${a.progress}% · ${a.message || ''}`
       : (engineOk
-          ? '模型在本地运行，语音不出本机。识别接入还在开发中 —— 这里先提供「选模型 + 下载」。'
+          ? '模型在本地运行，语音不出本机。<b>识别接入仍在开发中</b>：现在选「本地 ASR」还不会真的接管语音键。'
+            + (a.gpuAvailable ? '' : ' GPU 需要单独换 GPU 版引擎（随包是 CPU 版）。')
           : '⚠ 引擎文件缺失（assets\\haolive\\haolive-server.exe），请重新安装或点上面的「一键安装 / 修复」。');
   }
 
@@ -1657,9 +1676,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.115',
+      version: '1.2.116',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.115（构建于 2026-10-29 17:35）',
+      versionLine: 'v1.2.116（构建于 2026-10-29 17:50）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
