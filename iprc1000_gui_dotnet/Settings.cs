@@ -112,6 +112,13 @@ internal static class Settings
         set { _data.KeepEventLog = value; Save(); Safe.NotesEnabled = value; }
     }
 
+    /// <summary>是否已做过首次自动预选（做过后不再自动改）。</summary>
+    public static bool ImeAutoPicked
+    {
+        get => _data.ImeAutoPicked;
+        set { _data.ImeAutoPicked = value; Save(); }
+    }
+
     /// <summary>语音输入法档位（doubao / wechat / custom）。见 IPRC1000Adapter.Backend.SetImeProfile。</summary>
     public static string ImeProfile
     {
@@ -294,6 +301,9 @@ internal static class Settings
         /// 2026-10-29 增加：原来写死右 Alt，只适配豆包。
         /// </summary>
         public string ImeProfile { get; set; } = "doubao";
+
+        /// <summary>是否已经做过"首次自动预选"。做过后不再自动改，避免覆盖用户的手动选择。</summary>
+        public bool ImeAutoPicked { get; set; }
 
         /// <summary>
         /// 截图点击的**搜索范围**：

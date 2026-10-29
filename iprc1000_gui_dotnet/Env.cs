@@ -318,6 +318,44 @@ internal static class Env
         return null;
     }
 
+    /// <summary>
+    /// 检测已安装的**语音输入法**（豆包 / 微信输入法）。
+    ///
+    /// 数据源：卸载项里的 DisplayName —— 实测能同时列出"豆包输入法""微信输入法"。
+    /// 为什么不用 TSF 的 CTF\TIP：那里有 140+ 条（含系统自带），且描述是本地化资源串，
+    /// 反查 GUID 反而更脆；"装没装"这个问题用卸载项回答最直接。
+    /// 注意：**只能回答"装没装"，不能回答"用户想用哪个"** —— 所以只用于首次预选。
+    /// </summary>
+    public static (bool doubao, bool wechat) DetectVoiceImes()
+    {
+        bool doubao = false, wechat = false;
+        foreach (var root in new[]
+                 {
+                     @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+                     @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+                 })
+        {
+            try
+            {
+                using var k = Registry.LocalMachine.OpenSubKey(root, false);
+                if (k == null) continue;
+                foreach (var sub in k.GetSubKeyNames())
+                {
+                    try
+                    {
+                        using var d = k.OpenSubKey(sub, false);
+                        var name = d?.GetValue("DisplayName") as string ?? "";
+                        if (name.Contains("豆包")) doubao = true;
+                        if (name.Contains("微信输入法")) wechat = true;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
+        return (doubao, wechat);
+    }
+
     public static bool IsAdmin()
     {
         try

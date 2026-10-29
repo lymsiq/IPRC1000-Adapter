@@ -847,9 +847,14 @@ function renderEnv(s) {
     if (sw) sw.classList.toggle('on', imeCur === val);
   });
   const imeN = $('#imeNote');
-  if (imeN) imeN.textContent = s.imeVoice
-    ? `当前「语音」键 = ${s.imeVoice}。微信输入法需在它自己的设置里把「麦克风」选成 CABLE Output。`
-    : '';
+  if (imeN) {
+    const det = s.imeDetected || {};
+    const hit = [det.doubao && '豆包', det.wechat && '微信输入法'].filter(Boolean);
+    imeN.textContent =
+      (hit.length ? `检测到已安装：${hit.join(' / ')}。` : '未检测到豆包 / 微信输入法 —— 可手动选择，或用「自定义」。')
+      + (s.imeVoice ? ` 当前「语音」键 = ${s.imeVoice}。` : '')
+      + ' 微信输入法需在它自己的设置里把「麦克风」选成 CABLE Output。';
+  }
 
   // 事件日志开关（第二级）的初始态
   // 截图点击调参的当前值（不覆盖正在编辑的输入框）
@@ -1469,7 +1474,7 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.89',
+      version: '1.2.90',
       buildStamp: '2026-10-16 09:50',
       versionLine: 'v1.2.69（构建于 2026-10-26 14:45）',
       device: {

@@ -436,6 +436,9 @@ internal sealed class Backend : IDisposable
     {
         try
         {
+            // 首次启动：按"实际装了哪个输入法"预选档位（只做一次）
+            AutoPickIme();
+
             // ★ 启动兜底：清掉上一次异常退出（例如被强杀）残留的「按着不放」的注入键。
             //   最要命的是右 Alt(AltGr) —— 卡住会让字母键输出特殊字符、中文输入法失效。
             try { KeyFilter.ReleaseAllInjected(); } catch { }
@@ -613,6 +616,40 @@ internal sealed class Backend : IDisposable
     private DateTime _lastMicFix = DateTime.MinValue;
     /// <summary>检测到的反作弊名称（仅用于界面提示）；每 32 秒刷新一次</summary>
     private string? _antiCheat;
+    /// <summary>已安装输入法检测结果（缓存 60 s，避免每 2 秒刷界面都扫注册表）</summary>
+    private (bool doubao, bool wechat) _imeDetected;
+    private long _imeDetectedAt;
+
+    private (bool doubao, bool wechat) ImeDetected()
+    {
+        if (Environment.TickCount64 - _imeDetectedAt > 60000)
+        {
+            _imeDetectedAt = Environment.TickCount64;
+            try { _imeDetected = Env.DetectVoiceImes(); } catch { }
+        }
+        return _imeDetected;
+    }
+
+    /// <summary>
+    /// **首次启动自动预选**输入法档位（只做一次，之后不再自动改）。
+    ///
+    /// 规则：只装了微信 → 选微信；其余（都装 / 只装豆包 / 都没装）→ 保持豆包默认。
+    /// 为什么"都装"时不选微信：豆包是本产品长期调过的默认路径，微信的 Ctrl+Win 是
+    /// 全局快捷键、可能与其他软件冲突 —— 两个都在时把选择权留给用户更稳。
+    /// </summary>
+    private void AutoPickIme()
+    {
+        if (Settings.ImeAutoPicked) return;
+        try
+        {
+            var (doubao, wechat) = ImeDetected();
+            var pick = (!doubao && wechat) ? "wechat" : Settings.ImeProfile;
+            SetImeProfile(pick);
+            Settings.ImeAutoPicked = true;
+            Safe.Note($"IME 自动预选：豆包={doubao} 微信={wechat} → {pick}");
+        }
+        catch (Exception e) { Safe.Note($"IME 自动预选失败 {e.GetType().Name}: {e.Message}"); }
+    }
     private long _antiCheatAt;
 
     /// <summary>漂移检测 + 自动恢复（每轮探针跑一次）</summary>
@@ -788,6 +825,11 @@ internal sealed class Backend : IDisposable
             ["keepEventLog"] = Settings.KeepEventLog,
             ["imeProfile"] = Settings.ImeProfile,
             ["imeVoice"] = Keys.FormatSymbols(Keymaps.Get("voice") ?? Array.Empty<int>()),
+            ["imeDetected"] = new JsonObject
+            {
+                ["doubao"] = ImeDetected().doubao,
+                ["wechat"] = ImeDetected().wechat,
+            },
             ["clickMinScore"] = Settings.ClickMinScore,
             ["clickSearchScope"] = Settings.ClickSearchScope,
             ["clickReturnToOrigin"] = Settings.ClickReturnToOrigin,
