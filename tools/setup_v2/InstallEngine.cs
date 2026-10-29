@@ -45,6 +45,36 @@ namespace IprcSetup2
         /// <summary>日志是否已关闭（删日志目录之后不能再写）。</summary>
         private bool _logClosed;
 
+        /// <summary>
+        /// 覆盖文件时重试 3 次。
+        /// 为什么要重试：升级瞬间旧进程/杀软刚放开句柄，第一次 Copy 常失败、
+        /// 200ms 后就成功 —— 直接抛异常会让用户看到"安装失败"，而其实只是竞态。
+        /// 仍失败则抛**带文件名**的异常，让用户知道该关哪个程序。
+        /// </summary>
+        private static void CopyWithRetry(string source, string destination, string rel)
+        {
+            Exception? last = null;
+            for (var i = 0; i < 3; i++)
+            {
+                try { File.Copy(source, destination, true); return; }
+                catch (Exception e)
+                {
+                    last = e;
+                    if (i < 2) Thread.Sleep(200);
+                }
+            }
+            throw new IOException($"覆盖 {rel} 失败（已重试 3 次）：{last?.Message}　"
+                + "请退出正在运行的程序/暂停杀软后重试。", last);
+        }
+
+        /// <summary>把"被占用"这类异常翻译成能行动的话（含具体文件）。</summary>
+        private static string ExplainIo(Exception e, string path)
+        {
+            if (e is IOException || e is UnauthorizedAccessException)
+                return $"{Path.GetFileName(path)} 写不进去（可能仍在运行或被杀软占用）：{e.Message}";
+            return $"{Path.GetFileName(path)}：{e.Message}";
+        }
+
         private void Report(int value, string message)
         {
             // ★★ 2026-10-29 自伤 bug：删完 %ProgramData% 目录后这里还会往 setup-*.log 追加，
@@ -91,6 +121,11 @@ namespace IprcSetup2
                 if (!Environment.Is64BitOperatingSystem || Environment.OSVersion.Version.Major < 10)
                     throw new PlatformNotSupportedException("此安装包需要 Windows 10/11 x64。");
                 EnsureAppClosed();
+                // ★ 2026-10-29：升级时必须**连语音桥一起停**。
+                //   桥是主程序的子进程，关主程序它不一定立刻退出；
+                //   它占着 assets\etw_consumer.exe 时覆盖会失败（"文件正被使用"）。
+                //   卸载流程一直有这步，安装流程漏了 —— 这就是"升级偶尔装不上"的原因。
+                StopBridgeProcess();
                 InstallFiles();
                 ApplyRegistry();
                 Report(52, "正在检查界面运行时");
@@ -221,7 +256,7 @@ namespace IprcSetup2
                         existed.Add(rel);
                     }
                     applied.Add(rel);
-                    File.Copy(source, destination, true);
+                    CopyWithRetry(source, destination, rel);
                 }
                 var maintenance = Path.Combine(_target, "IPRC1000AdapterSetup.exe");
                 var sourceInstaller = Assembly.GetExecutingAssembly().Location;

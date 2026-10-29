@@ -344,6 +344,10 @@ SRC_REQUIRED = [
     ("鼠标引擎有自适应增速", "iprc1000_gui_dotnet/MouseEngine.cs", "RampExponent"),
     ("鼠标引擎有方向按住超时", "iprc1000_gui_dotnet/MouseEngine.cs", "DirectionHoldTimeoutSec"),
     ("鼠标键孤儿回收存在", "iprc1000_gui_dotnet/MouseEngine.cs", "ReapOrphanButtons"),
+    # 2026-10-29：升级时桥会占着 assets\etw_consumer.exe 导致覆盖失败
+    ("安装流程会先停语音桥", "tools/setup_v2/InstallEngine.cs", "StopBridgeProcess();\n                InstallFiles();"),
+    ("卸载流程会先停语音桥", "tools/setup_v2/InstallEngine.cs", "StopBridgeProcess();\n                // 次序很关键"),
+    ("覆盖文件带重试", "tools/setup_v2/InstallEngine.cs", "CopyWithRetry"),
     ("鼠标路由挂在 ApplyButton", "iprc1000_gui_dotnet/KeyFilter.cs", "MouseModeRouter"),
     ("鼠标模式有引擎自检", "iprc1000_gui_dotnet/MouseEngine.cs", "static string SelfTest"),
     ("引擎自检有 CLI 入口", "iprc1000_gui_dotnet/Program.cs", "--mouse-engine-test"),
