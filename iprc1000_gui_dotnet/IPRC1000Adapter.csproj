@@ -34,7 +34,7 @@
     <!-- 让 exe 的「文件版本」也等于发布版本；否则 FileVersion 停在默认 1.2.0.0，
          安装器的"已安装版本"提示会读错（2026-10-29 实测踩到） -->
     <FileVersion>$(Version)</FileVersion>
-    <FileVersion>1.2.0.0</FileVersion>
+    <!-- 旧的写死 FileVersion 已删除：它排在上面那条之后会把 $(Version) 覆盖掉（2026-10-29 实测 FileVersion 停在 1.2.0.0） -->
     <AssemblyVersion>1.2.0.0</AssemblyVersion>
     <Product>IPRC1000 遥控器适配器</Product>
     <Company>IPRC1000 Adapter contributors</Company>
