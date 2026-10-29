@@ -1963,6 +1963,11 @@ internal sealed class Backend : IDisposable
             progress = _asrDlPct,
             message = _asrDlMsg,
             selected = Settings.AsrModel,
+            enabled = Settings.AsrEnabled,
+            framework = Settings.AsrFramework,
+            frameworks = new JsonArray(
+                new JsonObject { ["id"] = "haolive", ["name"] = "HaoLive.cpp（本地）", ["ready"] = engine.Length > 0 },
+                new JsonObject { ["id"] = "cloud", ["name"] = "云端 API（未接入）", ["ready"] = false }),
             mode = Settings.AsrMode,
             backend = Settings.AsrBackend,
             backends = AsrCompiledBackends(),
@@ -2039,6 +2044,32 @@ internal sealed class Backend : IDisposable
         if (!File.Exists(file)) return Env.Json(new { ok = false, message = "还没下载这个模型" });
         Settings.AsrModel = m.id;
         return Env.Json(new { ok = true, message = "已选择 " + m.name });
+    }
+
+    /// <summary>本地识别总开关。关掉后语音键完全回到"交给输入法"，不做任何本地识别。</summary>
+    public string AsrSetEnabled(string? on)
+    {
+        var v = (on ?? "") == "1" || string.Equals(on, "true", StringComparison.OrdinalIgnoreCase);
+        Settings.AsrEnabled = v;
+        if (!v) LocalAsr.Stop();          // 关掉就释放引擎进程，省内存
+        return Env.Json(new
+        {
+            ok = true, enabled = v,
+            message = v
+                ? (Settings.AsrModel.Length == 0
+                    ? "已启用本地识别，但还没选模型 —— 先下载一个模型。"
+                    : "已启用本地识别（框架：" + Settings.AsrFramework + "）")
+                : "已关闭本地识别：语音键回到「交给输入法」"
+        });
+    }
+
+    /// <summary>选择识别框架（目前只有内置 haolive；cloud 预留）。</summary>
+    public string AsrSetFramework(string? fw)
+    {
+        var f = (fw ?? "").ToLowerInvariant();
+        if (f != "haolive") return Env.Json(new { ok = false, message = "这个框架还没接入（当前仅 HaoLive.cpp 本地引擎）" });
+        Settings.AsrFramework = f;
+        return Env.Json(new { ok = true, framework = f, message = "已选框架：HaoLive.cpp（本地推理）" });
     }
 
     /// <summary>选择识别通道：hotkey（交给输入法）/ asr（本地引擎）。</summary>
@@ -2384,6 +2415,8 @@ internal sealed class Backend : IDisposable
             "asrSelect" => AsrSelect(a0),
             "asrOpenDir" => OpenAsrDir(),
             "asrSetMode" => AsrSetMode(a0),
+            "asrSetEnabled" => AsrSetEnabled(a0),
+            "asrSetFramework" => AsrSetFramework(a0),
             "asrSetBackend" => AsrSetBackend(a0),
             "wizardReset" => WizardReset(),
             "repairDriver" => RepairDriver(a0),

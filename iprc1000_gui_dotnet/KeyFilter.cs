@@ -677,7 +677,7 @@ internal sealed class KeyFilter : IDisposable
         // ★★ ASR 模式：语音键**只录音，不注入组合键**。
         //   否则会同时唤起"输入法 + 本地引擎" → 双重录音、两份文字抢着上屏。
         //   抖动对（<25ms）不当成一次说话，避免把半句话当成整句送去识别。
-        if (bid == "voice" && Settings.AsrMode == "asr")
+        if (bid == "voice" && Settings.AsrEnabled && Settings.AsrMode == "asr")
         {
             if (pressed) AsrRun.Begin();
             else if (holdMs < 0 || holdMs >= DebounceMs) AsrRun.Schedule(VoiceTailMs + 40);

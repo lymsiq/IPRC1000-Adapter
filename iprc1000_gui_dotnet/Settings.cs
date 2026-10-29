@@ -152,6 +152,20 @@ internal static class Settings
         set { _data.AsrModel = value; Save(); }
     }
 
+    /// <summary>本地识别总开关。</summary>
+    public static bool AsrEnabled
+    {
+        get => _data.AsrEnabled;
+        set { _data.AsrEnabled = value; Save(); }
+    }
+
+    /// <summary>识别框架（目前只有内置 haolive）。</summary>
+    public static string AsrFramework
+    {
+        get => string.IsNullOrEmpty(_data.AsrFramework) ? "haolive" : _data.AsrFramework;
+        set { _data.AsrFramework = value; Save(); }
+    }
+
     /// <summary>识别通道：hotkey / asr。</summary>
     public static string AsrMode
     {
@@ -366,6 +380,12 @@ internal static class Settings
 
         /// <summary>选中的本地 ASR 模型 id（空 = 未选）。见 Backend.AsrModels。</summary>
         public string AsrModel { get; set; } = "";
+
+        /// <summary>本地识别**总开关**。关掉 = 完全不介入（等价于原来的"交给输入法"）。</summary>
+        public bool AsrEnabled { get; set; }
+
+        /// <summary>识别框架：haolive（内置本地引擎）。将来可加 cloud（云端 API）。</summary>
+        public string AsrFramework { get; set; } = "haolive";
 
         /// <summary>识别通道：hotkey = 交给输入法（豆包/微信）；asr = 本地引擎。默认 hotkey。</summary>
         public string AsrMode { get; set; } = "hotkey";
