@@ -1469,7 +1469,10 @@ internal sealed class Backend : IDisposable
             return Env.Json(new { ok = false, message = $"未知输入法：{p}" });
 
         var doubao = new[] { 0xA5 };
-        var wechat = new[] { 0x11, 0x5B };
+        // ★ 2026-10-29：**左** Ctrl + **左** Win（0xA2 + 0x5B），不是通用 VK_CONTROL(0x11)。
+        //   微信输入法官方给的就是"左 Ctrl + 左 Win"；用通用 Ctrl 时系统按当前键盘布局
+        //   可能解析成右 Ctrl，组合键就失效（同类项目 SayAll 也是这么写的）。
+        var wechat = new[] { 0xA2, 0x5B };
         var target = profile switch { "doubao" => doubao, "wechat" => wechat, _ => Array.Empty<int>() };
         var cur = Keymaps.Get("voice") ?? Array.Empty<int>();
         var curShown = Keys.FormatSymbols(cur);
