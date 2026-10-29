@@ -390,7 +390,7 @@
           <!-- 第二级：事件日志（每天几 KB）。关掉它 = 完全不写任何日志。 -->
           <label class="switch" id="noteSwitch"><input type="checkbox" id="noteToggle">记录事件日志<i>按键/释放等归因，每天几 KB；关掉即完全不记录</i></label>
           <!-- 无驱动（降级）模式：给装不了 WinUHid 的机器。风险要写在界面上，不能只写文档。 -->
-          <label class="switch" id="driverFreeSwitch"><input type="checkbox" id="driverFreeToggle">无驱动模式（降级）<i>保持遥控器为键盘、吞掉幽灵 m；输入法可能不认此模式的注入，联机游戏请勿使用</i></label>
+          <label class="switch" id="driverFreeSwitch"><input type="checkbox" id="driverFreeToggle">无驱动模式（实验·降级）<i>保持遥控器为键盘、靠钩子吞 m。<b>已知不稳</b>：可能刷屏或让键盘暂时打不了字（失控会自动切回驱动模式）。<b>建议优先用「安装虚拟键盘驱动」</b></i></label>
           <label class="switch" id="zeroGhostSwitch"><input type="checkbox" id="zeroGhostToggle">零漏模式（先吞后补）<i>连第一个 m 也不漏：遥控器刚用过时，单个 m 会晚 60ms 出现</i></label>
         </div>
         <div class="note" id="logNote"></div>

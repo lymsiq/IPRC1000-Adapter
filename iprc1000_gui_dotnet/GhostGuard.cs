@@ -26,6 +26,7 @@ internal static class GhostGuard
 {
     private const int WH_KEYBOARD_LL = 13;
     private const int WM_KEYDOWN = 0x0100;
+    private const int WM_KEYUP = 0x0101;
     private const int WM_SYSKEYDOWN = 0x0104;
     private const int VK_M = 0x4D;
 
@@ -159,6 +160,21 @@ internal static class GhostGuard
     public static long Replayed;                        // 补发次数（可观测）
     /// <summary>最近一次**钩子**看到 m 的时刻（对比 Raw Input 用）</summary>
     public static long LastHookMAt;
+    /// <summary>钩子看到的 m **按下**总数（不管吞没吞）。用来量"系统自动重复"的速率。</summary>
+    public static long SeenKeyDowns;
+
+    /// <summary>
+    /// **失控自动降级**（2026-10-29 安全网）。
+    ///
+    /// 无驱动模式在真机上出现过"键一直被按住 + 整套键盘打不了字"的场面。
+    /// 与其追求"零漏且永不失控"，不如**保证失控能自愈**：
+    ///   连续吞掉 N 次 m 却始终没见到弹起 ⇒ 判定失控 ⇒ 置位 AutoDisabled，
+    ///   由 Backend 自动切回驱动模式（系统层面就没有 m 了），并提示用户。
+    /// </summary>
+    public static volatile bool AutoDisabled;
+    private static int _swallowStreak;
+
+    private const int AutoDisableStreak = 240;   // 约 8 秒 @31Hz
 
     private const int RemoteActiveMs = 8000;            // 遥控器活跃窗口：8 秒
     private const int HoldMs = 60;                      // 先吞多久
@@ -230,6 +246,7 @@ internal static class GhostGuard
     {
         Swallowed = 0; Bursts = 0; ForcedReleases = 0; LastSwallowAt = 0;
         Replayed = 0; _pending = false; _lastRemoteAt = 0;
+        _swallowStreak = 0; AutoDisabled = false;
     }
 
     /// <summary>语音键按下 → 开始吞 m。</summary>
@@ -279,6 +296,40 @@ internal static class GhostGuard
         _armed = false;
         Stop();
         return (int)(Swallowed - before);
+    }
+
+    /// <summary>
+    /// **按住不放**自检：只发一次 m down、不发 up，量 Windows 会不会**自己重复**；
+    /// 再补一个 keyup，看重复是否立刻停止。
+    /// 这一步回答的是"为什么 Linux 只出一个 M、Windows 是连发"。
+    /// </summary>
+    public static string SelfTestHold()
+    {
+        Enabled = true; Start();
+        if (!Running) return "钩子安装失败";
+        if (!WinUhidInjector.EnsureReady()) return "WinUHid 未就绪（先停掉正在运行的应用）";
+
+        var sb = new System.Text.StringBuilder();
+        // ① 只按下，不弹起
+        var a0 = SeenKeyDowns;
+        try { WinUhidInjector.Send(new[] { 0x4D }); } catch { }
+        Thread.Sleep(1500);
+        var during = SeenKeyDowns - a0;
+        sb.AppendLine($"① 按住不放 1.5 秒：系统产生了 {during} 次 m 按下（≈{during / 1.5:F0}/秒）");
+
+        // ② 补一个 keyup
+        try { WinUhidInjector.Send(Array.Empty<int>()); } catch { }
+        Thread.Sleep(300);
+        var b0 = SeenKeyDowns;
+        Thread.Sleep(1200);
+        var after = SeenKeyDowns - b0;
+        sb.AppendLine($"② 补 keyup 之后 1.2 秒：{after} 次（期望 0）");
+        sb.AppendLine(after == 0 && during > 5
+            ? "⇒ 结论：重复来自**系统自动重复**；补 keyup 能立刻止住。"
+            : during <= 5
+              ? "⇒ 结论：这个环境下按键没被系统重复（可能设备不是键盘类）。"
+              : "⇒ 结论：补 keyup 没止住，重复来自设备本身。");
+        return sb.ToString().TrimEnd();
     }
 
     /// <summary>
@@ -357,6 +408,8 @@ internal static class GhostGuard
     {
         try
         {
+            // m 弹起 ⇒ 键正常松开，连击计数归零（说明没卡住）
+            if (nCode >= 0 && wParam.ToInt32() == WM_KEYUP) _swallowStreak = 0;
             if (nCode >= 0 && Enabled)
             {
                 // 安全阀：万一"松开"事件丢了（遥控器断连），15 秒后自动解除
@@ -373,6 +426,7 @@ internal static class GhostGuard
                     {
                         var now = Environment.TickCount64;
                         LastHookMAt = now;
+                        SeenKeyDowns++;
 
                         // ★★★ 结构说明（2026-10-29 第二次修）：
                         //   必须先做"连发判定 / 过期判定"，最后才决定吞不吞。
@@ -410,6 +464,11 @@ internal static class GhostGuard
                         {
                             Swallowed++;
                             LastSwallowAt = now;
+                            // 失控判定：连续吞很多次却一直没见到"弹起"，说明这个键卡住了
+                            if (++_swallowStreak > AutoDisableStreak && !AutoDisabled)
+                            {
+                                AutoDisabled = true;
+                            }
                             return (IntPtr)1;      // 吞掉：不传给后续（包括输入法）
                         }
 

@@ -90,6 +90,11 @@ internal static class Program
         // 无驱动模式的钩子自检（不动设备驱动）：注入 3 个 m，看被吞掉几个
         if (args.Length > 0 && args[0] == "--ghost-test")
         {
+            if (args.Length > 1 && args[1] == "hold")
+            {
+                Console.WriteLine(GhostGuard.SelfTestHold());
+                return;
+            }
             if (args.Length > 1 && args[1] == "long")
             {
                 Console.WriteLine(GhostGuard.SelfTestLongBurst());

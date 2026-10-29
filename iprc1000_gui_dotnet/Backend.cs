@@ -1279,6 +1279,8 @@ internal sealed class Backend : IDisposable
         //     还引导用户去"安装虚拟键盘驱动"—— 恰好会把无驱动模式推翻。
         var driverFreeOn = Settings.DriverFreeMode && GhostGuard.Running;
         var devOk = driverFreeOn || !Env.RemoteStillKeyboard() || (_filter is { Running: true, KeySourceIsEtw: false });
+        CheckGhostAutoFallback();   // 失控自愈：无驱动模式卡住时自动切回驱动模式
+
         return new JsonObject
         {
             ["cable"] = new JsonObject { ["ok"] = _cableReady, ["hint"] = "虚拟声卡 VB-CABLE" },
@@ -1573,6 +1575,26 @@ internal sealed class Backend : IDisposable
     ///
     /// 只在"当前映射还是某个档位的默认值"时才自动改写 —— 用户手工改过就不动。
     /// </summary>
+    /// <summary>
+    /// **失控自动降级**：无驱动模式的幽灵键抑制如果连续吞了很多次却一直没见到弹起，
+    /// 说明这个键卡住了（用户整套键盘会打不了字）。此时**自动切回驱动模式** ——
+    /// 驱动模式下系统层面就没有 m，最稳。宁可功能降级，也不能把用户的键盘搞坏。
+    /// </summary>
+    private static volatile bool _fallbackRunning;
+
+    private void CheckGhostAutoFallback()
+    {
+        if (!Settings.DriverFreeMode || !GhostGuard.AutoDisabled || _fallbackRunning) return;
+        _fallbackRunning = true;
+        Safe.Note("GHOST 失控（连续吞咽未见弹起）→ 自动切回驱动模式，恢复键盘");
+        Task.Run(() =>
+        {
+            try { KeyFilter.ReleaseAllInjected(); } catch { }
+            try { SetDriverFreeMode("0"); } catch { }
+            _driverNote = "无驱动模式失控（遥控器的 m 卡住），已自动切回驱动模式";
+        });
+    }
+
     /// <summary>键源归因报告：`rawInput` / `rawInput reset`</summary>
     private static string RawInputReport(string? arg)
     {
