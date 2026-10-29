@@ -112,6 +112,12 @@ internal static class Settings
         set { _data.KeepEventLog = value; Save(); Safe.NotesEnabled = value; }
     }
 
+    public static bool DriverFreeMode
+    {
+        get => _data.DriverFreeMode;
+        set { _data.DriverFreeMode = value; Save(); }
+    }
+
     /// <summary>是否已做过首次自动预选（做过后不再自动改）。</summary>
     public static bool ImeAutoPicked
     {
@@ -304,6 +310,13 @@ internal static class Settings
 
         /// <summary>是否已经做过"首次自动预选"。做过后不再自动改，避免覆盖用户的手动选择。</summary>
         public bool ImeAutoPicked { get; set; }
+
+        /// <summary>
+        /// **无驱动（降级）模式**：不把遥控器切成普通 HID，而是保持键盘 +
+        /// 钩子吞掉按住语音键期间的幽灵 `m`。给"装不了 WinUHid"的机器用。
+        /// 代价：输入法可能不认 SendInput 注入（详见 GhostGuard 注释）。
+        /// </summary>
+        public bool DriverFreeMode { get; set; }
 
         /// <summary>
         /// 截图点击的**搜索范围**：

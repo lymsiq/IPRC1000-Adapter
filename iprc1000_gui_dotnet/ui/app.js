@@ -854,6 +854,12 @@ function renderEnv(s) {
       + ' 微信输入法需把「麦克风」选成 CABLE Output。';
   }
 
+  // 无驱动模式开关
+  const dfT = $('#driverFreeToggle');
+  if (dfT) dfT.checked = s.driverFree === true;
+  const dfSw = $('#driverFreeSwitch');
+  if (dfSw) dfSw.classList.toggle('on', s.driverFree === true);
+
   // 事件日志开关（第二级）的初始态
   // 截图点击调参的当前值（不覆盖正在编辑的输入框）
   const minEl = $('#clickMinScore');
@@ -1263,6 +1269,19 @@ function bindUI() {
     };
   }
 
+  // 无驱动模式：切驱动 + 启停钩子，切完提示重启
+  const dfT2 = $('#driverFreeToggle');
+  if (dfT2 && hasBridge) {
+    dfT2.onchange = async () => {
+      const r = JSON.parse(await B.setDriverFree(dfT2.checked ? '1' : '0'));
+      dfT2.checked = r.driverFree === true;
+      const sw = $('#driverFreeSwitch');
+      if (sw) sw.classList.toggle('on', dfT2.checked);
+      toast(r.message, 9000);
+      await refresh();
+    };
+  }
+
   // 语音输入法：点哪个就切到哪个（业务侧只在"映射仍是预设值"时自动改写，不覆盖自定义）
   document.querySelectorAll('.ime-seg button[data-ime]').forEach(btn => {
     if (!hasBridge) return;
@@ -1471,9 +1490,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.92',
+      version: '1.2.93',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.92（构建于 2026-10-29 10:20）',
+      versionLine: 'v1.2.93（构建于 2026-10-29 10:35）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

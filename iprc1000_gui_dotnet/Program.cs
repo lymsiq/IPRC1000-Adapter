@@ -51,6 +51,14 @@ internal static class Program
             return;
         }
 
+        // 无驱动模式的钩子自检（不动设备驱动）：注入 3 个 m，看被吞掉几个
+        if (args.Length > 0 && args[0] == "--ghost-test")
+        {
+            var n = GhostGuard.SelfTest();
+            Console.WriteLine(n < 0 ? "钩子安装失败" : $"已吞掉 {n} / 3 个 m");
+            return;
+        }
+
         // 管道自检：连上业务服务，调一条命令并打印结果（拆分后的联调工具）
         if (args.Length > 0 && args[0] == "--pipe-test")
         {
@@ -58,7 +66,10 @@ internal static class Program
             var pa0 = args.Length > 2 ? args[2] : "";
             var pa1 = args.Length > 3 ? args[3] : "";
             // 输出**全文**（截断过会导致外部脚本解析失败；需要精简请自行 head -c）
-            Console.WriteLine(ServiceClient.Call(method, pa0, pa1));
+            // 慢命令要放宽超时：切设备驱动会等设备重新枚举（最多 4 s），
+            // 用默认 3 s 会误报"响应超时"（实测踩到：其实已经切成功）。
+            var slow = method is "setDriverFree" or "setDeviceDriver" or "installWinuhid" or "runSetup" or "installCable";
+            Console.WriteLine(ServiceClient.Call(method, pa0, pa1, slow ? 20000 : 3000));
             return;
         }
 

@@ -113,9 +113,10 @@ internal static class Env
     /// 拿到的 `Hwid` 是该实例真实的 HardwareID（如 `HID\VID_8087&PID_0022&MI_03&Col01`），
     /// 用它去调 UpdateDriverForPlugAndPlayDevices 才不会因为写死 VID 而失败。
     /// </summary>
-    private static List<RemoteHidNode> RemoteHwidsCache()
+    private static List<RemoteHidNode> RemoteHwidsCache(bool force = false)
     {
-        if (_remoteNodes != null && (DateTime.UtcNow - _remoteNodesAt).TotalSeconds < 5) return _remoteNodes;
+        // ★ 2026-10-29：加 force —— 切完设备驱动要**立刻**复查，不能等 5 秒缓存过期。
+        if (!force && _remoteNodes != null && (DateTime.UtcNow - _remoteNodesAt).TotalSeconds < 5) return _remoteNodes;
         var nodes = new List<RemoteHidNode>();
         try
         {
@@ -271,13 +272,23 @@ internal static class Env
             if (!ok)
                 return (false, $"切换失败（Win32 错误 {Marshal.GetLastWin32Error()}）。" +
                                "若设备当前未连接，请按遥控器任意键唤醒后重试。");
-            var kb = RemoteStillKeyboard();
+            // ★★ 2026-10-29：切换后**设备要重新枚举**（实测 1~2 秒），立刻复查必然还是旧状态
+            //   ⇒ 原来会报"已调用还原，但设备仍不是键盘"这种**假失败**（其实已经切过去了）。
+            //   这里轮询等它到位（最多 4 秒），再下结论。
+            var wantKeyboard = revert;
+            var kb = RemoteStillKeyboard(force: true);
+            for (var i = 0; i < 30 && kb != wantKeyboard; i++)
+            {
+                System.Threading.Thread.Sleep(200);
+                kb = RemoteStillKeyboard(force: true);   // 必须 force：否则读到 5 秒缓存
+            }
+
             var msg = revert
                 ? (kb ? "已还原为 HID Keyboard Device。" : "已调用还原，但设备仍不是键盘，请重试。")
-                : (kb ? "已调用切换，但设备仍被当作键盘，请重试或改用设备管理器手动更换。"
-                      : "已切换为 HID-compliant device —— 系统不再把它当键盘，按键重复从根上消失。");
+                : (!kb ? "已切换为 HID-compliant device —— 系统不再把它当键盘，按键重复从根上消失。"
+                       : "已调用切换，但设备仍被当作键盘，请重试或改用设备管理器手动更换。");
             if (reboot) msg += "（系统提示需要重启才能完全生效）";
-            return (!kb || revert, msg);
+            return (kb == wantKeyboard, msg);
         }
         catch (Exception e) { return (false, $"调用失败：{e.Message}"); }
     }
@@ -566,15 +577,15 @@ internal static class Env
         NotKeyboard,
     }
 
-    public static RemoteKbState RemoteKb()
+    public static RemoteKbState RemoteKb(bool force = false)
     {
-        var nodes = RemoteHwidsCache();
+        var nodes = RemoteHwidsCache(force);
         if (nodes.Count == 0) return RemoteKbState.Absent;
         return nodes.Any(n => n.Service == "kbdhid") ? RemoteKbState.Keyboard : RemoteKbState.NotKeyboard;
     }
 
     /// <summary>是否仍是键盘（Absent 时返回 false —— 调用方若需要区分请用 RemoteKb()）。</summary>
-    public static bool RemoteStillKeyboard() => RemoteKb() == RemoteKbState.Keyboard;
+    public static bool RemoteStillKeyboard(bool force = false) => RemoteKb(force) == RemoteKbState.Keyboard;
 
     /// <summary>遥控器当前是否还在系统里（不论绑的是什么驱动）——用于「断开即解锁」</summary>
     public static bool RemotePresent()

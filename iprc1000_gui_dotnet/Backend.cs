@@ -439,6 +439,9 @@ internal sealed class Backend : IDisposable
             // 首次启动：按"实际装了哪个输入法"预选档位（只做一次）
             AutoPickIme();
 
+            // 无驱动模式：恢复幽灵键抑制（钩子不随进程持久，重启后要重新装）
+            if (Settings.DriverFreeMode) { try { GhostGuard.Enabled = true; GhostGuard.Start(); } catch { } }
+
             // ★ 启动兜底：清掉上一次异常退出（例如被强杀）残留的「按着不放」的注入键。
             //   最要命的是右 Alt(AltGr) —— 卡住会让字母键输出特殊字符、中文输入法失效。
             try { KeyFilter.ReleaseAllInjected(); } catch { }
@@ -824,6 +827,8 @@ internal sealed class Backend : IDisposable
             ["heldNow"] = KeyFilter.HeldKeysNow(),
             ["keepEventLog"] = Settings.KeepEventLog,
             ["imeProfile"] = Settings.ImeProfile,
+            ["driverFree"] = Settings.DriverFreeMode,
+            ["ghostSwallowed"] = GhostGuard.Swallowed,
             ["imeVoice"] = Keys.FormatSymbols(Keymaps.Get("voice") ?? Array.Empty<int>()),
             ["imeDetected"] = new JsonObject
             {
@@ -1453,6 +1458,36 @@ internal sealed class Backend : IDisposable
     }
 
     /// <summary>
+    /// **无驱动（降级）模式**开关（2026-10-29）。
+    ///
+    ///   开：遥控器保持键盘 + 启钩子吞幽灵 m（给装不了 WinUHid 的机器）
+    ///   关：切回"普通 HID 设备" + 停钩子（恢复标准路径）
+    ///
+    /// 切换会改动设备驱动，**建议切完重启程序**（设备在重新枚举，注入目标会短暂失效）。
+    /// 已知代价（如实告知，不掩饰）：
+    ///   · 输入法（豆包/微信）可能不认 SendInput 注入 ⇒ 语音键触发可能不生效；
+    ///   · 按键映射到普通程序仍可用；音频链路不受影响；
+    ///   · 钩子可被反作弊检测 —— 仅建议无联机游戏的机器使用。
+    /// </summary>
+    public string SetDriverFreeMode(string? on)
+    {
+        var want = on is "true" or "1" or "True";
+        try { _filter?.ClearHeld("切换驱动模式，先放掉按住的键"); } catch { }
+
+        Settings.DriverFreeMode = want;
+        if (want) { GhostGuard.Enabled = true; GhostGuard.Start(); }
+        else GhostGuard.Stop();
+
+        var (ok, msg) = Env.SetDeviceDriver(want);   // true=还原键盘，false=普通 HID
+        return Env.Json(new { ok, driverFree = want,
+            message = (want
+                ? "已切到无驱动模式：遥控器保持键盘，按住语音键期间会吞掉它自带的 m。"
+                : "已切回标准模式：遥控器重新设为普通 HID 设备。")
+                + $" 设备驱动：{msg} 建议重启程序后使用。"
+                + (want ? " 注意：输入法可能不认此模式下的按键注入（语音键可能无法触发输入法）。" : "") });
+    }
+
+    /// <summary>
     /// 切换**语音输入法档位**：把「语音键」的映射改成该输入法要求的组合键。
     ///
     ///   豆包：长按 **右 Alt**（VK_RMENU = 0xA5）
@@ -1725,6 +1760,7 @@ internal sealed class Backend : IDisposable
             "setLog" => SetLog(a0),
             "setKeepEventLog" => SetKeepEventLog(a0),
             "setImeProfile" => SetImeProfile(a0),
+            "setDriverFree" => SetDriverFreeMode(a0),
             "setAutoSwitchDriver" => SetAutoSwitchDriver(a0),
             "setAutoKeepMic" => SetAutoKeepMic(a0),
             "checkCaptureDevice" => CheckCaptureDevice(),

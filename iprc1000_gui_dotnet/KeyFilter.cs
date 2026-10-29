@@ -566,6 +566,15 @@ internal sealed class KeyFilter : IDisposable
     public void ApplyButton(string bid, bool pressed, string src = "rawinput")
     {        try { OnButton?.Invoke(bid, pressed); } catch { }
 
+        // ★ 2026-10-29 无驱动模式：按住语音键期间吞掉遥控器自带的 31 Hz 幽灵 `m`。
+        //   必须在这里（两种按键来源共用的漏斗）而不是注入路径 —— 幽灵键是**遥控器自己发的**，
+        //   跟我们注入了什么无关。
+        if (bid == "voice")
+        {
+            if (pressed) GhostGuard.Arm(Environment.TickCount64);
+            else GhostGuard.Disarm();
+        }
+
         // ★ 鼠标模式：方向键 / 确认 / info 交给 MouseEngine 接管（它有自己的线程按 tick 下发位移）。
         //   必须在键盘映射**之前**分流，而且**不能**登记进 _heldButtons ——
         //   那会把鼠标动作塞进键盘的「整份报告」，反而发出真的按键。

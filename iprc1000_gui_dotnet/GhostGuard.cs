@@ -1,0 +1,185 @@
+using System.Runtime.InteropServices;
+
+namespace Iprc1000Adapter;
+
+/// <summary>
+/// **无驱动模式**的幽灵键抑制（2026-10-29）。
+///
+/// 背景：遥控器是标准蓝牙键盘。按住语音键时，它会以约 31 Hz 连发 `m` ——
+/// 装上 WinUHid 并把设备驱动切成「普通 HID 设备」后，系统不再把它当键盘，这个 `m` 就没了。
+/// 但有些机器**装不了驱动**（无管理员、杀软拦截、受限镜像）。这个类是给那种情况的降级方案：
+///
+///   保持键盘 + 用低级键盘钩子**只在按住语音键期间**吞掉 `m`。
+///
+/// 为什么只在按住期间吞：
+///   LL 钩子拿不到"这个键来自哪个设备"，所以不能长期吞 `m`（否则用户真打 m 就打不出来）。
+///   而"按住语音键"是明确的、用户可见的状态，这个窗口内吞 `m` 在语义上是安全的
+///   （人不可能一边按住语音键一边打 m）。
+///
+/// 已知代价（不掩饰）：
+///   1. **输入法可能不认**：IME 会过滤 SendInput 注入的按键，所以无驱动模式下
+///      "按住语音键触发输入法"这条链路**可能不生效**；按键映射到普通程序仍然可用。
+///   2. 钩子本身可被反作弊检测 —— 所以本模式**默认关闭**，且提示"仅建议无联机游戏的机器"。
+///   3. ETW 与 HID 之间有几十毫秒的先后差，第一两个 `m` 可能漏进去（见 Swallowed / 面板可观测）。
+/// </summary>
+internal static class GhostGuard
+{
+    private const int WH_KEYBOARD_LL = 13;
+    private const int WM_KEYDOWN = 0x0100;
+    private const int WM_SYSKEYDOWN = 0x0104;
+    private const int VK_M = 0x4D;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KBDLLHOOKSTRUCT
+    {
+        public uint vkCode;
+        public uint scanCode;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandle(string? lpModuleName);
+    [DllImport("user32.dll")]
+    private static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+    [DllImport("user32.dll")]
+    private static extern bool TranslateMessage(ref MSG lpMsg);
+    [DllImport("user32.dll")]
+    private static extern IntPtr DispatchMessage(ref MSG lpMsg);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSG { public IntPtr hwnd; public uint message; public IntPtr wParam; public IntPtr lParam; public uint time; public int ptX; public int ptY; }
+
+    /// <summary>总开关：只有"无驱动模式"才置 true。</summary>
+    public static volatile bool Enabled;
+
+    private static volatile bool _armed;
+    private static long _armedAt;
+    private static volatile int _graceGen;
+
+    private static IntPtr _hook;
+    private static Thread? _thread;
+    private static HookProc? _proc;   // 必须保住引用，否则会被 GC 回收 → 钩子崩
+
+    /// <summary>被吞掉的 `m` 次数（面板可观测；0 且按住语音键有 m 漏出时说明窗口没抢到）。</summary>
+    public static long Swallowed;
+
+    public static bool Running => _hook != IntPtr.Zero;
+
+    public static void Start()
+    {
+        if (_hook != IntPtr.Zero) return;
+        _thread = new Thread(() =>
+        {
+            _proc = HookCallback;
+            _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(null), 0);
+            if (_hook == IntPtr.Zero)
+            {
+                Safe.Note($"GHOST 钩子安装失败（错误 {Marshal.GetLastWin32Error()}）");
+                return;
+            }
+            Safe.Note("GHOST 幽灵键抑制已启用（仅按住语音键期间吞 m）");
+            while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
+            {
+                TranslateMessage(ref msg);
+                DispatchMessage(ref msg);
+            }
+        })
+        { IsBackground = true, Name = "ghost-guard" };
+        _thread.SetApartmentState(ApartmentState.STA);
+        _thread.Start();
+
+        // ★ 2026-10-29：`SetWindowsHookEx` 在新线程里执行，这里必须**等它装完**再返回，
+        //   否则调用方立刻查 `Running` 会拿到 false（自检就会误报"安装失败"）。
+        for (var i = 0; i < 100 && _hook == IntPtr.Zero; i++) Thread.Sleep(10);
+    }
+
+    public static void Stop()
+    {
+        Enabled = false;
+        _armed = false;
+        if (_hook != IntPtr.Zero) { try { UnhookWindowsHookEx(_hook); } catch { } _hook = IntPtr.Zero; }
+    }
+
+    /// <summary>语音键按下 → 开始吞 m。</summary>
+    public static void Arm(long nowMs)
+    {
+        if (!Enabled) return;
+        _armedAt = nowMs;
+        _armed = true;
+        _graceGen++;      // 取消任何待执行的 Disarm
+    }
+
+    /// <summary>语音键松开 → 宽限一小段时间后停止（尾巴上的重复仍会来）。</summary>
+    public static void Disarm()
+    {
+        if (!Enabled) return;
+        var gen = ++_graceGen;
+        Task.Delay(400).ContinueWith(_ =>
+        {
+            if (gen == _graceGen) _armed = false;   // 期间又按下过就不 disarm
+        });
+    }
+
+    /// <summary>
+    /// **自检**（不动设备驱动）：只启钩子 + 武装 3 秒，期间由调用方注入若干 `m`，
+    /// 返回被吞掉的数量。用途：验证钩子本身能不能拦住 `m`（`--ghost-test`）。
+    /// </summary>
+    public static int SelfTest()
+    {
+        Enabled = true;
+        Start();
+        if (!Running) return -1;
+        var before = Swallowed;
+        Arm(Environment.TickCount64);
+        // 注入 3 个 m（自身也会走 LL 钩子，正好用来验证"能不能拦"）
+        for (var i = 0; i < 3; i++)
+        {
+            keybd_event(0x4D, 0, 0, UIntPtr.Zero);
+            keybd_event(0x4D, 0, 2 /*KEYEVENTF_KEYUP*/, UIntPtr.Zero);
+            Thread.Sleep(120);
+        }
+        Thread.Sleep(200);
+        _armed = false;
+        Stop();
+        return (int)(Swallowed - before);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+    private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        try
+        {
+            if (nCode >= 0 && Enabled && _armed)
+            {
+                // 安全阀：万一"松开"事件丢了（遥控器断连），15 秒后自动解除，避免 m 永远打不出来
+                if (Environment.TickCount64 - _armedAt > 15000) { _armed = false; }
+                else
+                {
+                    var msg = wParam.ToInt32();
+                    if (msg is WM_KEYDOWN or WM_SYSKEYDOWN)
+                    {
+                        var info = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
+                        if (info.vkCode == VK_M)
+                        {
+                            Swallowed++;
+                            return (IntPtr)1;      // 吞掉：不传给后续（包括输入法）
+                        }
+                    }
+                }
+            }
+        }
+        catch { }
+        return CallNextHookEx(_hook, nCode, wParam, lParam);
+    }
+}
