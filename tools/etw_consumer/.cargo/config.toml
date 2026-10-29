@@ -1,0 +1,18 @@
+# 静态链接 C 运行时（CRT）。
+#
+# 为什么：
+#   Rust 的 MSVC 目标默认按 /MD 动态链接 CRT —— 产物会依赖 **VCRUNTIME140.dll**。
+#   而 vcruntime140.dll 属于 **VC++ 2015-2022 可再发行包**，干净的 Windows 上不一定有
+#   （很多机器是靠别的软件顺带装上的）。
+#
+#   语音桥（etw_consumer.exe）是独立进程：一旦缺这个 dll 就启动失败，
+#   而按键事件也是它经 UDP 转发给主程序的 —— 表现会是"**语音没声音、按键也没反应**"。
+#
+#   静态链接后，exe 不再依赖任何外部运行库，只剩系统自带的 kernel32/advapi32/ntdll 等。
+#   代价：exe 略大一点（几百 KB），换来"拷过去就能跑"。
+#
+# 验证方法：
+#   解析 PE 导入表，确认不再出现 VCRUNTIME140.dll（见 tools/check_pe_deps.py）。
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
