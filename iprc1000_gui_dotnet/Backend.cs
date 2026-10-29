@@ -490,6 +490,15 @@ internal sealed class Backend : IDisposable
     /// </summary>
     private void AutoSwitchDriver()
     {
+        // ★★ 2026-10-29（用户实测踩到）：无驱动模式要求**遥控器保持键盘**，
+        //   而这里会在每次启动时强制把它切成"非键盘" —— 等于把用户的设置推翻。
+        //   面板里会显示"遥控器已被系统当作普通 HID 设备"，用户以为开关没生效。
+        if (Settings.DriverFreeMode)
+        {
+            _driverNote = "无驱动模式：已跳过自动切换，遥控器保持键盘（幽灵 m 由钩子吞掉）";
+            DeviceLog("无驱动模式：跳过自动切驱动");
+            return;
+        }
         if (!Settings.AutoSwitchDriver) return;
         if (!Env.IsAdmin()) { _driverNote = "需要管理员权限才能自动切换驱动"; return; }
         if (!Env.RemoteStillKeyboard())
@@ -557,6 +566,13 @@ internal sealed class Backend : IDisposable
         AutoSelectKeySource();                          // ① 保护优先（幂等：只在需要时才真切）
 
         if (!stillKb) return;
+        // ★★ 2026-10-29：无驱动模式要**保持键盘** —— 这里原来一看到"仍是键盘"就切回非键盘，
+        //   重启后会把用户的设置推翻（实测：开了无驱动、重启又变回 HID-compliant）。
+        if (Settings.DriverFreeMode)
+        {
+            _driverNote = "无驱动模式：遥控器保持键盘（重连后也不切换）";
+            return;
+        }
         if (!Settings.AutoSwitchDriver) return;
         if (now < _driverBackoffUntil) return;
         if (!Env.IsAdmin())
@@ -1479,6 +1495,10 @@ internal sealed class Backend : IDisposable
         else GhostGuard.Stop();
 
         var (ok, msg) = Env.SetDeviceDriver(want);   // true=还原键盘，false=普通 HID
+        // 结果同时写进 _driverNote：toast 一闪就没了，而"到底切没切成功"必须能回头看
+        _driverNote = (want ? "无驱动模式：" : "标准模式：") + msg;
+        DeviceLog((ok ? "✓ " : "★ ") + _driverNote);
+        _probeAt = DateTime.MinValue;
         return Env.Json(new { ok, driverFree = want,
             message = (want
                 ? "已切到无驱动模式：遥控器保持键盘，按住语音键期间会吞掉它自带的 m。"
