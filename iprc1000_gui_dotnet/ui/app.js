@@ -1214,6 +1214,92 @@ async function captureOneKeyAndAdd() {
   }
 }
 
+/* ── 插入按键的弹框（2026-10-30）──────────────────────────────
+   用户要的是「弹出一个框，按键 或 选一个」，不是底部 toast。
+   两种方式都能用：按键盘（自动录入）/ 从下拉列表选常用键。 */
+let _keyModalOpen = false;
+
+const KEY_PICK_LIST = [
+  ['Esc', '27'], ['Enter', '13'], ['Tab', '9'], ['空格', '32'], ['退格', '8'], ['Delete', '46'],
+  ['Home', '36'], ['End', '35'], ['PgUp', '33'], ['PgDn', '34'],
+  ['↑', '38'], ['↓', '40'], ['←', '37'], ['→', '39'],
+  ['F1', '112'], ['F2', '113'], ['F3', '114'], ['F4', '115'], ['F5', '116'], ['F6', '117'],
+  ['F7', '118'], ['F8', '119'], ['F9', '120'], ['F10', '121'], ['F11', '122'], ['F12', '123'],
+  ['Ctrl+C', '17,67'], ['Ctrl+V', '17,86'], ['Ctrl+A', '17,65'], ['Ctrl+S', '17,83'],
+  ['Ctrl+Z', '17,90'], ['Ctrl+X', '17,88'], ['Ctrl+Y', '17,89'],
+  ['Ctrl+Shift+S', '17,16,83'], ['Win+L', '91,76'], ['Alt+Tab', '18,9'],
+];
+
+function addKeyStep(vks, label) {
+  const st = defStep('keys');
+  st.vks = vks;
+  st.sym = label;
+  MAC.steps.push(st);
+  renderMacroPane();
+  toast('已加入步骤：' + label, 3500);
+}
+
+function closeKeyModal() {
+  _keyModalOpen = false;
+  const m = $('#keyModal');
+  if (m) m.classList.add('hide');
+  try { B.cancelKeyCapture(); } catch (e) { }
+}
+
+async function openKeyModal() {
+  const m = $('#keyModal');
+  if (!m) { toast('弹框没找到', 3000); return; }
+  m.classList.remove('hide');
+  _keyModalOpen = true;
+  const status = $('#keyModalStatus');
+  if (status) status.textContent = '等待按键…（5 秒没按就只能从下面选）';
+
+  // 下拉填一次
+  const sel = $('#keyModalPick');
+  if (sel && !sel.dataset.filled) {
+    KEY_PICK_LIST.forEach(([name, v]) => {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = name;
+      sel.appendChild(o);
+    });
+    sel.onchange = () => {
+      const v = sel.value;
+      if (!v) return;
+      const vks = String(v).split(',').map(Number);
+      const label = sel.options[sel.selectedIndex].textContent;
+      addKeyStep(vks, label);
+      closeKeyModal();
+    };
+    sel.dataset.filled = '1';
+  }
+  if (sel) sel.value = '';
+
+  // 取消按钮
+  const cancel = $('#keyModalCancel');
+  if (cancel) cancel.onclick = () => { closeKeyModal(); toast('已取消', 2500); };
+
+  // 启动按键捕获
+  let r;
+  try { r = JSON.parse(await B.beginKeyCapture()); }
+  catch (e) { if (status) status.textContent = '启动失败：' + e.message; return; }
+  if (!r.ok) { if (status) status.textContent = r.message; return; }
+
+  for (let n = 0; n < 55; n++) {
+    if (!_keyModalOpen) return;
+    await new Promise((res) => setTimeout(res, 100));
+    try {
+      const t = JSON.parse(await B.takeKeyCapture());
+      if (t.ok) {
+        addKeyStep(t.vks, t.label);
+        closeKeyModal();
+        return;
+      }
+      if (!t.capturing) { if (status) status.textContent = '已取消'; return; }
+    } catch (e) { if (status) status.textContent = '失败：' + e.message; return; }
+  }
+  if (status) status.textContent = '超时了 —— 可以从下面的列表里选';
+}
+
 function bindMacroAdd() {
   const add = $('#macAdd');
   if (add) {
@@ -1223,7 +1309,8 @@ function bindMacroAdd() {
         if (MAC.steps.length >= 50) { toast('一个宏最多 50 步', 4000); return; }
         // ★「+ 按键」**直接录键**：弹提示 → 按一下 → 自动加步骤（带键名）。
         //   不再是"先加空步骤再点 ⌨ 改"——那一步多余，而且用户会以为要手动填。
-        if (t === 'keys') { await captureOneKeyAndAdd(); return; }
+        // ★ 用户明确要「点插入按键弹出一个框」（不是底部 toast）
+        if (t === 'keys') { await openKeyModal(); return; }
         MAC.steps.push(defStep(t));
         renderMacroPane();
       };
@@ -2411,9 +2498,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.155',
+      version: '1.2.156',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.155（构建于 2026-10-30 15:26）',
+      versionLine: 'v1.2.156（构建于 2026-10-30 15:32）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

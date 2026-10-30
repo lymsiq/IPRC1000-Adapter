@@ -570,3 +570,20 @@ body[data-page="keys"] .rail .device .remote{display:none}
 .card-merge>.panel{border-radius:0;margin:0}
 .card-merge>.panel:first-child{border-radius:12px 12px 0 0}
 .card-merge>.panel:last-child{border-radius:0 0 12px 12px;border-top:1px dashed var(--line)}
+
+/* ── 插入按键的弹框（2026-10-30）────────────────────────────
+   用户明确要「点插入按键弹出一个框」，而不是底部 toast。
+   独立于那个大的快捷键设置弹窗（#comboModal）。 */
+#keyModal{position:fixed;inset:0;z-index:70;display:flex;align-items:center;
+  justify-content:center;background:rgba(23,32,45,.38);backdrop-filter:blur(2px)}
+#keyModal.hide{display:none}
+.key-box{width:340px;background:var(--bg1,#fff);border-radius:14px;padding:18px;
+  box-shadow:0 12px 40px rgba(0,0,0,.2);text-align:center}
+.key-box-title{font-size:16px;font-weight:700;color:var(--txt);margin-bottom:8px}
+.key-box-hint{font-size:12px;color:var(--txt2);line-height:1.6;margin-bottom:12px}
+.key-box-status{padding:14px 10px;border:1.5px dashed #4A7DFF;border-radius:10px;
+  color:#4A7DFF;font-weight:700;font-size:13px;margin-bottom:12px;min-height:22px}
+.key-box-or{font-size:11px;color:var(--txt3);margin:12px 0 6px}
+.key-box select{width:100%;padding:8px 10px;border:1px solid var(--line,#DDE3EC);
+  border-radius:8px;background:var(--bg,#fff);color:var(--txt);font-family:inherit;font-size:13px}
+.key-box-foot{margin-top:14px}

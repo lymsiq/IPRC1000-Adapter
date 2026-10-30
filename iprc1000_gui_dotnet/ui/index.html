@@ -209,6 +209,20 @@
 
       <!-- 组合键编辑弹窗：点某一行时弹出 -->
       <div class="mask hide" id="comboMask">
+        <!-- 插入按键的弹框：点「+ 按键」弹出来，按键 或 从列表选 -->
+        <div class="modal hide" id="keyModal">
+          <div class="key-box">
+            <div class="key-box-title">插入按键</div>
+            <div class="key-box-hint">按下要用的键（组合键：先按住 Ctrl/Alt/Shift/Win，再按主键）</div>
+            <div class="key-box-status" id="keyModalStatus">等待按键…</div>
+            <div class="key-box-or">或者从下面选：</div>
+            <select id="keyModalPick"><option value="">选择按键…</option></select>
+            <div class="key-box-foot">
+              <button class="btn ghost" id="keyModalCancel">取消</button>
+            </div>
+          </div>
+        </div>
+
         <div class="modal" id="comboModal">
           <div class="modal-head">
             <div class="modal-thumb" id="comboThumb"></div>
