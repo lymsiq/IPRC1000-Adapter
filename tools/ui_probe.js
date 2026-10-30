@@ -272,7 +272,9 @@ const PROBE = () => {
           r.hasGlobal = !!document.getElementById('comboGlobal');
           r.hasKmgo = !!document.getElementById('kmgoBtn');
           r.hasSpeed = !!document.getElementById('macSpeed');
-          document.querySelector('#macAdd button[data-add="keys"]').click();
+          // ★ 不点「+ 按键」了：它现在是**直接录键**（异步捕获），探针点它会卡在等待。
+          //   改成用 wait / paste 测"步骤能加出来"。
+          r.keysBtn = !!document.querySelector('#macAdd button[data-add="keys"]');
           document.querySelector('#macAdd button[data-add="wait"]').click();
           r.steps = document.querySelectorAll('#macSteps .cm-step').length;
           r.noteMacro = (document.getElementById('comboNote').textContent || '').trim().slice(0, 6);
@@ -305,8 +307,8 @@ const PROBE = () => {
         else if (!tp.textVisible || !tp.keyHidden) bad('切到「文本」页签时面板显隐不对');
         else if (tp.slots !== 10) bad('文本槽位数不是 10：' + tp.slots);
         else if (tp.textH < 80) bad('文本输入框太矮（' + tp.textH + 'px），可能没渲染出来');
-        else if (!tp.macroVisible || tp.steps !== 2 || tp.stepsAfterDel !== 2)
-          bad('宏步骤增删异常：加 3 步后删 1 步，期望 2 步，实得 ' + tp.stepsAfterDel);
+        else if (!tp.macroVisible || tp.steps !== 1 || tp.stepsAfterDel !== 1)
+          bad('宏步骤增删异常：加 2 步后删 1 步，期望 1 步，实得 ' + tp.stepsAfterDel);
         else if (!tp.hasRec) bad('宏页签缺少「开始录制」按钮');
         else if (!tp.hasClear) bad('宏页签缺少「清空」按钮（重新配宏时只能逐条删）');
         else if (!tp.hasGlobal) bad('弹窗缺少「全局」开关');

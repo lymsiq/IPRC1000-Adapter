@@ -1180,13 +1180,50 @@ async function importKmgoText(text) {
   toast(msg + ' · 已追加到步骤列表', 10000);
 }
 
+/* 「+ 按键」= 直接录一个键。
+   · 单键：按 Esc → 一步 Esc
+   · 组合：按住 Ctrl/Alt/Shift/Win 再按主键 → 一步 Ctrl+A
+   · 想要「按下 / 抬起」分开：加完步骤把下拉改成「按下」/「抬起」即可
+   按下的键**会被吞掉**（不会打到当前窗口），5 秒不按自动取消。 */
+async function captureOneKeyAndAdd() {
+  let r;
+  try { r = JSON.parse(await B.beginKeyCapture()); }
+  catch (e) { toast('启动录入失败：' + e.message, 6000); return; }
+  if (!r.ok) { toast(r.message, 6000); return; }
+  toast(r.message + '（5 秒内按，按完自动加入步骤）', 6000);
+  try {
+    for (let n = 0; n < 50; n++) {
+      await new Promise((res) => setTimeout(res, 120));
+      const t = JSON.parse(await B.takeKeyCapture());
+      if (t.ok) {
+        const st = defStep('keys');
+        st.vks = t.vks;
+        st.sym = t.label;
+        MAC.steps.push(st);
+        renderMacroPane();
+        toast('已加入步骤：' + t.label, 4000);
+        return;
+      }
+      if (!t.capturing) { toast('录入已取消', 4000); return; }
+    }
+    toast('录入超时（5 秒没按键）', 5000);
+    try { await B.cancelKeyCapture(); } catch (e) { }
+  } catch (e) {
+    toast('录入失败：' + e.message, 6000);
+    try { await B.cancelKeyCapture(); } catch (e2) { }
+  }
+}
+
 function bindMacroAdd() {
   const add = $('#macAdd');
   if (add) {
     add.querySelectorAll('button[data-add]').forEach((b) => {
-      b.onclick = () => {
+      b.onclick = async () => {
         const t = b.dataset.add;
         if (MAC.steps.length >= 50) { toast('一个宏最多 50 步', 4000); return; }
+        // ★「+ 按键」**直接录键**：弹提示 → 按一下 → 自动加步骤（带键名）。
+        //   不再是"先加空步骤再点 ⌨ 改"——那一步多余，而且用户会以为要手动填。
+        if (t === 'keys') { await captureOneKeyAndAdd(); return; }
         MAC.steps.push(defStep(t));
         renderMacroPane();
       };
@@ -2374,9 +2411,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.154',
+      version: '1.2.155',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.154（构建于 2026-10-30 15:14）',
+      versionLine: 'v1.2.155（构建于 2026-10-30 15:26）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
