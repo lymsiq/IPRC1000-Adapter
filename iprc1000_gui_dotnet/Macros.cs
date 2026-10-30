@@ -609,8 +609,12 @@ internal static class Macros
         // ① 编号 ↔ 绑定值 往返（错一个就会"绑到别的宏上"）
         Check(RefOf(1) == -1001 && RefOf(101) == -1101, "编号→绑定值",
               "文本1=-1001 · 宏101=-1101");
-        Check(FindByRef(RefOf(101)) is null, "未存在的编号返回 null（不是抛异常）",
-              $"RefOf(101)={RefOf(101)}");
+        // ★ 用**越界值**测，不要用"某个具体编号" —— 原来写的是 RefOf(101)，
+        //   而用户真的建了一个编号 101 的宏，这条断言就失败了（自检不能依赖用户数据）。
+        //   -999 和 -2000 都在合法引用区间（-1000..-1999）之外，必然返回 null。
+        Check(FindByRef(-999) is null && FindByRef(-2000) is null,
+              "越界引用返回 null（不是抛异常）",
+              $"FindByRef(-999)={FindByRef(-999)?.Num.ToString() ?? "null"} · FindByRef(-2000)={FindByRef(-2000)?.Num.ToString() ?? "null"}");
 
         // ② 区间判定：鼠标动作（-1..-6）不能被当成宏引用，反之亦然
         var mouseOk = !IsRef(-1) && !IsRef(-6) && !IsRef(0);

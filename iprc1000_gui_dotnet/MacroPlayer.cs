@@ -137,8 +137,36 @@ internal static class MacroPlayer
 
     private static bool Start(int num)
     {
-        var it = Macros.FindByNum(num);
-        if (it is null) { Log($"MACRO {num} 找不到（可能已被删除）"); return false; }
+        var it0 = Macros.FindByNum(num);
+        if (it0 is null) { Log($"MACRO {num} 找不到（可能已被删除）"); return false; }
+
+        // ★★ 2026-10-30 修：**文本项被当成"没有步骤"拒绝了**。
+        //   文本的设计是"只有一步 paste 的宏"，但它的内容在 `Text` 字段，`Steps` 是空的。
+        //   而绑定值 `-1001..-1010`（文本）和 `-1101..`（宏）走的是**同一条**动作分支
+        //   ⇒ 一个绑了文本的按键按下去，Start() 判 Steps==0 直接 return false，
+        //   表现为"按了完全没反应"（日志默认还关着）。
+        //   这里把文本项**转成一个真正的单步宏**再走后面的流程，其余逻辑零改动。
+        var it = it0;
+        if (it0.Kind == Macros.KindText)
+        {
+            if (string.IsNullOrEmpty(it0.Text))
+            {
+                Log($"TEXT {num} 内容是空的");
+                Notify?.Invoke($"文本 {num} 是空的 —— 先在「文本」页签里填内容");
+                return false;
+            }
+            it = new Macros.Item
+            {
+                Num = it0.Num,
+                Name = it0.Name,
+                Kind = Macros.KindSeq,      // 对播放器来说它就是一步宏
+                Loop = 1,
+                Steps = new List<Macros.Step>
+                {
+                    new() { Type = Macros.StepPaste, Slot = it0.Num, OnFail = "stop" },
+                },
+            };
+        }
         if (it.Steps.Count == 0) { Log($"MACRO {num} 没有步骤"); return false; }
 
         lock (Gate)

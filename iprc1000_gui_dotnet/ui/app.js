@@ -1255,7 +1255,7 @@ function bindMacroAdd() {
    ★ 必须重置：否则上一个键编辑到一半的文本/步骤会串到这个键上，一保存就写错。 */
 async function initComboPanes(it) {
   COMBO_KEY = it.id;
-  COMBO_TAB = 'key';
+
 
   // 全局开关的状态来自后端（isGlobal），每次打开都要重置 ——
   // 不重置的话，上一个键勾着"全局"，这个键会看起来也是全局
@@ -2362,9 +2362,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.149',
+      version: '1.2.150',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.149（构建于 2026-10-30 14:54）',
+      versionLine: 'v1.2.150（构建于 2026-10-30 14:38）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
