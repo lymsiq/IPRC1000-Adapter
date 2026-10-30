@@ -227,12 +227,12 @@ internal sealed class MainForm : Form
             Load += (_, _) =>
         {
             if (WindowState == FormWindowState.Minimized) Hide();
-            // F10 = 开始录制（常驻注册；F12 只在录制期间持有，见 SetStopHotkey）
+            // F10 = 开始录制（常驻注册；F11 只在录制期间持有，见 SetStopHotkey）
             try
             {
                 _recHotkeyStart = RegisterHotKey(Handle, HK_REC_START, 0, VK_F10);
                 Safe.Note(_recHotkeyStart
-                    ? "HOTKEY 录制热键已就绪：F10 开始录制（录制中 F12 结束）"
+                    ? "HOTKEY 录制热键已就绪：F10 开始录制（录制中 F11 结束）"
                     : "HOTKEY F10 注册失败（可能被别的程序占用）");
             }
             catch { }
@@ -442,7 +442,12 @@ internal sealed class MainForm : Form
         StartupMark("WebView2 环境就绪（Chromium 已起来，这段通常是启动里最大的一块）");
 
         web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
-        web.CoreWebView2.Settings.AreDevToolsEnabled = !_selftest;
+        // ★★ 永远禁用 DevTools（2026-10-30 修）。
+        //   原来写的是 `!_selftest`：自检时禁用、**正常运行时是开着的** ——
+        //   而 F12 是 Chromium 的 DevTools 快捷键，用户按了 F12 就弹出开发者工具。
+        //   （1.1.0 的审查结论就要求"DevTools 必须禁用"，当时没落到代码里。）
+        //   自检时反而**要**打开：--macro-test 要看控制台输出。
+        web.CoreWebView2.Settings.AreDevToolsEnabled = _selftest;
         web.CoreWebView2.Settings.IsStatusBarEnabled = false;
         web.CoreWebView2.WebMessageReceived += OnWebMessage;
 
@@ -887,15 +892,16 @@ internal sealed class MainForm : Form
 
 
     // ── 录制热键（2026-10-30）────────────────────────────────────────────
-    // F10 = 开始录制，F12 = 结束录制。用户要求：录制时人在目标程序里，
+    // F10 = 开始录制，F11 = 结束录制。用户要求：录制时人在目标程序里，
     // 不可能回来点按钮。
     // ⚠ 全局热键是**独占**的：注册后其他程序收不到这个键。
     //   F10 影响小（浏览器按它只出菜单栏），所以常驻；
-    //   F12 影响大（浏览器开发者工具），只在**录制期间**注册，停止就注销。
+    //   F12 会直接弹出 DevTools（已禁用 DevTools，但 F11 更稳妥），改用 **F11**，
+    //   也只在**录制期间**注册，停止就注销。
     private const int WM_HOTKEY = 0x0312;
     private const int HK_REC_START = 0xA001;
     private const int HK_REC_STOP = 0xA002;
-    private const int VK_F10 = 0x79, VK_F12 = 0x7B;
+    private const int VK_F10 = 0x79, VK_F11 = 0x7A;   // F11 = 结束录制（F12 是 DevTools/开发者工具的键）
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
@@ -905,12 +911,12 @@ internal sealed class MainForm : Form
 
     private bool _recHotkeyStart, _recHotkeyStop;
 
-    /// <summary>注册/注销「结束录制」热键。只在录制期间持有 F12。</summary>
+    /// <summary>注册/注销「结束录制」热键。只在录制期间持有 F11。</summary>
     private void SetStopHotkey(bool on)
     {
         try
         {
-            if (on && !_recHotkeyStop) _recHotkeyStop = RegisterHotKey(Handle, HK_REC_STOP, 0, VK_F12);
+            if (on && !_recHotkeyStop) _recHotkeyStop = RegisterHotKey(Handle, HK_REC_STOP, 0, VK_F11);
             else if (!on && _recHotkeyStop) { UnregisterHotKey(Handle, HK_REC_STOP); _recHotkeyStop = false; }
         }
         catch { }
@@ -929,7 +935,7 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>
-    /// F12：结束录制。**不自动把步骤塞进宏** —— 那需要知道"加到哪个键的宏里"，
+    /// F11：结束录制。**不自动把步骤塞进宏** —— 那需要知道"加到哪个键的宏里"，
     /// 而这时用户可能连弹窗都没开。步骤留在缓冲里，回界面点按钮取回。
     /// </summary>
     private void StopRecordByHotkey()

@@ -77,6 +77,16 @@ internal static class Macros
         public int Ms { get; set; } = 80;
         /// <summary>Type=paste：引用哪个文本槽（1..10）</summary>
         public int Slot { get; set; } = 1;
+        /// <summary>
+        /// 按键的**触发方式**：`both` = 按下+抬起（默认）/ `down` = 只按下不抬 /
+        /// `up` = 只抬起。
+        ///
+        /// 为什么要分开：KeymouseGo 的事件就是 `key down` / `key up` 两条，
+        /// 合并成一条就表达不了"按住 A 期间做别的事"。手动加步骤时可以随时改。
+        /// ⚠ `down` 之后若没有对应的 `up`，宏结束时会统一放开（见 ReleaseAll），
+        ///   不会永久卡键。
+        /// </summary>
+        public string Press { get; set; } = "both";
 
         // ── 鼠标类步骤（2026-10-30 录制功能加入）──────────────────────────
 
@@ -545,6 +555,7 @@ internal static class Macros
             type = s.Type,
             vks = s.Vks,
             holdMs = s.HoldMs,
+            press = s.Press,
             ms = s.Ms,
             slot = s.Slot,
             target = s.Target,
@@ -574,6 +585,7 @@ internal static class Macros
             Type = s.Type,
             Vks = (int[])s.Vks.Clone(),
             HoldMs = s.HoldMs,
+            Press = s.Press,
             Ms = s.Ms,
             Slot = s.Slot,
             Target = s.Target,

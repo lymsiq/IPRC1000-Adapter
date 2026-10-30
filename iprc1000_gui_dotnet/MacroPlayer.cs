@@ -410,6 +410,20 @@ internal static class MacroPlayer
     {
         var f = _filter;
         if (f is null) return false;
+        // 按下 / 抬起可以分开录（对齐 KeymouseGo 的 `key down` / `key up`）
+        var press = st.Press ?? "both";
+        if (press == "up")
+        {
+            // 只抬起：把这一槽里按住的键全部放下（宏里的键共用 BidKey 一个槽）
+            f.InjectTransient(BidKey, Array.Empty<int>(), false);
+            return true;
+        }
+        if (press == "down")
+        {
+            // 只按下：登记并保持，等到后续 `up` 步骤或宏结束时的 ReleaseAll
+            f.InjectTransient(BidKey, st.Vks, true);
+            return true;
+        }
         f.InjectTransient(BidKey, st.Vks, true);
         var held = SleepCancellable(Scaled(st.HoldMs));
         f.InjectTransient(BidKey, Array.Empty<int>(), false);

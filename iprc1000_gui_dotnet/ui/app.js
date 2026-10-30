@@ -838,6 +838,7 @@ function defStep(t) {
     type: t,
     vks: t === 'keys' ? [17, 65] : [],
     holdMs: 30,
+    press: 'both',      // both = 按下+抬起 / down = 只按下 / up = 只抬起
     ms: t === 'wait' ? 300 : 0,
     slot: TXT.slot || 1,
     // ★ 点击默认"在光标位置"：这是用户加"+ 点击"时的本意。
@@ -871,8 +872,13 @@ function renderMacroPane() {
         // 手填 `17,65` 对普通用户是不可能的 —— 那等于这个输入框没用。
         pm = `<input data-i="${i}" data-f="vks" value="${(s.vks || []).join(',')}" placeholder="点 ⌨ 后按键">`
            + `<button class="kcap" data-cap="${i}" title="按一下要用的键，自动填入（组合键：先按住 Ctrl 等再按主键）">⌨</button>`
+           + `<select class="w72" data-i="${i}" data-f="press" title="这个步骤是按下、还是抬起">`
+           + `<option value="both"${(s.press || 'both') === 'both' ? ' selected' : ''}>按下+抬起</option>`
+           + `<option value="down"${s.press === 'down' ? ' selected' : ''}>按下</option>`
+           + `<option value="up"${s.press === 'up' ? ' selected' : ''}>抬起</option>`
+           + `</select>`
            + `<input class="w56" data-i="${i}" data-f="holdMs" type="number" min="10" max="2000"`
-           + ` value="${s.holdMs || 30}" title="按住多少毫秒再抬起">`;
+           + ` value="${s.holdMs || 30}" title="按住多少毫秒再抬起（只在「按下+抬起」时用）">`;
       } else if (t === 'wait') {
         pm = `<input class="w56" data-i="${i}" data-f="ms" type="number" min="0" max="10000" value="${s.ms || 0}">`
            + `<span class="rd">毫秒</span>`;
@@ -2362,9 +2368,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.150',
+      version: '1.2.151',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.150（构建于 2026-10-30 14:38）',
+      versionLine: 'v1.2.151（构建于 2026-10-30 15:00）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
