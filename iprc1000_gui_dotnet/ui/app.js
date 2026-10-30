@@ -1000,20 +1000,10 @@ async function loadMacro(num) {
     MAC.num = it.num || 0;
     // ★ 必须把所有字段都带上。漏一个（比如 x/y）就会变成"打开弹窗→保存→坐标没了"，
     //   这种静默数据丢失比直接报错难查得多。
-    MAC.steps = (it.steps || []).map((s) => ({
-      type: s.type,
-      vks: s.vks || [],
-      holdMs: s.holdMs,
-      ms: s.ms,
-      slot: s.slot,
-      target: s.target,
-      x: s.x, y: s.y, x2: s.x2, y2: s.y2,
-      sw: s.sw, sh: s.sh,
-      winTitle: s.winTitle,
-      button: s.button,
-      pasteKey: s.pasteKey,
-      onFail: s.onFail,
-    }));
+    // ★ 用展开而不是逐个映射：原来逐个列字段，新加 `press`/`sym` 时漏了两个 ——
+    //   表现是"打开宏再保存，按下/抬起丢失"和"显示 17,65 而不是 Ctrl+A"。
+    //   展开以后后端加字段，前端自动跟上，不会再出现"字段没对齐"。
+    MAC.steps = (it.steps || []).map((s) => ({ ...s }));
     // 0 = 一直循环，必须原样保留（`it.loop || 1` 会把 0 变成 1，静默改掉用户的设置）
     MAC.loop = Number.isFinite(it.loop) && it.loop >= 0 ? it.loop : 1;
     const nm = $('#macName');
@@ -2373,9 +2363,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.152',
+      version: '1.2.153',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.152（构建于 2026-10-30 14:40）',
+      versionLine: 'v1.2.153（构建于 2026-10-30 15:08）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

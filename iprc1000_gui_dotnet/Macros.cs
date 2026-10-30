@@ -530,6 +530,8 @@ internal static class Macros
                 type = s.Type,
                 vks = s.Vks,
                 holdMs = s.HoldMs,
+                press = s.Press,          // ★ 必须和 StepsToJson 对齐，否则打开宏再保存会丢这个字段
+                sym = s.Vks.Length > 0 ? Keys.FormatSymbols(s.Vks) : "",
                 ms = s.Ms,
                 slot = s.Slot,
                 target = s.Target,
