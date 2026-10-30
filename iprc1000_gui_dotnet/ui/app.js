@@ -837,6 +837,9 @@ function defStep(t) {
   return {
     type: t,
     vks: t === 'keys' ? [17, 65] : [],
+    // ★ 新加的步骤也要有键名，否则显示会 fallback 到 VK 码（实测踩过）。
+    //   加载宏 / 录制 / 导入都会从后端拿到 `sym`，只有手动「+ 按键」走 defStep。
+    sym: t === 'keys' ? 'Ctrl+A' : '',
     holdMs: 30,
     press: 'both',      // both = 按下+抬起 / down = 只按下 / up = 只抬起
     ms: t === 'wait' ? 300 : 0,
@@ -855,9 +858,17 @@ function defStep(t) {
   };
 }
 
+/* 任何步骤如果缺 sym（老数据 / 手工构造），现算一个 —— 显示侧兜底，不写回 */
+function ensureSyms(steps) {
+  (steps || []).forEach((st) => {
+    if (!st.sym && st.vks && st.vks.length) st.sym = st.vks.join(',');
+  });
+}
+
 function renderMacroPane() {
   const wrap = $('#macSteps');
   if (!wrap) return;
+  try { ensureSyms(MAC.steps); } catch (e) { }
 
   if (!MAC.steps.length) {
     wrap.innerHTML = '<div class="note">还没有步骤。点下面按钮加一步；「按键」里的键码用逗号分隔，如 <b>17,65</b> = Ctrl+A。</div>';
@@ -2363,9 +2374,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.153',
+      version: '1.2.154',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.153（构建于 2026-10-30 15:08）',
+      versionLine: 'v1.2.154（构建于 2026-10-30 15:14）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
