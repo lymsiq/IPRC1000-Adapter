@@ -870,8 +870,13 @@ function renderMacroPane() {
       if (t === 'keys') {
         // ⌨ 按钮：点一下、然后按键，自动把键码填进去。
         // 手填 `17,65` 对普通用户是不可能的 —— 那等于这个输入框没用。
-        pm = `<input data-i="${i}" data-f="vks" value="${(s.vks || []).join(',')}" placeholder="点 ⌨ 后按键">`
-           + `<button class="kcap" data-cap="${i}" title="按一下要用的键，自动填入（组合键：先按住 Ctrl 等再按主键）">⌨</button>`
+        // ★ 显示**键名**（Ctrl+A），不是 VK 码（17,65）——
+        //   实测有人按了 ⌨ 之后看到还是 `17,65`，以为录入没反应。
+        //   VK 码放进隐藏 input，真正的编辑入口就是右边的 ⌨。
+        const sym = s.sym || (s.vks || []).join(',');
+        pm = `<span class="vkname" title="VK 码：${(s.vks || []).join(',') || '（未设置）'}">${sym || '（未设置）'}</span>`
+           + `<input type="hidden" data-i="${i}" data-f="vks" value="${(s.vks || []).join(',')}">`
+           + `<button class="kcap" data-cap="${i}" title="点这里再按一下键，自动填入（组合键：先按住 Ctrl 等再按主键）">⌨</button>`
            + `<select class="w72" data-i="${i}" data-f="press" title="这个步骤是按下、还是抬起">`
            + `<option value="both"${(s.press || 'both') === 'both' ? ' selected' : ''}>按下+抬起</option>`
            + `<option value="down"${s.press === 'down' ? ' selected' : ''}>按下</option>`
@@ -958,7 +963,7 @@ function renderMacroPane() {
           const t = JSON.parse(await B.takeKeyCapture());
           if (t.ok) {
             const st = MAC.steps[i];
-            if (st) { st.vks = t.vks; renderMacroPane(); }
+            if (st) { st.vks = t.vks; st.sym = t.label; renderMacroPane(); }
             toast('已录入：' + t.label, 4000);
             return;
           }
@@ -1051,10 +1056,10 @@ function syncRecButton() {
   if (!btn) return;
   if (REC_TIMER) return;                       // 倒计时中，别覆盖文案
   const st = state || {};
-  const idleHint = '录键盘 + 鼠标点击/拖拽；不录自由移动，也不录遥控器按键；F10 开始 · F12 结束';
+  const idleHint = '录键盘 + 鼠标点击/拖拽；不录自由移动，也不录遥控器按键；F10 开始 · F11 结束';
   if (st.recording) {
     btn.dataset.on = '1'; btn.textContent = '停止录制';
-    if (hint) hint.textContent = '录制中…做完按 F12 或点「停止录制」';
+    if (hint) hint.textContent = '录制中…做完按 F11 或点「停止录制」';
   } else if ((st.pendingRecord || 0) > 0) {
     btn.dataset.on = '0'; btn.textContent = `取回刚录的（${st.pendingRecord} 个事件）`;
     if (hint) hint.textContent = '刚录完还没取回，点按钮把这批操作变成步骤';
@@ -1067,7 +1072,7 @@ function syncRecButton() {
 async function recToggle() {
   const btn = $('#recBtn'), hint = $('#recHint');
   if (!btn) return;
-  const idleHint = '录键盘 + 鼠标点击/拖拽；不录自由移动，也不录遥控器按键；F10 开始 · F12 结束';
+  const idleHint = '录键盘 + 鼠标点击/拖拽；不录自由移动，也不录遥控器按键；F10 开始 · F11 结束';
 
   // ① 倒计时中再点 = 取消
   if (REC_TIMER) {
@@ -1101,7 +1106,7 @@ async function recToggle() {
     return;
   }
 
-  // ②b 已录完但还没取回（典型场景：按 F12 停的）→ 直接把这批操作变成步骤
+  // ②b 已录完但还没取回（典型场景：按 F11 停的）→ 直接把这批操作变成步骤
   if (((state && state.pendingRecord) || 0) > 0) {
     btn.disabled = true;
     try {
@@ -1756,7 +1761,7 @@ async function refresh() {
   renderKeys(state);
   renderEnv(state);
   renderMouse(state);
-  // 录制状态可能是热键（F10/F12）改的，按钮文字要跟着走
+  // 录制状态可能是热键（F10/F11）改的，按钮文字要跟着走
   try { syncRecButton(); } catch (e) { }
 }
 
@@ -2368,9 +2373,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.151',
+      version: '1.2.152',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.151（构建于 2026-10-30 15:00）',
+      versionLine: 'v1.2.152（构建于 2026-10-30 14:40）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

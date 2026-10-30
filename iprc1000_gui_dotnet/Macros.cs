@@ -556,6 +556,9 @@ internal static class Macros
             vks = s.Vks,
             holdMs = s.HoldMs,
             press = s.Press,
+            // 给界面显示用：`17,65` → `Ctrl+A`。不存盘（每次现算），
+            // 否则改了 Keys.FormatSymbols 的输出会和历史数据不一致。
+            sym = s.Vks.Length > 0 ? Keys.FormatSymbols(s.Vks) : "",
             ms = s.Ms,
             slot = s.Slot,
             target = s.Target,

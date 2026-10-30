@@ -394,6 +394,11 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
 .cm-step .kcap{flex:0 0 24px;width:24px;border:1px solid var(--line);background:var(--bg2);
   color:var(--txt2);border-radius:6px;cursor:pointer;font-size:12px;padding:3px 0;
   font-family:inherit;line-height:1}
+/* 键名显示（替代原来的 VK 码输入框）—— 用户按 ⌨ 录入后应该看到 `Ctrl+A` 而不是 `17,65` */
+.cm-step .vkname{flex:1;min-width:0;padding:4px 7px;border:1px solid var(--line);border-radius:7px;
+  background:var(--bg2);color:var(--txt);font-family:ui-monospace,Consolas,Menlo,monospace;
+  font-size:11.5px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cm-step .vkname:hover{border-color:var(--blue)}
 .cm-step .kcap:hover{border-color:var(--blue);color:var(--blue)}
 .cm-step .rd{font-size:11.5px;color:var(--txt3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 失败策略：点一下在「停 / 跳」之间切 */
