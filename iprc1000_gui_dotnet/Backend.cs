@@ -1282,26 +1282,6 @@ internal sealed class Backend : IDisposable
              + ",\"steps\":" + Macros.StepsToJson(r.Steps) + "}";
     }
 
-    /// <summary>
-    /// 罗技 Lua 导入。**失败也要把警告带回去** —— 用户需要知道"哪几行被跳过了"，
-    /// 否则导入出来的宏少了几步，他只会觉得"这功能不准"。
-    /// </summary>
-    private string ImportLuaCmd(string a0)
-    {
-        var r = LuaImport.Parse(a0);
-        var warnJson = System.Text.Json.JsonSerializer.Serialize(r.Warnings);
-        if (!r.Ok)
-        {
-            var msg = r.Error.Length > 0 ? r.Error : "没解析出可执行步骤";
-            return "{\"ok\":false,\"message\":" + System.Text.Json.JsonSerializer.Serialize(msg)
-                 + ",\"warnings\":" + warnJson + "}";
-        }
-        return "{\"ok\":true,\"message\":"
-             + System.Text.Json.JsonSerializer.Serialize($"已导入 {r.Steps.Count} 步")
-             + ",\"warnings\":" + warnJson
-             + ",\"steps\":" + Macros.StepsToJson(r.Steps) + "}";
-    }
-
     public string StartBridge()
     {
         lock (_lock)
@@ -2565,8 +2545,6 @@ internal sealed class Backend : IDisposable
             "takeRecord" => TakeRecordCmd(),
             "cancelRecord" => CancelRecordCmd(),
             "recordState" => RecordStateCmd(),
-            // 罗技 Lua 导入（2026-10-30）：只做子集提取，不做 Lua 解释器
-            "importLua" => ImportLuaCmd(a0),
             // KeymouseGo 脚本导入（2026-10-30）：旧版数组格式 .txt
             "importKmgo" => ImportKmgoCmd(a0),
             // 宏执行速度（百分比）

@@ -717,76 +717,7 @@ internal static class Macros
         Check(b3.Count == 1 && b3[0].Type == StepClick, "录制转换：手抖 3px 仍算点击（不是拖拽）",
               $"步数={b3.Count} 类型={b3.FirstOrDefault()?.Type}");
 
-        // ⑩ Lua 导入（罗技）：能剥壳、能转组合键、按住循环必须报错并指行号
-        var lua1 = "function OnEvent(event, arg)\n"
-                 + "  if event == \"MOUSE_BUTTON_PRESSED\" and arg == 5 then\n"
-                 + "    PressAndReleaseMouseButton(1)\n"
-                 + "    Sleep(80)\n"
-                 + "  end\n"
-                 + "end";
-        var lr1 = LuaImport.Parse(lua1);
-        Check(lr1.Ok && lr1.Steps.Count == 2
-              && lr1.Steps[0].Type == StepClick && lr1.Steps[0].Target == "cursor"
-              && lr1.Steps[1].Type == StepWait && lr1.Steps[1].Ms == 80,
-              "Lua 导入：剥掉 OnEvent + if 外壳",
-              $"步数={lr1.Steps.Count}(期望2) · 首步={lr1.Steps.FirstOrDefault()?.Type}"
-              + $" · 次步={lr1.Steps.Skip(1).FirstOrDefault()?.Type}");
-
-        var lua2 = "function OnEvent(event, arg)\n"
-                 + "  if event == \"MOUSE_BUTTON_PRESSED\" and arg == 5 then\n"
-                 + "    while IsMouseButtonPressed(5) do\n"
-                 + "      PressAndReleaseMouseButton(1)\n"
-                 + "      Sleep(60)\n"
-                 + "    end\n"
-                 + "  end\n"
-                 + "end";
-        var lr2 = LuaImport.Parse(lua2);
-        Check(!lr2.Ok && lr2.Error.Contains("while") && lr2.Error.Contains("第"),
-              "Lua 导入：按住循环必须报错并指行号（不能静默导入）",
-              lr2.Ok ? "竟然导入成功了（危险）" : lr2.Error[..Math.Min(lr2.Error.Length, 38)]);
-
-        var lua3 = "PressKey(29)\nPressKey(\"c\")\nSleep(50)\nReleaseKey(\"c\")\nReleaseKey(29)";
-        var lr3 = LuaImport.Parse(lua3);
-        Check(lr3.Ok && lr3.Steps.Count == 1 && lr3.Steps[0].Type == StepKeys
-              && lr3.Steps[0].Vks.Contains(0x11) && lr3.Steps[0].Vks.Contains(0x43)
-              && lr3.Steps[0].HoldMs == 50,
-              "Lua 导入：scancode 29=Ctrl，组合只闭合一步、Sleep 变按住时长",
-              $"步数={lr3.Steps.Count}(期望1) · hold={lr3.Steps.FirstOrDefault()?.HoldMs}(期望50)");
-
-        // ⑪ Lua 键码表必须与**官方 Appendix A** 一致。
-        //    这几个锚点是专门挑出来的：`0x47`(num7) 曾经被错映射成 Home、
-        //    方向键（0x148 等）整段缺失 —— 这类错误导入后表现为"按键不对"，
-        //    用户根本不会想到是映射表的问题，所以必须钉死。
-        var anchors = new (int sc, int vk, string note)[]
-        {
-            (0x01, 0x1B, "escape"),
-            (0x1e, 0x41, "a"),
-            (0x39, 0x20, "spacebar"),
-            (0x29, 0xC0, "tilde"),
-            (0x2a, 0x10, "lshift"),
-            (0x47, 0x67, "num7（**不是** Home）"),
-            (0x52, 0x60, "num0（**不是** Delete）"),
-            (0x148, 0x26, "up（扩展键）"),
-            (0x153, 0x2E, "delete（扩展键）"),
-            (0x15b, 0x5B, "lgui（扩展键）"),
-        };
-        var keyOk = true;
-        var keyBad = "八个锚点全部一致";
-        foreach (var (sc, vk, note) in anchors)
-        {
-            var got = LuaImport.VkOfScancode(sc);
-            if (got != vk) { keyOk = false; keyBad = $"{note}: 期望 0x{vk:X2} 实得 0x{got:X2}"; break; }
-        }
-        // 键名同样抽查几个官方写法（"spacebar"/"tilde"/"num7" 都是社区脚本不这么写的）
-        var nameOk = LuaImport.VkOfKeyName("spacebar") == 0x20
-                     && LuaImport.VkOfKeyName("tilde") == 0xC0
-                     && LuaImport.VkOfKeyName("num7") == 0x67
-                     && LuaImport.VkOfKeyName("lbracket") == 0xDB
-                     && LuaImport.VkOfKeyName("space") == 0x20;      // 别名也要认
-        Check(keyOk && nameOk, "Lua 键码表与官方 Appendix A 一致",
-              keyOk && nameOk ? "scancode 10 锚点 + 键名 5 项（含别名）" : (keyOk ? "键名不符" : keyBad));
-
-        // ⑫ KeymouseGo 脚本导入 —— 用**用户真实脚本的片段**做断言（不是编的数据）
+        // ⑩ KeymouseGo 脚本导入 —— 用**用户真实脚本的片段**做断言（不是编的数据）
         //    真实片段看着别扭但很有代表性：第一条是 mouse up（没有配对的 down）、
         //    键盘是 13=Return、坐标是绝对像素 2996,206。
         var km1 = "[\n"
@@ -822,7 +753,7 @@ internal static class Macros
         Check(!kr3.Ok && kr3.Error.Contains("新版"), "KeymouseGo 导入：新版流程控制要明确拒绝",
               kr3.Ok ? "竟然导入成功了" : kr3.Error[..Math.Min(kr3.Error.Length, 30)]);
 
-        // ⑬ StateJson 必须是**合法 JSON**：它被直接拼进 getState 返回给界面，
+        // ⑪ StateJson 必须是**合法 JSON**：它被直接拼进 getState 返回给界面，
         //   格式错一个字符就是整个界面白屏（和 v1.1.0 那次同级别的故障）。
         var sj = StateJson();
         var sjOk = true;

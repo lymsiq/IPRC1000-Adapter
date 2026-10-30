@@ -245,15 +245,6 @@ SRC_REQUIRED = [
     ("坐标点击前校验窗口", "iprc1000_gui_dotnet/MacroPlayer.cs", "WrongWindow(st)"),
     ("粘贴键可配（终端场景）", "iprc1000_gui_dotnet/MacroPlayer.cs", "DoPaste(st.Slot, st.PasteKey"),
     ("失败策略 skip 要留痕", "iprc1000_gui_dotnet/MacroPlayer.cs", "已设置为跳过继续"),
-    # ★ v1.2.142：罗技 Lua 导入（只做子集提取）
-    ("Lua 拒绝按住循环", "iprc1000_gui_dotnet/LuaImport.cs", "按住期间持续循环"),
-    ("Lua 支持 scancode 数字", "iprc1000_gui_dotnet/LuaImport.cs", "VkOfScancode"),
-    ("Lua Sleep 变按住时长", "iprc1000_gui_dotnet/LuaImport.cs", "pendingHoldMs += ms"),
-    ("Lua 无坐标点击走光标位", "iprc1000_gui_dotnet/LuaImport.cs", "Target = \"cursor\""),
-    # ★ v1.2.143：按官方 Appendix A 校准键码表（之前小键盘被错映射成方向键）
-    ("Lua 扩展键 scancode 表", "iprc1000_gui_dotnet/LuaImport.cs", "0x148 => 0x26"),
-    ("Lua 小键盘不是方向键", "iprc1000_gui_dotnet/LuaImport.cs", "0x47 => 0x67"),
-    ("Lua 左键默认不上报的提示", "iprc1000_gui_dotnet/LuaImport.cs", "EnablePrimaryMouseButtonEvents"),
     # ★ v1.2.144：全局按键（语音键跨配置组统一）
     #   这四条防的是"语音键随配置组漂移"——实测过：首页切成微信输入法，
     #   切到鼠标模式又变回右 Alt，用户报的就是这个。
@@ -986,7 +977,7 @@ def verify(zp=None, title="主包", self_contained=False, source_checks=True):
         # 界面上会按 action 名动态调用的命令（新增时**必须**同步加进 Dispatch）
         doc_actions = ["installCable", "installUhid", "relaunchAdmin", "setDefaultMic",
                        "startBridge", "releaseAllKeys", "resetKeys", "repairDriver",
-                       "exportDriverDiag", "exportWinuhid", "setDeviceDriver", "runSetup", "importKmgo", "importLua", "setMacroSpeed"]
+                       "exportDriverDiag", "exportWinuhid", "setDeviceDriver", "runSetup", "importKmgo", "setMacroSpeed"]
         miss = [a for a in doc_actions if a not in disp]
         ok = not miss
         ok_all &= ok

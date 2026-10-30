@@ -260,7 +260,7 @@
                    （否则点「开始录制」那一下会被自己录进去） -->
               <div class="cm-row">
                 <button class="btn" id="recBtn" data-on="0">开始录制</button>
-                <span class="cm-hint" id="recHint">录键盘 + 鼠标点击/拖拽；不录自由移动</span>
+                <span class="cm-hint" id="recHint">录键盘 + 鼠标点击/拖拽；不录自由移动，也不录遥控器按键</span>
               </div>
               <div class="cm-row">
                 <input class="cm-name" id="macName" maxlength="40" placeholder="宏名称（可选）">
@@ -286,11 +286,9 @@
                 <!-- 清空：重新配一个宏时不用逐条删。会二次确认（误点丢很多步很难受） -->
                 <button class="btn ghost" id="macClear" title="清空所有步骤，重新配">清空</button>
               </div>
-              <!-- 脚本导入：罗技 Lua / KeymouseGo .txt，两者都只做"线性序列"提取 -->
+              <!-- 脚本导入：KeymouseGo .txt（只做线性序列提取）-->
               <div class="cm-row">
-                <button class="btn ghost" id="luaBtn">导入 .lua（罗技）</button>
                 <button class="btn ghost" id="kmgoBtn">导入 .txt（KeymouseGo）</button>
-                <input type="file" id="luaFile" accept=".lua" style="display:none">
                 <input type="file" id="kmgoFile" accept=".txt" style="display:none">
                 <span class="cm-hint">只认线性序列；循环/流程控制会明确报错并给行号</span>
               </div>

@@ -59,7 +59,7 @@ internal static class Keymaps
 ///  10 = **鼠标模式变成一个配置组**（Kind="mouse"）；方块键从"硬编码的特殊键"
 ///       改为**普通可绑定键**，出厂值 = 动作值 `切换配置组`（`KeyAct.SwitchGroup`）。
     /// </summary>
-    private const int Ver_ = 11;
+    private const int Ver_ = 12;
 
     private sealed class Store
     {
@@ -237,6 +237,26 @@ internal static class Keymaps
                                 s.Global["voice"] = (int[])vv.Clone();
                         }
                         s.Ver = 11;
+                        Save(s);
+                    }
+
+                    // ★ Ver 12（2026-10-30）：`power` 改回 **Win+L 锁屏**。
+                    //   1.2.138 重冻结出厂默认时它被设成了 **Ctrl+F4（关闭当前文档）** ——
+                    //   这是个危险的默认值：遥控器放茶几上误按一下，正在编辑的文档就直接关了，
+                    //   没存盘就丢数据；而且"电源"和"关文档"之间没有任何直觉关系。
+                    //   只改**恰好还是旧默认值**的组，用户自己配成别的就不碰。
+                    if (s.Ver < 12)
+                    {
+                        int[] old1 = { 0x11, 0x73 };              // Ctrl+F4
+                        int[] old2 = { 0x11, 0x10, 0x57 };        // Ctrl+Shift+W（WorkBuddy 组旧值）
+                        int[] nu = { 0x5B, 0x4C };                // Win+L
+                        foreach (var g in s.Groups)
+                        {
+                            if (!g.Map.TryGetValue("power", out var pv) || pv is null) continue;
+                            if (pv.SequenceEqual(old1) || pv.SequenceEqual(old2))
+                                g.Map["power"] = (int[])nu.Clone();
+                        }
+                        s.Ver = 12;
                         Save(s);
                     }
                     return s;
@@ -578,7 +598,7 @@ internal static class Defaults
     public static Dictionary<string, int[]> Plain() => new()
     {
         // 遥控器按键        注入的键
-        ["power"] = new[] { 0x11, 0x73 },              // Ctrl+F4  关闭当前标签/文档
+        ["power"] = new[] { 0x5B, 0x4C },              // Win+L  锁屏（不是关文档！）
         ["back"] = new[] { 0x08 },                     // Backspace（浏览器/资源管理器=后退）
         ["menu"] = new[] { 0x5D },                     // 菜单键（右键菜单，多数程序都认）
         ["exit"] = new[] { 0x1B },                     // Esc
@@ -637,7 +657,7 @@ internal static class Defaults
     public static Dictionary<string, int[]> WorkBuddy() => new()
     {
         //  遥控器键        注入                      WorkBuddy 动作
-        ["power"]        = new[] { 0x11, 0x10, 0x57 },   // Ctrl+Shift+W  关闭当前页
+        ["power"]        = new[] { 0x5B, 0x4C },          // Win+L  锁屏
         ["back"]         = new[] { 0x11, 0x50 },         // Ctrl+P        打开文件搜索
         ["menu"]         = new[] { 0x11, 0x4F },         // Ctrl+O        全局搜索
         ["exit"]         = new[] { 0x1B },               // Esc           停止生成

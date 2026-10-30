@@ -697,7 +697,7 @@ function closeCombo() {
     try { B.cancelRecord(); } catch (e) { }
     rb.dataset.on = '0';
     rb.textContent = '开始录制';
-    if ($('#recHint')) $('#recHint').textContent = '录键盘 + 鼠标点击/拖拽；不录自由移动';
+    if ($('#recHint')) $('#recHint').textContent = '录键盘 + 鼠标点击/拖拽；不录自由移动，也不录遥控器按键';
   }
   $('#comboMask').classList.add('hide');
 }
@@ -995,7 +995,7 @@ let REC_TIMER = null;
 async function recToggle() {
   const btn = $('#recBtn'), hint = $('#recHint');
   if (!btn) return;
-  const idleHint = '录键盘 + 鼠标点击/拖拽；不录自由移动';
+  const idleHint = '录键盘 + 鼠标点击/拖拽；不录自由移动，也不录遥控器按键';
 
   // ① 倒计时中再点 = 取消
   if (REC_TIMER) {
@@ -1087,30 +1087,6 @@ async function importKmgoText(text) {
   toast(msg + ' · 已追加到步骤列表', 10000);
 }
 
-/* ── 罗技 Lua 导入 ──
-   后端只做"子集提取"：线性序列能转，`while IsMouseButtonPressed(...)` 这类
-   「按住期间持续循环」会**明确报错并指行号**（那是连点/压枪，不是我们能执行的模型）。
-   失败时的原因必须完整显示 —— 只弹一句"导入失败"等于没给信息。 */
-async function importLuaText(text) {
-  let r;
-  try { r = JSON.parse(await B.importLua(text)); }
-  catch (e) { toast('导入失败：' + e.message, 6000); return; }
-
-  if (!r.ok) {
-    toast(r.message || '导入失败', 10000);
-    if (r.warnings && r.warnings.length) console.warn('Lua 导入警告：\n' + r.warnings.join('\n'));
-    return;
-  }
-  MAC.steps = MAC.steps.concat(r.steps);
-  renderMacroPane();
-  let msg = r.message;
-  if (r.warnings && r.warnings.length) {
-    msg += `，${r.warnings.length} 条警告（细节看控制台）`;
-    console.warn('Lua 导入警告：\n' + r.warnings.join('\n'));
-  }
-  toast(msg + ' · 已追加到步骤列表', 9000);
-}
-
 function bindMacroAdd() {
   const add = $('#macAdd');
   if (add) {
@@ -1153,21 +1129,6 @@ function bindMacroAdd() {
 
   const recBtn = $('#recBtn');
   if (recBtn) recBtn.onclick = () => recToggle();
-
-  // 罗技 Lua 导入：前端读文件内容，后端只做解析（不碰文件系统）
-  const luaBtn = $('#luaBtn'), luaFile = $('#luaFile');
-  if (luaBtn && luaFile) {
-    luaBtn.onclick = () => luaFile.click();
-    luaFile.onchange = async () => {
-      const f = luaFile.files && luaFile.files[0];
-      if (!f) return;
-      let text = '';
-      try { text = await readFileSmart(f); }
-      catch (e) { toast('读文件失败：' + e.message, 6000); return; }
-      luaFile.value = '';
-      await importLuaText(text);
-    };
-  }
 
   // KeymouseGo .txt 导入
   const kmgoBtn = $('#kmgoBtn'), kmgoFile = $('#kmgoFile');
@@ -2318,9 +2279,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.146',
+      version: '1.2.147',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.146（构建于 2026-10-30 13:12）',
+      versionLine: 'v1.2.147（构建于 2026-10-30 13:02）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
