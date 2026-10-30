@@ -156,33 +156,38 @@ internal static class KeyCapture
                 if (msg is WM_KEYDOWN or WM_SYSKEYDOWN or WM_KEYUP or WM_SYSKEYUP)
                 {
                     var info = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
-                    if ((info.flags & LLKHF_INJECTED) == 0)
+                    if ((info.flags & LLKHF_INJECTED) != 0)
                     {
-                        var vk = (int)info.vkCode;
-                        var down = msg is WM_KEYDOWN or WM_SYSKEYDOWN;
+                        // ★ **注入的键必须放行** —— 弹框开着时如果还按着遥控器键触发宏，
+                        //   宏发的 Ctrl+V 会被这里吞掉，表现为"其他按键都无法触发"（实测踩过）。
+                        return CallNextHookEx(_hook, nCode, wParam, lParam);
+                    }
 
-                        if (down)
+                    var vk = (int)info.vkCode;
+                    var down = msg is WM_KEYDOWN or WM_SYSKEYDOWN;
+
+                    if (down)
+                    {
+                        if (IsModifier(vk))
                         {
-                            if (IsModifier(vk))
+                            lock (Gate)
                             {
-                                lock (Gate)
-                                {
-                                    var n = NormMod(vk);
-                                    if (!_mods.Contains(n)) _mods.Add(n);
-                                }
-                            }
-                            else
-                            {
-                                lock (Gate)
-                                {
-                                    // 组合 = 已按住的修饰键 + 这一下主键
-                                    _result = _mods.Append(vk).Distinct().ToArray();
-                                }
+                                var n = NormMod(vk);
+                                if (!_mods.Contains(n)) _mods.Add(n);
                             }
                         }
-                        // ★ 捕获期间**全部吞掉**：不吞的话，用户为了录 Ctrl+S 会真的保存一次文件
-                        return (IntPtr)1;
+                        else
+                        {
+                            lock (Gate)
+                            {
+                                // 组合 = 已按住的修饰键 + 这一下主键
+                                _result = _mods.Append(vk).Distinct().ToArray();
+                            }
+                        }
                     }
+                    // ★ 只吞**真实按键**（不吞注入的）：不吞的话，
+                    //   用户为了录 Ctrl+S 会真的保存一次文件
+                    return (IntPtr)1;
                 }
             }
             catch { }
