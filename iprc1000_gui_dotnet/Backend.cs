@@ -1262,12 +1262,16 @@ internal sealed class Backend : IDisposable
         if (MacroPlayer.IsRunning)
             return Env.Json(new { ok = false, message = "宏正在播放，先停一下" });
         var ok = KeyCapture.Begin();
+        var err = KeyCapture.LastError;
         return Env.Json(new
         {
             ok,
+            captureError = err,
             message = ok
                 ? "请按下要用的键（组合键：先按住 Ctrl/Alt/Shift/Win，再按主键）"
-                : "按键钩子装不上（可能有安全软件拦截）",
+                : (err != 0
+                    ? $"按键钩子装不上（Win32 错误 {err}，多半被安全软件拦了）—— 请用下面的下拉选"
+                    : "按键钩子装不上 —— 请用下面的下拉选"),
         });
     }
 

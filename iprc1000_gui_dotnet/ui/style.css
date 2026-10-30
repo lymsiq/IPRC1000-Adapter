@@ -587,3 +587,6 @@ body[data-page="keys"] .rail .device .remote{display:none}
 .key-box select{width:100%;padding:8px 10px;border:1px solid var(--line,#DDE3EC);
   border-radius:8px;background:var(--bg,#fff);color:var(--txt);font-family:inherit;font-size:13px}
 .key-box-foot{margin-top:14px}
+/* 录键失败时把下拉高亮出来（不然用户以为整框都不可用） */
+.key-box select.attention{border-color:#4A7DFF;border-width:2px;
+  box-shadow:0 0 0 3px rgba(74,125,255,.18)}

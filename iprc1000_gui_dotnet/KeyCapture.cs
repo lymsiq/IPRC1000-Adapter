@@ -42,6 +42,11 @@ internal static class KeyCapture
 
     private static IntPtr _hook;
     private static HookProc? _proc;
+    // ★★ 标志「消息循环已经跑起来了」。低级钩子的回调**由消息循环分发** ——
+    //   如果消息循环还没启动就有人按键，回调根本不会被调用。
+    //   Recorder 能正常是因为它先倒计时 3 秒（消息循环早就跑了）；
+    //   而这里是"点按钮立刻等键"，所以必须显式等它就绪。
+    private static volatile bool _loopStarted;
     private static Thread? _thread;
     private static uint _tid;
     private static readonly object Gate = new();
@@ -51,6 +56,8 @@ internal static class KeyCapture
     private static DateTime _began;
 
     public static bool IsCapturing { get; private set; }
+    /// <summary>钩子装不上的 Win32 错误码（0 = 没失败过）。前端用来告诉用户原因。</summary>
+    public static int LastError { get; private set; }
 
     /// <summary>开始捕获。返回 false = 钩子装不上（安全软件拦截）。</summary>
     public static bool Begin()
@@ -61,6 +68,7 @@ internal static class KeyCapture
             _mods.Clear();
             _result = null;
             _began = DateTime.UtcNow;
+            _loopStarted = false;      // 让下面的等待有意义
             IsCapturing = true;
         }
 
@@ -69,7 +77,15 @@ internal static class KeyCapture
             _tid = GetCurrentThreadId();
             _proc = Callback;
             _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(null), 0);
-            if (_hook == IntPtr.Zero) { IsCapturing = false; return; }
+            if (_hook == IntPtr.Zero)
+            {
+                // ★ 记下 Win32 错误码：装不上的时候用户只知道"没反应"，
+                //   有了错误码才知道是被安全软件拦了还是别的。
+                LastError = Marshal.GetLastWin32Error();
+                IsCapturing = false;
+                return;
+            }
+            _loopStarted = true;      // 消息循环即将开始，Begin() 可以返回了
             while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
             {
                 TranslateMessage(ref msg);
@@ -80,8 +96,12 @@ internal static class KeyCapture
         _thread.SetApartmentState(ApartmentState.STA);
         _thread.Start();
 
-        for (var i = 0; i < 100 && _hook == IntPtr.Zero && IsCapturing; i++) Thread.Sleep(5);
-        return _hook != IntPtr.Zero;
+        // ★ 必须等**消息循环就绪**（不只是钩子装上）：低级钩子的回调由消息循环分发，
+        //   消息循环没跑起来时按的键会被**完全丢掉**（实测就是"按了没反应"）。
+        for (var i = 0; i < 100 && !_loopStarted && IsCapturing; i++) Thread.Sleep(5);
+        if (!_loopStarted) return false;
+        Thread.Sleep(30);              // 再给消息循环一点启动余量
+        return true;
     }
 
     /// <summary>取结果并停止。返回 null = 用户还没按（继续等）或已超时。</summary>
@@ -100,6 +120,7 @@ internal static class KeyCapture
     public static void Stop()
     {
         IsCapturing = false;
+        _loopStarted = false;
         lock (Gate) { _result = null; _mods.Clear(); }
         try { if (_hook != IntPtr.Zero) UnhookWindowsHookEx(_hook); } catch { }
         _hook = IntPtr.Zero;

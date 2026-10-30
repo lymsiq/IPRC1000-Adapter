@@ -1246,6 +1246,13 @@ function closeKeyModal() {
   try { B.cancelKeyCapture(); } catch (e) { }
 }
 
+/* 录键失败/超时时，让下拉**明显可点** —— 否则用户看到"没反应"就走了，
+   而其实下拉一直能用。 */
+function highlightPick() {
+  const sel = $('#keyModalPick');
+  if (sel) { sel.classList.add('attention'); sel.focus(); }
+}
+
 async function openKeyModal() {
   const m = $('#keyModal');
   if (!m) { toast('弹框没找到', 3000); return; }
@@ -1282,7 +1289,7 @@ async function openKeyModal() {
   let r;
   try { r = JSON.parse(await B.beginKeyCapture()); }
   catch (e) { if (status) status.textContent = '启动失败：' + e.message; return; }
-  if (!r.ok) { if (status) status.textContent = r.message; return; }
+  if (!r.ok) { if (status) status.textContent = r.message; highlightPick(); return; }
 
   for (let n = 0; n < 55; n++) {
     if (!_keyModalOpen) return;
@@ -1294,10 +1301,15 @@ async function openKeyModal() {
         closeKeyModal();
         return;
       }
-      if (!t.capturing) { if (status) status.textContent = '已取消'; return; }
-    } catch (e) { if (status) status.textContent = '失败：' + e.message; return; }
+      if (!t.capturing) {
+        if (status) status.textContent = '没收到按键 —— 请从下面的下拉选一个';
+        highlightPick();
+        return;
+      }
+    } catch (e) { if (status) status.textContent = '失败：' + e.message; highlightPick(); return; }
   }
-  if (status) status.textContent = '超时了 —— 可以从下面的列表里选';
+  if (status) status.textContent = '超时了 —— 请从下面的下拉选';
+  highlightPick();
 }
 
 function bindMacroAdd() {
@@ -2498,9 +2510,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.156',
+      version: '1.2.157',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.156（构建于 2026-10-30 15:32）',
+      versionLine: 'v1.2.157（构建于 2026-10-30 15:30）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
