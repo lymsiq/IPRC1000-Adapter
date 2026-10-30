@@ -49,6 +49,16 @@ internal static class LuaImport
         var r = new Result();
         if (string.IsNullOrWhiteSpace(lua)) { r.Error = "脚本是空的"; return r; }
 
+        // ★ 大小上限：`Parse` 在 UI 线程上同步跑（WebMessageReceived → Dispatch），
+        //   几百 KB 的脚本会让窗口卡住。正常 Lua 脚本都是几 KB，512 KB 足够宽裕。
+        const int MaxChars = 512 * 1024;
+        if (lua.Length > MaxChars)
+        {
+            r.Error = $"脚本太大（{lua.Length / 1024} KB），上限 {MaxChars / 1024} KB —— "
+                    + "这不是正常的宏脚本，请确认选错文件了没有。";
+            return r;
+        }
+
         var lines = StripComments(lua).Replace("\r\n", "\n").Replace('\r', '\n')
                                       .Split('\n')
                                       .Select((t, i) => new Line(t, i + 1))

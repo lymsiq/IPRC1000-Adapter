@@ -1093,7 +1093,13 @@ internal sealed class Backend : IDisposable
     public string ResetKeys()
     {
         var n = Keymaps.ResetCurrent();
-        return Env.Json(new { ok = true, message = $"已把配置组「{n}」恢复为默认映射。" });
+        // ★ 说清"全局键不跟着恢复"：用户点了「恢复默认」却发现语音键没变，
+        //   会以为按钮没生效。全局键在顶层，本来就不属于任何配置组。
+        var gl = Keymaps.GlobalIds();
+        var tail = gl.Length > 0
+            ? $"（另有 {gl.Length} 个全局键不随之变化 —— 它们不隶属任何配置组）"
+            : "";
+        return Env.Json(new { ok = true, message = $"已把配置组「{n}」恢复为默认映射。{tail}" });
     }
 
     /// <summary>
@@ -2295,12 +2301,19 @@ internal sealed class Backend : IDisposable
             Keymaps.Set("voice", target);
         }
         Settings.ImeProfile = profile;
+        // ★ 作用范围要说实情：语音键是"全局"时才真的对所有配置组生效。
+        //   原来这里无条件写"（全局生效）"—— 一旦用户取消了全局，
+        //   那句话就是假的，用户切完配置组发现又变回去，只会觉得没生效。
+        var scope = Keymaps.IsGlobal("voice")
+            ? "所有配置组"
+            : "仅当前配置组 —— 建议在按键弹窗里把「语音」设为全局";
         return Env.Json(new { ok = true, applied = profile != "custom", imeProfile = profile,
             voiceNow = Keys.FormatSymbols(Keymaps.Get("voice") ?? Array.Empty<int>()),
             message = profile switch
             {
-                "doubao" => "已切到豆包：语音键 = 长按右 Alt。",
-                "wechat" => "已切到微信输入法：语音键 = 长按 Ctrl+Win（全局生效，无需切换默认输入法）。另请在微信输入法设置里把「麦克风」选成 CABLE Output。",
+                "doubao" => $"已切到豆包：语音键 = 长按右 Alt（{scope}）。",
+                "wechat" => $"已切到微信输入法：语音键 = 长按 Ctrl+Win（{scope}）。"
+                          + "另请在微信输入法设置里把「麦克风」选成 CABLE Output。",
                 _ => "已切到自定义：语音键映射不再自动改动。",
             } });
     }

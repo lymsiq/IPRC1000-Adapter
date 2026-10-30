@@ -501,6 +501,10 @@ internal static class Keymaps
         => JsonSerializer.Serialize(new { name = Current.Name, map = Current.Map },
             new JsonSerializerOptions { WriteIndented = true });
 
+    /// <summary>按键 id → 中文名（提示与日志用；找不到就原样返回 id）</summary>
+    private static string NameOfKey(string id)
+        => Keys.Table.FirstOrDefault(x => x.Id == id)?.Name ?? id;
+
     public static (bool ok, string msg) Import(string json)
     {
         try
@@ -510,19 +514,34 @@ internal static class Keymaps
             var map = n["map"]?.AsObject();
             if (map == null) return (false, "缺少 map 字段。");
             var d = new Dictionary<string, int[]>();
+            var skipped = new List<string>();
             foreach (var kv in map)
             {
+                // ★ 全局键的值**不能**写进组里：读的时候 `Get` 优先查 Global，
+                //   写进去也白写 —— 但用户会看到"导入成功了，值却没变"，
+                //   然后反复重试。明确跳过并告知，比静默吞掉好。
+                if (_s.Global.ContainsKey(kv.Key)) { skipped.Add(NameOfKey(kv.Key)); continue; }
+
                 var arr = kv.Value?.AsArray();
                 if (arr == null) continue;
                 d[kv.Key] = arr.Select(x => (int)(x?.GetValue<int>() ?? 0)).Where(x => x > 0).ToArray();
             }
-            if (d.Count == 0) return (false, "map 里没有有效按键。");
-            _s.Groups[_s.Active].Map = d;
-            _s.Groups[_s.Active].Kind = "custom";   // 导入进来的不是出厂默认了
-            if (n["name"]?.GetValue<string>() is { Length: > 0 } nm)
-                _s.Groups[_s.Active].Name = nm;
+            if (d.Count == 0 && skipped.Count == 0) return (false, "map 里没有有效按键。");
+
+            // 全部被跳过时**不要**清空当前组 —— 否则导入一个"只有全局键"的文件会把用户配置抹掉
+            if (d.Count > 0)
+            {
+                _s.Groups[_s.Active].Map = d;
+                _s.Groups[_s.Active].Kind = "custom";   // 导入进来的不是出厂默认了
+                if (n["name"]?.GetValue<string>() is { Length: > 0 } nm)
+                    _s.Groups[_s.Active].Name = nm;
+            }
             Save();
-            return (true, $"已导入 {d.Count} 个按键映射到当前配置组「{_s.Groups[_s.Active].Name}」。");
+
+            var tail = skipped.Count > 0
+                ? $"；{string.Join("、", skipped)} 是**全局键**，本次未应用 —— 它们不随配置组变化，请在按键弹窗里单独改"
+                : "";
+            return (true, $"已导入 {d.Count} 个按键映射到当前配置组「{_s.Groups[_s.Active].Name}」{tail}。");
         }
         catch (Exception e) { return (false, "导入失败：" + e.Message); }
     }

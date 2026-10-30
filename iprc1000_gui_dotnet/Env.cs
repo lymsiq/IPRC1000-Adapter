@@ -113,25 +113,12 @@ internal static class Env
         return list;
     }
 
-    /// <summary>当前使用的遥控器 MAC：**优先在线的那只**，其次第一只，最后回退出厂值。</summary>
-    public static string RemoteMac
-    {
-        get
-        {
-            var macs = PairedRemoteMacs();
-            foreach (var m in macs)
-            {
-                // BTHENUM 里有 DEV_<MAC> 且至少一个子实例在线 ⇒ 这一只在线
-                foreach (var top in SubKeys(Registry.LocalMachine, @"SYSTEM\CurrentControlSet\Enum\BTHENUM"))
-                {
-                    if (!top.ToLowerInvariant().Contains(m)) continue;
-                    foreach (var inst in SubKeys(Registry.LocalMachine, $@"SYSTEM\CurrentControlSet\Enum\BTHENUM\{top}"))
-                        if (DevNodeStarted($@"BTHENUM\{top}\{inst}")) return m;
-                }
-            }
-            return macs.Count > 0 ? macs[0] : LegacyRemoteMac;
-        }
-    }
+    // ★ 2026-10-30 审查删除：这里原来有个 `RemoteMac` 属性（"优先在线那只，其次第一只，
+    //   最后回退出厂值"），**全项目没有任何代码引用它** —— 是 v1.2.4 改"按名字动态识别"
+    //   之后留下的死代码。留着有两个害处：
+    //   ① 让人以为"程序在按某个固定 MAC 工作"（用户就因此怀疑有硬编码）
+    //   ② 那段兜底会把 LegacyRemoteMac 当成有效值返回，谁哪天用了就踩坑
+    //   现在识别只走 PairedRemoteMacs()（按设备名 IPRC 扫注册表），没有单值概念。
 
     /// <summary>这个 HID 顶层节点是不是遥控器的（不写死 PID；同名设备换一只也能认出来）</summary>
     private static bool IsRemoteHid(string lowTop)

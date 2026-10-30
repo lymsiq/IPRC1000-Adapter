@@ -420,10 +420,22 @@ internal static class Macros
             var it = _s.Items.FirstOrDefault(x => x.Num == num);
             if (it is null) return "找不到这一条";
             var isText = it.Kind == KindText;
-            if (isText) { it.Text = ""; it.Name = $"文本 {num}"; }   // 文本槽：清空而不是删条目（槽位固定）
-            else _s.Items.Remove(it);
+            if (isText)
+            {
+                // ★ 清空文本槽前先数一下有多少宏在引用它 —— 那些宏会在播放时
+                //   报「文本 N 是空的」，用户如果不知道有引用，会以为是宏坏了。
+                var users = _s.Items.Count(x => x.Kind == KindSeq
+                    && x.Steps.Any(s => s.Type == StepPaste && s.Slot == num));
+                it.Text = "";
+                it.Name = $"文本 {num}";
+                Save();
+                return users > 0
+                    ? $"文本 {num} 已清空。注意：有 {users} 个宏引用了它，那些宏执行到粘贴时会失败。"
+                    : $"文本 {num} 已清空";
+            }
+            _s.Items.Remove(it);
             Save();
-            return isText ? $"文本 {num} 已清空" : $"宏 {num} 已删除";
+            return $"宏 {num} 已删除";
         }
     }
 
