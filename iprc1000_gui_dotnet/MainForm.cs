@@ -224,7 +224,19 @@ internal sealed class MainForm : Form
         if (Settings.StartMinimized && !_e2e)
         {
             WindowState = FormWindowState.Minimized;
-            Load += (_, _) => { if (WindowState == FormWindowState.Minimized) Hide(); };
+            Load += (_, _) =>
+        {
+            if (WindowState == FormWindowState.Minimized) Hide();
+            // F10 = 开始录制（常驻注册；F12 只在录制期间持有，见 SetStopHotkey）
+            try
+            {
+                _recHotkeyStart = RegisterHotKey(Handle, HK_REC_START, 0, VK_F10);
+                Safe.Note(_recHotkeyStart
+                    ? "HOTKEY 录制热键已就绪：F10 开始录制（录制中 F12 结束）"
+                    : "HOTKEY F10 注册失败（可能被别的程序占用）");
+            }
+            catch { }
+        };
         }
 
         // ★★ 2026-10-29 进程拆分收尾：`--ui-client` 时宿主**只做 UI**，
@@ -874,6 +886,63 @@ internal sealed class MainForm : Form
     // ── Raw Input（WM_INPUT）+ 拦截器生命周期 ──
 
 
+    // ── 录制热键（2026-10-30）────────────────────────────────────────────
+    // F10 = 开始录制，F12 = 结束录制。用户要求：录制时人在目标程序里，
+    // 不可能回来点按钮。
+    // ⚠ 全局热键是**独占**的：注册后其他程序收不到这个键。
+    //   F10 影响小（浏览器按它只出菜单栏），所以常驻；
+    //   F12 影响大（浏览器开发者工具），只在**录制期间**注册，停止就注销。
+    private const int WM_HOTKEY = 0x0312;
+    private const int HK_REC_START = 0xA001;
+    private const int HK_REC_STOP = 0xA002;
+    private const int VK_F10 = 0x79, VK_F12 = 0x7B;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+    private bool _recHotkeyStart, _recHotkeyStop;
+
+    /// <summary>注册/注销「结束录制」热键。只在录制期间持有 F12。</summary>
+    private void SetStopHotkey(bool on)
+    {
+        try
+        {
+            if (on && !_recHotkeyStop) _recHotkeyStop = RegisterHotKey(Handle, HK_REC_STOP, 0, VK_F12);
+            else if (!on && _recHotkeyStop) { UnregisterHotKey(Handle, HK_REC_STOP); _recHotkeyStop = false; }
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// F10：开始录制。录制时用户人在目标程序里，不可能回来点按钮 —— 这就是加全局热键的原因。
+    /// 启动后**立刻持有 F12**，这样用户录完直接按 F12 就能停，不用切窗口。
+    /// </summary>
+    private void StartRecordByHotkey()
+    {
+        if (Recorder.IsRecording || MacroPlayer.IsRunning) return;
+        var msg = Recorder.Start();
+        SetStopHotkey(Recorder.IsRecording);
+        try { _tray.ShowBalloonTip(3000, Env.AppName, msg, ToolTipIcon.Info); } catch { }
+    }
+
+    /// <summary>
+    /// F12：结束录制。**不自动把步骤塞进宏** —— 那需要知道"加到哪个键的宏里"，
+    /// 而这时用户可能连弹窗都没开。步骤留在缓冲里，回界面点按钮取回。
+    /// </summary>
+    private void StopRecordByHotkey()
+    {
+        if (!Recorder.IsRecording) return;
+        var msg = Recorder.Stop();
+        SetStopHotkey(false);
+        var tail = Recorder.EventCount > 0
+            ? $"（{Recorder.EventCount} 个事件，回界面点「取回刚录的」）"
+            : "";
+        try { _tray.ShowBalloonTip(4000, Env.AppName, msg + tail, ToolTipIcon.Info); } catch { }
+    }
+
     private const int WM_DEVICECHANGE = 0x0219;
     private const int DBT_DEVICEREMOVECOMPLETE = 0x0004;
     private const int DBT_DEVNODES_CHANGED = 0x0007;
@@ -882,6 +951,17 @@ internal sealed class MainForm : Form
     {
         // 2026-10-27：`WM_INPUT` 分支删除 —— Raw Input 从未注册（RegisterRawInputDevices 从未调用），
         //   这条分支永远收不到消息；按键只走 ETW。
+        if (m.Msg == WM_HOTKEY)
+        {
+            var id = m.WParam.ToInt32();
+            try
+            {
+                if (id == HK_REC_START) StartRecordByHotkey();
+                else if (id == HK_REC_STOP) StopRecordByHotkey();
+            }
+            catch { }
+        }
+
         if (m.Msg == WM_DEVICECHANGE)
         {
             // 设备插拔事件（蓝牙断开/拔电池都会来）→ 若遥控器已不在，立即解锁卡住的键

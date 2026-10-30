@@ -251,6 +251,11 @@ SRC_REQUIRED = [
     ("点击默认走光标位", "iprc1000_gui_dotnet/ui/app.js", "target: t === 'click' ? 'cursor' : 'icon'"),
     ("光标位点击的分支存在", "iprc1000_gui_dotnet/MacroPlayer.cs", 'if (target == "cursor")'),
     ("宏失败要用警告气泡", "iprc1000_gui_dotnet/MainForm.cs", "ToolTipIcon.Warning"),
+    # ★ v1.2.149：录制热键 + 按键录入
+    ("F10 开始录制热键", "iprc1000_gui_dotnet/MainForm.cs", "HK_REC_START, Handle, 0, VK_F10".replace("Handle, ", "")),
+    ("F12 只在录制期持有", "iprc1000_gui_dotnet/MainForm.cs", "SetStopHotkey(Recorder.IsRecording)"),
+    ("按键录入先吞修饰键", "iprc1000_gui_dotnet/KeyCapture.cs", "if (!_mods.Contains(n)) _mods.Add(n)"),
+    ("按键录入吞掉主键", "iprc1000_gui_dotnet/KeyCapture.cs", "return (IntPtr)1;"),
     # ★ v1.2.144：全局按键（语音键跨配置组统一）
     #   这四条防的是"语音键随配置组漂移"——实测过：首页切成微信输入法，
     #   切到鼠标模式又变回右 Alt，用户报的就是这个。
@@ -983,7 +988,8 @@ def verify(zp=None, title="主包", self_contained=False, source_checks=True):
         # 界面上会按 action 名动态调用的命令（新增时**必须**同步加进 Dispatch）
         doc_actions = ["installCable", "installUhid", "relaunchAdmin", "setDefaultMic",
                        "startBridge", "releaseAllKeys", "resetKeys", "repairDriver",
-                       "exportDriverDiag", "exportWinuhid", "setDeviceDriver", "runSetup", "importKmgo", "setMacroSpeed"]
+                       "exportDriverDiag", "exportWinuhid", "setDeviceDriver", "runSetup", "importKmgo", "setMacroSpeed",
+                       "beginKeyCapture", "takeKeyCapture", "cancelKeyCapture"]
         miss = [a for a in doc_actions if a not in disp]
         ok = not miss
         ok_all &= ok

@@ -385,6 +385,11 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
   font-size:12px;font-family:inherit;background:var(--bg2);color:var(--txt);min-width:0}
 .cm-step input[data-f="vks"]{flex:1 1 60px}
 .cm-step .w56{width:56px;flex:0 0 56px;text-align:center}
+/* 按键录入按钮：小巧，不抢输入框的宽度 */
+.cm-step .kcap{flex:0 0 24px;width:24px;border:1px solid var(--line);background:var(--bg2);
+  color:var(--txt2);border-radius:6px;cursor:pointer;font-size:12px;padding:3px 0;
+  font-family:inherit;line-height:1}
+.cm-step .kcap:hover{border-color:var(--blue);color:var(--blue)}
 .cm-step .rd{font-size:11.5px;color:var(--txt3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 失败策略：点一下在「停 / 跳」之间切 */
 .cm-step .of{border:0;background:transparent;cursor:pointer;font-family:inherit;

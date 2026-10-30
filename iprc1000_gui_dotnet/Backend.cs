@@ -873,6 +873,11 @@ internal sealed class Backend : IDisposable
             ["macros"] = System.Text.Json.Nodes.JsonNode.Parse(Macros.StateJson()),
             // 宏执行速度：界面回填输入框用
             ["macroSpeedPct"] = Settings.MacroSpeedPct,
+            // 录制状态：热键（F10/F12）能在界面没打开时改状态，
+            // 所以前端要能靠轮询把按钮文字同步过来。
+            // `pendingRecord > 0 && recording == false` = "录完了但还没取回"。
+            ["recording"] = Recorder.IsRecording,
+            ["pendingRecord"] = Recorder.IsRecording ? 0 : Recorder.EventCount,
             // 宏的运行进度：界面据此显示"第 2/5 遍"、已跑多久、为什么停。
             // ★ 这三个字段必须是**实时读**（不是缓存），否则界面显示的是上一次的状态。
             ["macroRun"] = new JsonObject
@@ -1244,6 +1249,40 @@ internal sealed class Backend : IDisposable
             recording = Recorder.IsRecording,
             events = Recorder.EventCount,
             elapsedMs = Recorder.ElapsedMs,
+        });
+    }
+
+    private static string KeyCancel() { KeyCapture.Cancel(); return "已取消按键录入"; }
+
+    /// <summary>开始捕获一次按键（组合键按"先修饰后主键"的顺序按）</summary>
+    private string BeginKeyCaptureCmd()
+    {
+        if (Recorder.IsRecording)
+            return Env.Json(new { ok = false, message = "正在录制宏，先结束录制" });
+        if (MacroPlayer.IsRunning)
+            return Env.Json(new { ok = false, message = "宏正在播放，先停一下" });
+        var ok = KeyCapture.Begin();
+        return Env.Json(new
+        {
+            ok,
+            message = ok
+                ? "请按下要用的键（组合键：先按住 Ctrl/Alt/Shift/Win，再按主键）"
+                : "按键钩子装不上（可能有安全软件拦截）",
+        });
+    }
+
+    /// <summary>
+    /// 取捕获结果。返回 `capturing=true` 表示还没按，前端继续轮询。
+    /// </summary>
+    private string TakeKeyCaptureCmd()
+    {
+        var vks = KeyCapture.Take();
+        return Env.Json(new
+        {
+            ok = vks is { Length: > 0 },
+            capturing = KeyCapture.IsCapturing,
+            vks = vks ?? Array.Empty<int>(),
+            label = vks is { Length: > 0 } ? Keys.FormatSymbols(vks) : "",
         });
     }
 
@@ -2549,6 +2588,10 @@ internal sealed class Backend : IDisposable
             "importKmgo" => ImportKmgoCmd(a0),
             // 宏执行速度（百分比）
             "setMacroSpeed" => SetMacroSpeedCmd(a0),
+            // 单次按键捕获：让用户"按一下"就录进步骤，不用手填 VK 码
+            "beginKeyCapture" => BeginKeyCaptureCmd(),
+            "takeKeyCapture" => TakeKeyCaptureCmd(),
+            "cancelKeyCapture" => Env.Json(new { ok = true, message = KeyCancel() }),
             "switchGroup" => SwitchGroup(a0),
             "newGroup" => NewGroup(),
             "renameGroup" => RenameGroup(a0, a1),

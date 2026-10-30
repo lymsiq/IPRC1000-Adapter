@@ -867,7 +867,10 @@ function renderMacroPane() {
       const t = (s.type || '').toLowerCase();
       let pm = '';
       if (t === 'keys') {
-        pm = `<input data-i="${i}" data-f="vks" value="${(s.vks || []).join(',')}" placeholder="17,65">`
+        // ⌨ 按钮：点一下、然后按键，自动把键码填进去。
+        // 手填 `17,65` 对普通用户是不可能的 —— 那等于这个输入框没用。
+        pm = `<input data-i="${i}" data-f="vks" value="${(s.vks || []).join(',')}" placeholder="点 ⌨ 后按键">`
+           + `<button class="kcap" data-cap="${i}" title="按一下要用的键，自动填入（组合键：先按住 Ctrl 等再按主键）">⌨</button>`
            + `<input class="w56" data-i="${i}" data-f="holdMs" type="number" min="10" max="2000"`
            + ` value="${s.holdMs || 30}" title="按住多少毫秒再抬起">`;
       } else if (t === 'wait') {
@@ -886,10 +889,16 @@ function renderMacroPane() {
            + `<select data-i="${i}" data-f="pasteKey">${pkOpts}</select>`;
       } else if (t === 'click') {
         const tg = s.target || 'cursor';
+        const bt = s.button || 0;
         pm = `<select data-i="${i}" data-f="target">`
            + `<option value="cursor"${tg === 'cursor' ? ' selected' : ''}>在光标位置点一下</option>`
            + `<option value="icon"${tg === 'icon' ? ' selected' : ''}>截图匹配（需先采集图标）</option>`
            + `<option value="coord"${tg === 'coord' ? ' selected' : ''}>坐标 ${s.x ?? 0},${s.y ?? 0}</option>`
+           + `</select>`
+           + `<select data-i="${i}" data-f="button" title="用哪个键点">`
+           + `<option value="0"${bt === 0 ? ' selected' : ''}>左键</option>`
+           + `<option value="1"${bt === 1 ? ' selected' : ''}>右键</option>`
+           + `<option value="2"${bt === 2 ? ' selected' : ''}>中键</option>`
            + `</select>`;
       } else if (t === 'move') {
         pm = `<span class="rd">→ ${s.x ?? 0},${s.y ?? 0}</span>`;
@@ -927,6 +936,37 @@ function renderMacroPane() {
       paintComboFoot();
     };
   });
+  // ⌨ 按键录入
+  wrap.querySelectorAll('.kcap').forEach((b) => {
+    b.onclick = async () => {
+      const i = Number(b.dataset.cap);
+      let r;
+      try { r = JSON.parse(await B.beginKeyCapture()); }
+      catch (e) { toast('启动录入失败：' + e.message, 6000); return; }
+      if (!r.ok) { toast(r.message, 6000); return; }
+      b.textContent = '…';
+      toast(r.message, 5000);
+      try {
+        for (let n = 0; n < 50; n++) {
+          await new Promise((res) => setTimeout(res, 120));
+          const t = JSON.parse(await B.takeKeyCapture());
+          if (t.ok) {
+            const st = MAC.steps[i];
+            if (st) { st.vks = t.vks; renderMacroPane(); }
+            toast('已录入：' + t.label, 4000);
+            return;
+          }
+          if (!t.capturing) { toast('录入已取消', 4000); return; }
+        }
+        toast('录入超时（5 秒没按键）', 5000);
+        try { await B.cancelKeyCapture(); } catch (e) { }
+      } catch (e) {
+        toast('录入失败：' + e.message, 6000);
+        try { await B.cancelKeyCapture(); } catch (e2) { }
+      } finally { b.textContent = '⌨'; }
+    };
+  });
+
   // 失败策略：点一下在 停 / 跳 之间切
   wrap.querySelectorAll('.of').forEach((b) => {
     b.onclick = () => {
@@ -998,10 +1038,30 @@ async function saveMacroPane() {
    ★ 录到的步骤是**追加**到现有列表，不是替换 —— 替换会静默吃掉用户手写的步骤。 */
 let REC_TIMER = null;
 
+/* 按后端状态同步录制按钮的文字。热键能在界面没打开时改变录制状态，
+   所以每次 refresh 都要调它，否则按钮会显示成错的。 */
+function syncRecButton() {
+  const btn = $('#recBtn'), hint = $('#recHint');
+  if (!btn) return;
+  if (REC_TIMER) return;                       // 倒计时中，别覆盖文案
+  const st = state || {};
+  const idleHint = '录键盘 + 鼠标点击/拖拽；不录自由移动，也不录遥控器按键；F10 开始 · F12 结束';
+  if (st.recording) {
+    btn.dataset.on = '1'; btn.textContent = '停止录制';
+    if (hint) hint.textContent = '录制中…做完按 F12 或点「停止录制」';
+  } else if ((st.pendingRecord || 0) > 0) {
+    btn.dataset.on = '0'; btn.textContent = `取回刚录的（${st.pendingRecord} 个事件）`;
+    if (hint) hint.textContent = '刚录完还没取回，点按钮把这批操作变成步骤';
+  } else {
+    btn.dataset.on = '0'; btn.textContent = '开始录制';
+    if (hint) hint.textContent = idleHint;
+  }
+}
+
 async function recToggle() {
   const btn = $('#recBtn'), hint = $('#recHint');
   if (!btn) return;
-  const idleHint = '录键盘 + 鼠标点击/拖拽；不录自由移动，也不录遥控器按键';
+  const idleHint = '录键盘 + 鼠标点击/拖拽；不录自由移动，也不录遥控器按键；F10 开始 · F12 结束';
 
   // ① 倒计时中再点 = 取消
   if (REC_TIMER) {
@@ -1011,7 +1071,7 @@ async function recToggle() {
     return;
   }
 
-  // ② 正在录 → 停止并取回
+  // ② 正在录 → 停止并取回（状态以后端为准：可能是热键开始的）
   if (btn.dataset.on === '1') {
     btn.disabled = true;
     try {
@@ -1032,6 +1092,21 @@ async function recToggle() {
       btn.dataset.on = '0'; btn.textContent = '开始录制';
       if (hint) hint.textContent = idleHint;
     }
+    return;
+  }
+
+  // ②b 已录完但还没取回（典型场景：按 F12 停的）→ 直接把这批操作变成步骤
+  if (((state && state.pendingRecord) || 0) > 0) {
+    btn.disabled = true;
+    try {
+      const t = JSON.parse(await B.takeRecord());
+      if (t.ok && Array.isArray(t.steps) && t.steps.length) {
+        MAC.steps = MAC.steps.concat(t.steps);
+        renderMacroPane();
+        toast(t.message + ' · 已追加到步骤列表', 9000);
+      } else if (t.message) toast(t.message, 5000);
+    } catch (e) { toast('取回失败：' + e.message, 6000); }
+    finally { btn.disabled = false; if (typeof refresh === 'function') await refresh(); }
     return;
   }
 
@@ -1675,6 +1750,8 @@ async function refresh() {
   renderKeys(state);
   renderEnv(state);
   renderMouse(state);
+  // 录制状态可能是热键（F10/F12）改的，按钮文字要跟着走
+  try { syncRecButton(); } catch (e) { }
 }
 
 /* ── 窗口藏进托盘后停掉 2 秒轮询 ──
@@ -2285,9 +2362,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.148',
+      version: '1.2.149',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.148（构建于 2026-10-30 14:22）',
+      versionLine: 'v1.2.149（构建于 2026-10-30 14:54）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],
