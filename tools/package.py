@@ -245,6 +245,12 @@ SRC_REQUIRED = [
     ("坐标点击前校验窗口", "iprc1000_gui_dotnet/MacroPlayer.cs", "WrongWindow(st)"),
     ("粘贴键可配（终端场景）", "iprc1000_gui_dotnet/MacroPlayer.cs", "DoPaste(st.Slot, st.PasteKey"),
     ("失败策略 skip 要留痕", "iprc1000_gui_dotnet/MacroPlayer.cs", "已设置为跳过继续"),
+    # ★ v1.2.148：点击默认走"光标位置"（用户加"+ 点击"的本意）
+    #   实测踩过：用户加了「点击（图标）」但没采集图标 → 宏第 1 步就停，
+    #   而日志默认关着 ⇒ 体感"按了完全没反应"。
+    ("点击默认走光标位", "iprc1000_gui_dotnet/ui/app.js", "target: t === 'click' ? 'cursor' : 'icon'"),
+    ("光标位点击的分支存在", "iprc1000_gui_dotnet/MacroPlayer.cs", 'if (target == "cursor")'),
+    ("宏失败要用警告气泡", "iprc1000_gui_dotnet/MainForm.cs", "ToolTipIcon.Warning"),
     # ★ v1.2.144：全局按键（语音键跨配置组统一）
     #   这四条防的是"语音键随配置组漂移"——实测过：首页切成微信输入法，
     #   切到鼠标模式又变回右 Alt，用户报的就是这个。

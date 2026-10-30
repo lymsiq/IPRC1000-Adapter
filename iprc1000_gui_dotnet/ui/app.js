@@ -840,7 +840,11 @@ function defStep(t) {
     holdMs: 30,
     ms: t === 'wait' ? 300 : 0,
     slot: TXT.slot || 1,
-    target: 'icon',
+    // ★ 点击默认"在光标位置"：这是用户加"+ 点击"时的本意。
+    //   `icon` 是**截图匹配**（要先去采集图标），选错了会表现为"按了没反应"——
+    //   实测就踩过：用户加了两个点击步骤，宏在第 1 步"没找到图标"直接停，
+    //   而日志默认是关的，界面上什么提示都没有。
+    target: t === 'click' ? 'cursor' : 'icon',
     x: 0, y: 0, x2: 0, y2: 0,
     sw: 0, sh: 0,
     winTitle: '',
@@ -881,9 +885,11 @@ function renderMacroPane() {
         }).join('')}</select>`
            + `<select data-i="${i}" data-f="pasteKey">${pkOpts}</select>`;
       } else if (t === 'click') {
+        const tg = s.target || 'cursor';
         pm = `<select data-i="${i}" data-f="target">`
-           + `<option value="icon"${s.target !== 'coord' ? ' selected' : ''}>图标匹配（找不到就停）</option>`
-           + `<option value="coord"${s.target === 'coord' ? ' selected' : ''}>坐标 ${s.x ?? 0},${s.y ?? 0}</option>`
+           + `<option value="cursor"${tg === 'cursor' ? ' selected' : ''}>在光标位置点一下</option>`
+           + `<option value="icon"${tg === 'icon' ? ' selected' : ''}>截图匹配（需先采集图标）</option>`
+           + `<option value="coord"${tg === 'coord' ? ' selected' : ''}>坐标 ${s.x ?? 0},${s.y ?? 0}</option>`
            + `</select>`;
       } else if (t === 'move') {
         pm = `<span class="rd">→ ${s.x ?? 0},${s.y ?? 0}</span>`;
@@ -2279,9 +2285,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.147',
+      version: '1.2.148',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.147（构建于 2026-10-30 13:02）',
+      versionLine: 'v1.2.148（构建于 2026-10-30 14:22）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

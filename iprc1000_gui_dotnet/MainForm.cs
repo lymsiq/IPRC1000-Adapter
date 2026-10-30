@@ -259,9 +259,18 @@ internal sealed class MainForm : Form
             try
             {
                 if (!IsHandleCreated) return;
+                // 失败消息要显眼：日志默认是关的（LogEnabled=false），
+                // 托盘气泡是用户**唯一**能看到"宏为什么没跑"的地方。
+                var bad = msg.Contains("失败") || msg.Contains("没找到") || msg.Contains("中止")
+                       || msg.Contains("中断") || msg.Contains("第 ");
                 BeginInvoke(new Action(() =>
                 {
-                    try { _tray.ShowBalloonTip(2000, Env.AppName, msg, ToolTipIcon.None); } catch { }
+                    try
+                    {
+                        _tray.ShowBalloonTip(bad ? 6000 : 2000, Env.AppName, msg,
+                                             bad ? ToolTipIcon.Warning : ToolTipIcon.None);
+                    }
+                    catch { }
                 }));
             }
             catch { }
