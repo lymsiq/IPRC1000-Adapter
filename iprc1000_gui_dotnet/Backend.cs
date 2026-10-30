@@ -871,6 +871,8 @@ internal sealed class Backend : IDisposable
             // 宏/文本摘要（只带名称和长度/步数，**不带正文**）——
             // 并进 getState 是为了不额外增加一次每 2 秒的跨进程调用；正文等点开某条时再取。
             ["macros"] = System.Text.Json.Nodes.JsonNode.Parse(Macros.StateJson()),
+            // 宏执行速度：界面回填输入框用
+            ["macroSpeedPct"] = Settings.MacroSpeedPct,
             // 宏的运行进度：界面据此显示"第 2/5 遍"、已跑多久、为什么停。
             // ★ 这三个字段必须是**实时读**（不是缓存），否则界面显示的是上一次的状态。
             ["macroRun"] = new JsonObject
@@ -1243,6 +1245,41 @@ internal sealed class Backend : IDisposable
             events = Recorder.EventCount,
             elapsedMs = Recorder.ElapsedMs,
         });
+    }
+
+    /// <summary>
+    /// 设置宏的执行速度（百分比）。`Settings` 内部已做 10–400 的夹紧。
+    /// 只影响步骤级等待（wait / 按住时长 / 拖拽），内部固定延时不受影响。
+    /// </summary>
+    private string SetMacroSpeedCmd(string a0)
+    {
+        if (!int.TryParse(a0, out var p)) return Env.Json(new { ok = false, message = "参数错误" });
+        Settings.MacroSpeedPct = p;
+        var v = Settings.MacroSpeedPct;
+        return Env.Json(new { ok = true, macroSpeedPct = v,
+            message = v == 100 ? "宏执行速度已恢复原速（100%）" : $"宏执行速度已设为 {v}%" });
+    }
+
+    /// <summary>
+    /// KeymouseGo 脚本导入。坐标基准用**主屏**尺寸 —— KeymouseGo 自己就是
+    /// `GetSystemMetrics(0/1)` 取主屏，用它算比例才对得上。
+    /// </summary>
+    private string ImportKmgoCmd(string a0)
+    {
+        var (sw, sh) = MouseInjector.ScreenSize();
+        var r = KmgoImport.Parse(a0, sw, sh, Macros.AllocTextSlot);
+        var warnJson = System.Text.Json.JsonSerializer.Serialize(r.Warnings);
+        if (!r.Ok)
+        {
+            var msg = r.Error.Length > 0 ? r.Error : "没解析出可执行步骤";
+            return "{\"ok\":false,\"message\":" + System.Text.Json.JsonSerializer.Serialize(msg)
+                 + ",\"warnings\":" + warnJson + "}";
+        }
+        var texts = r.Steps.Count(s => s.Type == Macros.StepPaste);
+        var msg2 = $"已导入 {r.Steps.Count} 步" + (texts > 0 ? $"（其中 {texts} 段文本已放进空槽位）" : "");
+        return "{\"ok\":true,\"message\":" + System.Text.Json.JsonSerializer.Serialize(msg2)
+             + ",\"warnings\":" + warnJson
+             + ",\"steps\":" + Macros.StepsToJson(r.Steps) + "}";
     }
 
     /// <summary>
@@ -2530,6 +2567,10 @@ internal sealed class Backend : IDisposable
             "recordState" => RecordStateCmd(),
             // 罗技 Lua 导入（2026-10-30）：只做子集提取，不做 Lua 解释器
             "importLua" => ImportLuaCmd(a0),
+            // KeymouseGo 脚本导入（2026-10-30）：旧版数组格式 .txt
+            "importKmgo" => ImportKmgoCmd(a0),
+            // 宏执行速度（百分比）
+            "setMacroSpeed" => SetMacroSpeedCmd(a0),
             "switchGroup" => SwitchGroup(a0),
             "newGroup" => NewGroup(),
             "renameGroup" => RenameGroup(a0, a1),

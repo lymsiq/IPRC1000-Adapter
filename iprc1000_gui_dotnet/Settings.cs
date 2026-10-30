@@ -264,6 +264,20 @@ internal static class Settings
         set { _data.MacroPasteDelayMs = Math.Clamp(value, 150, 3000); Save(); }
     }
 
+    /// <summary>
+    /// 宏的**执行速度**（百分比，默认 100）。200 = 快一倍（等待时长减半），50 = 慢一倍。
+    ///
+    /// ★ 2026-10-30 按用户要求加入（对齐 KeymouseGo 的「执行速度」）。
+    ///   只缩放**步骤级的等待**（wait 的毫秒、按键按住时长、拖拽时长），
+    ///   不动内部的固定延时 —— 粘贴后那 400ms 是"等目标程序读剪贴板"，
+    ///   跟着加速会粘成旧内容。
+    /// </summary>
+    public static int MacroSpeedPct
+    {
+        get => _data.MacroSpeedPct <= 0 ? 100 : Math.Clamp(_data.MacroSpeedPct, 10, 400);
+        set { _data.MacroSpeedPct = Math.Clamp(value, 10, 400); Save(); }
+    }
+
     private static void Save()
     {
         try
@@ -307,6 +321,8 @@ internal static class Settings
         public bool MacroRestoreClipboard { get; set; } = true;
         /// <summary>Ctrl+V 之后等多久还原剪贴板（毫秒，默认 400）</summary>
         public int MacroPasteDelayMs { get; set; } = 400;
+        /// <summary>宏执行速度（百分比，默认 100 = 原速）</summary>
+        public int MacroSpeedPct { get; set; } = 100;
         /// <summary>
         /// 是否写文本日志。**默认 false**（发布版性能优先，见 LogSwitch 的说明）。
         /// 排查问题时在环境设置页勾上，或设环境变量 `IPRC1000_LOG=on`。

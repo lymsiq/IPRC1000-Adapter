@@ -986,7 +986,7 @@ def verify(zp=None, title="主包", self_contained=False, source_checks=True):
         # 界面上会按 action 名动态调用的命令（新增时**必须**同步加进 Dispatch）
         doc_actions = ["installCable", "installUhid", "relaunchAdmin", "setDefaultMic",
                        "startBridge", "releaseAllKeys", "resetKeys", "repairDriver",
-                       "exportDriverDiag", "exportWinuhid", "setDeviceDriver", "runSetup"]
+                       "exportDriverDiag", "exportWinuhid", "setDeviceDriver", "runSetup", "importKmgo", "importLua", "setMacroSpeed"]
         miss = [a for a in doc_actions if a not in disp]
         ok = not miss
         ok_all &= ok

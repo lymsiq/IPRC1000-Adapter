@@ -1049,6 +1049,44 @@ async function recToggle() {
   }, 1000);
 }
 
+/* 读文本文件：先按 UTF-8 解，出现替换字符（�）就回退 GBK。
+   ★ KeymouseGo 的 .txt 在中文 Windows 上很可能是 GBK 存的 —— 按 UTF-8 硬读，
+   里面的中文（EX input 那段）会变成乱码，导入出来的文本就是一堆问号。
+   WebView2 是 Chromium，TextDecoder 支持 'gbk'。 */
+async function readFileSmart(file) {
+  const buf = await file.arrayBuffer();
+  const utf8 = new TextDecoder('utf-8', { fatal: false }).decode(buf);
+  if (!utf8.includes('\uFFFD')) return utf8;
+  try {
+    const gbk = new TextDecoder('gbk', { fatal: false }).decode(buf);
+    return gbk.includes('\uFFFD') ? utf8 : gbk;
+  } catch (e) { return utf8; }
+}
+
+/* KeymouseGo .txt 导入 —— 解析在后端，前端只负责把步骤追加到列表 */
+async function importKmgoText(text) {
+  let r;
+  try { r = JSON.parse(await B.importKmgo(text)); }
+  catch (e) { toast('导入失败：' + e.message, 6000); return; }
+
+  if (!r.ok) {
+    toast(r.message || '导入失败', 11000);
+    if (r.warnings && r.warnings.length) console.warn('KeymouseGo 导入警告：\n' + r.warnings.join('\n'));
+    return;
+  }
+  // 先刷新（导入可能占了文本槽，槽位下拉要能看到新内容），再追加步骤
+  await refresh();
+  MAC.steps = MAC.steps.concat(r.steps);
+  renderMacroPane();
+
+  let msg = r.message;
+  if (r.warnings && r.warnings.length) {
+    msg += `，${r.warnings.length} 条警告（细节看控制台）`;
+    console.warn('KeymouseGo 导入警告：\n' + r.warnings.join('\n'));
+  }
+  toast(msg + ' · 已追加到步骤列表', 10000);
+}
+
 /* ── 罗技 Lua 导入 ──
    后端只做"子集提取"：线性序列能转，`while IsMouseButtonPressed(...)` 这类
    「按住期间持续循环」会**明确报错并指行号**（那是连点/压枪，不是我们能执行的模型）。
@@ -1101,6 +1139,18 @@ function bindMacroAdd() {
   const lpIn = $('#macLoop');
   if (lpIn) lpIn.onchange = () => { paintComboFoot(); };
 
+  const spIn = $('#macSpeed');
+  if (spIn) {
+    spIn.onchange = async () => {
+      try {
+        const r = JSON.parse(await B.setMacroSpeed(spIn.value));
+        toast(r.message, 4000);
+        spIn.value = r.macroSpeedPct;
+        if (state) state.macroSpeedPct = r.macroSpeedPct;
+      } catch (e) { toast('设置速度失败：' + e.message, 5000); }
+    };
+  }
+
   const recBtn = $('#recBtn');
   if (recBtn) recBtn.onclick = () => recToggle();
 
@@ -1112,10 +1162,25 @@ function bindMacroAdd() {
       const f = luaFile.files && luaFile.files[0];
       if (!f) return;
       let text = '';
-      try { text = await f.text(); }
+      try { text = await readFileSmart(f); }
       catch (e) { toast('读文件失败：' + e.message, 6000); return; }
       luaFile.value = '';
       await importLuaText(text);
+    };
+  }
+
+  // KeymouseGo .txt 导入
+  const kmgoBtn = $('#kmgoBtn'), kmgoFile = $('#kmgoFile');
+  if (kmgoBtn && kmgoFile) {
+    kmgoBtn.onclick = () => kmgoFile.click();
+    kmgoFile.onchange = async () => {
+      const f = kmgoFile.files && kmgoFile.files[0];
+      if (!f) return;
+      let text = '';
+      try { text = await readFileSmart(f); }
+      catch (e) { toast('读文件失败：' + e.message, 6000); return; }
+      kmgoFile.value = '';
+      await importKmgoText(text);
     };
   }
 
@@ -1157,6 +1222,10 @@ async function initComboPanes(it) {
     gb.dataset.on = it.isGlobal ? '1' : '0';
     gb.classList.toggle('on', !!it.isGlobal);
   }
+
+  // 执行速度是**全局**设置（对所有宏生效），从 state 回填
+  const sp = $('#macSpeed');
+  if (sp) sp.value = (state && state.macroSpeedPct) || 100;
   TXT.slot = 1;
   if ($('#txtName')) $('#txtName').value = '';
   if ($('#txtBody')) $('#txtBody').value = '';
@@ -2249,9 +2318,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.145',
+      version: '1.2.146',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.145（构建于 2026-10-30 12:30）',
+      versionLine: 'v1.2.146（构建于 2026-10-30 13:12）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

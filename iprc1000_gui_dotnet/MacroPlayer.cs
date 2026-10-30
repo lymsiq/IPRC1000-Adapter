@@ -317,7 +317,7 @@ internal static class MacroPlayer
                     // 长等待要专门说一句，否则用户以为卡死了（KeymouseGo #124 就是这个抱怨）
                     if (verbose && st.Ms >= 800)
                         Log($"MACRO {no}/{it.Steps.Count} 等待 {st.Ms}ms（这段时间按任意遥控器键可中断）");
-                    if (!SleepCancellable(st.Ms)) return "已中断";
+                    if (!SleepCancellable(Scaled(st.Ms))) return "已中断";
                     break;
 
                 case Macros.StepPaste:
@@ -383,7 +383,7 @@ internal static class MacroPlayer
         var f = _filter;
         if (f is null) return false;
         f.InjectTransient(BidKey, st.Vks, true);
-        var held = SleepCancellable(st.HoldMs);
+        var held = SleepCancellable(Scaled(st.HoldMs));
         f.InjectTransient(BidKey, Array.Empty<int>(), false);
         return held;
     }
@@ -482,7 +482,8 @@ internal static class MacroPlayer
         {
             // 分步移动而不是瞬移：很多程序（尤其 Electron/WPF 的拖拽）只认
             // "按下期间发生过移动"，一次瞬移可能被当成没拖。
-            var n = Math.Clamp(st.Ms / 15, 3, 40);
+            var totalMs = Scaled(st.Ms);
+            var n = Math.Clamp(totalMs / 15, 3, 40);
             for (var i = 1; i <= n; i++)
             {
                 if (_cancel) { why = "已中断"; return false; }
@@ -490,7 +491,7 @@ internal static class MacroPlayer
                 MouseInjector.MoveToScreen(
                     (int)Math.Round(x1 + (x2 - x1) * t),
                     (int)Math.Round(y1 + (y2 - y1) * t));
-                SleepCancellable(Math.Max(1, st.Ms / n));
+                SleepCancellable(Math.Max(1, totalMs / n));
             }
             return true;
         }
@@ -557,6 +558,20 @@ internal static class MacroPlayer
         return true;
     }
 
+    /// <summary>
+    /// 按「执行速度」缩放一个等待时长。100% = 原速；200% = 快一倍（时长减半）。
+    ///
+    /// ★ 只用于**步骤级**的等待（wait 的毫秒 / 按键按住时长 / 拖拽时长）。
+    ///   内部固定延时（粘贴后等目标程序读剪贴板那 400ms）**不能**跟着缩，
+    ///   否则会粘成旧内容 —— 那是个时序依赖，不是"快慢"问题。
+    /// </summary>
+    private static int Scaled(int ms)
+    {
+        if (ms <= 0) return 0;
+        var pct = Math.Clamp(Settings.MacroSpeedPct, 10, 400);
+        return (int)Math.Clamp(ms * 100L / pct, 1, 600_000);
+    }
+
     /// <summary>可中断的等待：每 20ms 检查一次取消标志，被取消后立刻返回 false</summary>
     private static bool SleepCancellable(int ms)
     {
@@ -592,7 +607,11 @@ internal static class MacroPlayer
                 _ => 0,
             };
         }
-        return (int)Math.Min(sum + BudgetPadMs, 120_000);
+        // ★ 预算必须跟着「执行速度」走：用户设 50%（慢一倍）时实际耗时会翻倍，
+        //   预算不放大就会出现"正常执行却被判超时中止"。
+        var pct = Math.Clamp(Settings.MacroSpeedPct, 10, 400);
+        var total = (sum + BudgetPadMs) * 100L / pct;
+        return (int)Math.Clamp(total, 1000, 600_000);
     }
 
     private static void Log(string msg)

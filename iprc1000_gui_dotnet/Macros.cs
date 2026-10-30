@@ -439,6 +439,37 @@ internal static class Macros
         }
     }
 
+    /// <summary>
+    /// 找第一个能用的文本槽写入，返回槽号；1–10 全满返回 0。
+    ///
+    /// 给「导入 KeymouseGo 脚本」用：那边的 `EX input` 是**内联文本**，
+    /// 而我们的 paste 步骤只认槽位号，所以导入时把文本落进空槽再引用。
+    /// </summary>
+    public static int AllocTextSlot(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return 0;
+        lock (Gate)
+        {
+            for (var n = 1; n <= TextSlots; n++)
+            {
+                var it = _s.Items.FirstOrDefault(x => x.Kind == KindText && x.Num == n);
+                if (it is null)
+                {
+                    _s.Items.Add(new Item { Num = n, Kind = KindText, Name = $"文本 {n}", Text = text });
+                    Save();
+                    return n;
+                }
+                if (string.IsNullOrEmpty(it.Text))
+                {
+                    it.Text = text;
+                    Save();
+                    return n;
+                }
+            }
+            return 0;
+        }
+    }
+
     // ── 给界面的 JSON ──────────────────────────────────────────────────────
 
     /// <summary>把字符串转义成可安全塞进 JSON 字面量的内容（不含首尾引号）</summary>
@@ -755,7 +786,43 @@ internal static class Macros
         Check(keyOk && nameOk, "Lua 键码表与官方 Appendix A 一致",
               keyOk && nameOk ? "scancode 10 锚点 + 键名 5 项（含别名）" : (keyOk ? "键名不符" : keyBad));
 
-        // ⑫ StateJson 必须是**合法 JSON**：它被直接拼进 getState 返回给界面，
+        // ⑫ KeymouseGo 脚本导入 —— 用**用户真实脚本的片段**做断言（不是编的数据）
+        //    真实片段看着别扭但很有代表性：第一条是 mouse up（没有配对的 down）、
+        //    键盘是 13=Return、坐标是绝对像素 2996,206。
+        var km1 = "[\n"
+                + "[113,\"EM\",\"mouse left up\",[2996,206]],\n"
+                + "[186,\"EK\",\"key down\",[13,\"Return\",0]],\n"
+                + "[132,\"EK\",\"key up\",[13,\"Return\",0]],\n"
+                + "[94,\"EM\",\"mouse left down\",[2996,206]],\n"
+                + "[126,\"EM\",\"mouse left up\",[2996,206]],\n"
+                + "]";
+        var kr1 = KmgoImport.Parse(km1, 3840, 2160, _ => 1);
+        Check(kr1.Ok && kr1.Steps.Count == 3
+              && kr1.Steps[0].Type == StepKeys && kr1.Steps[0].Vks.Contains(0x0D)
+              && kr1.Steps[0].HoldMs == 132
+              && kr1.Steps[1].Type == StepWait
+              && kr1.Steps[2].Type == StepClick && kr1.Steps[2].X == 2996,
+              "KeymouseGo 导入：回车 + 点击（真实脚本片段）",
+              $"步数={kr1.Steps.Count}(期望3) · 首步={kr1.Steps.FirstOrDefault()?.Type}"
+              + $" · 键={kr1.Steps.FirstOrDefault()?.Vks?.Length}");
+
+        // EX input 要变成"引用文本槽的 paste 步骤"
+        var gotText = "";
+        var km2 = "[100,\"EX\",\"input\",\"你好 world\"],\n"
+                + "[50,\"EK\",\"key down\",[13,\"Return\",0]],\n"
+                + "[50,\"EK\",\"key up\",[13,\"Return\",0]]";
+        var kr2 = KmgoImport.Parse(km2, 1920, 1080, s => { gotText = s; return 3; });
+        Check(kr2.Ok && kr2.Steps.Any(s => s.Type == StepPaste && s.Slot == 3) && gotText == "你好 world",
+              "KeymouseGo 导入：EX input 落进文本槽",
+              $"文本=「{gotText}」· 槽位={kr2.Steps.FirstOrDefault(s => s.Type == StepPaste)?.Slot}");
+
+        // 新版（带 scripts / 流程控制）必须**明确拒绝**，不能假装成功
+        var km3 = "{ scripts: [ { type: 'if', do: [], else: [] } ] }";
+        var kr3 = KmgoImport.Parse(km3, 1920, 1080, _ => 1);
+        Check(!kr3.Ok && kr3.Error.Contains("新版"), "KeymouseGo 导入：新版流程控制要明确拒绝",
+              kr3.Ok ? "竟然导入成功了" : kr3.Error[..Math.Min(kr3.Error.Length, 30)]);
+
+        // ⑬ StateJson 必须是**合法 JSON**：它被直接拼进 getState 返回给界面，
         //   格式错一个字符就是整个界面白屏（和 v1.1.0 那次同级别的故障）。
         var sj = StateJson();
         var sjOk = true;
