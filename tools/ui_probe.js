@@ -270,6 +270,7 @@ const PROBE = () => {
           r.hasRec = !!document.getElementById('recBtn');
           r.hasLua = !!document.getElementById('luaBtn');
           r.hasClear = !!document.getElementById('macClear');
+          r.hasGlobal = !!document.getElementById('comboGlobal');
           document.querySelector('#macAdd button[data-add="keys"]').click();
           document.querySelector('#macAdd button[data-add="wait"]').click();
           r.steps = document.querySelectorAll('#macSteps .cm-step').length;
@@ -308,6 +309,7 @@ const PROBE = () => {
         else if (!tp.hasRec) bad('宏页签缺少「开始录制」按钮');
         else if (!tp.hasLua) bad('宏页签缺少「导入 .lua」按钮');
         else if (!tp.hasClear) bad('宏页签缺少「清空」按钮（重新配宏时只能逐条删）');
+        else if (!tp.hasGlobal) bad('弹窗缺少「全局」开关');
         else if (tp.ofBefore !== '停' || tp.ofAfter !== '跳')
           bad('失败策略按钮不能切换：「' + tp.ofBefore + '」→「' + tp.ofAfter + '」');
         else if (tp.pasteSelects !== 2)
@@ -317,7 +319,7 @@ const PROBE = () => {
           bad('底部说明没跟着页签变（文本与宏一样：「' + tp.noteText + '」）');
         else if (tp.loopDefault !== '1') bad('宏的「执行遍数」默认不是 1（是 ' + tp.loopDefault + '），误设会变成循环');
         else if (!/一直循环/.test(tp.footLoop)) bad('遍数设 0 时底部没提示"一直循环"：「' + tp.footLoop + '」');
-        else ok('弹窗三页签正常（文本 ' + tp.slots + ' 槽 / 宏步骤增删 / 失败策略可切 / 粘贴键可选 / 可录制/导入/清空 / 遍数默认 1）');
+        else ok('弹窗三页签正常（文本 ' + tp.slots + ' 槽 / 宏步骤增删 / 失败策略可切 / 粘贴键可选 / 可录制/导入/清空 / 全局开关 / 遍数默认 1）');
 
         await page.keyboard.press('Escape');
         await page.waitForTimeout(220);

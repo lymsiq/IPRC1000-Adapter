@@ -254,9 +254,16 @@ SRC_REQUIRED = [
     ("Lua 扩展键 scancode 表", "iprc1000_gui_dotnet/LuaImport.cs", "0x148 => 0x26"),
     ("Lua 小键盘不是方向键", "iprc1000_gui_dotnet/LuaImport.cs", "0x47 => 0x67"),
     ("Lua 左键默认不上报的提示", "iprc1000_gui_dotnet/LuaImport.cs", "EnablePrimaryMouseButtonEvents"),
+    # ★ v1.2.144：全局按键（语音键跨配置组统一）
+    #   这四条防的是"语音键随配置组漂移"——实测过：首页切成微信输入法，
+    #   切到鼠标模式又变回右 Alt，用户报的就是这个。
+    ("全局键读取优先", "iprc1000_gui_dotnet/Keymaps.cs", "if (_s.Global.TryGetValue(id, out var g)) return g;"),
+    ("写入按是否全局分流", "iprc1000_gui_dotnet/Keymaps.cs", "if (_s.Global.ContainsKey(id)) _s.Global[id] = vks;"),
+    ("dump/回收要合并全局", "iprc1000_gui_dotnet/Keymaps.cs", "foreach (var kv in _s.Global) merged[kv.Key] = kv.Value;"),
+    ("语音键默认设为全局", "iprc1000_gui_dotnet/Keymaps.cs", 's.Global["voice"] = (int[])vv.Clone();'),
     ("按住状态取真实集合", "iprc1000_gui_dotnet/Backend.cs", "PatchEtwPressed"),
     # ★ v1.2.39：探针提示要说清"要重启"（原来只显示"驱动未安装"）
-    ("驱动探针提示重启", "iprc1000_gui_dotnet/Backend.cs", "请重启 Windows（不重启注入只能走 SendInput"),
+    ("驱动探针说明降级与重启", "iprc1000_gui_dotnet/Backend.cs", "当前走 SendInput 降级"),
     # ★ v1.2.38：把"驱动未生效需重启"和"槽位被占"分开提示
     ("驱动未生效要提示重启", "iprc1000_gui_dotnet/WinUhidInjector.cs", "ControlDeviceOpenable"),
     # ★ v1.2.37：ClearHeld 必须按"真正放掉的按钮"计数并留痕（原来用 Raw Input 集合，恒为 0）
@@ -967,6 +974,26 @@ def verify(zp=None, title="主包", self_contained=False, source_checks=True):
         ok = need in txt
         ok_all &= ok
         print(f"  {'✓' if ok else '✗'} {label}")
+
+    # ── 体检修复按钮 ↔ Dispatch 命令 一致性（2026-10-30 新增）──
+    #   踩过的坑：Doctor 给出 action="installUhid"，Dispatch 却没有这个命令；
+    #   前端是 B[action]() **动态调用** ⇒ 用户点体检里的「一键安装驱动」只得到
+    #   「未知方法 installUhid」，按钮是死的，而且编译期、ui_probe 都发现不了。
+    try:
+        btxt = open(os.path.join(ROOT, "iprc1000_gui_dotnet", "Backend.cs"),
+                    encoding="utf-8", errors="replace").read()
+        disp = set(re.findall(r'"([A-Za-z][A-Za-z0-9_]*)"\s*=>', btxt))
+        # 界面上会按 action 名动态调用的命令（新增时**必须**同步加进 Dispatch）
+        doc_actions = ["installCable", "installUhid", "relaunchAdmin", "setDefaultMic",
+                       "startBridge", "releaseAllKeys", "resetKeys", "repairDriver",
+                       "exportDriverDiag", "exportWinuhid", "setDeviceDriver", "runSetup"]
+        miss = [a for a in doc_actions if a not in disp]
+        ok = not miss
+        ok_all &= ok
+        print(f"  {'✓' if ok else '✗'} 界面按 action 动态调用的命令都存在"
+              + ("" if ok else f"  ← Dispatch 缺：{', '.join(miss)}（点了会报「未知方法」）"))
+    except Exception as e:
+        print(f"  ⚠ 体检动作一致性检查没跑成：{e}")
 
     # ── 状态字段层级检查（2026-10-27 新增）──
     #   症状：字段被误加进子对象 ⇒ 界面读 state.xxx 得到 undefined ⇒

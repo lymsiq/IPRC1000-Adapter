@@ -150,6 +150,8 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
 .kv .k{font-size:11.5px;color:var(--txt3)}
 .kv .v{margin-top:3px;font-size:14px;font-weight:600;font-family:Consolas,"Cascadia Mono",monospace;word-break:break-all}
 .kv .v.ok{color:#16a34a} .kv .v.bad{color:#e8890c}
+/* 可选项未启用（不影响使用）：用中性灰，不要用告警色 —— 免得让人以为出故障 */
+.kv .v.warn{color:var(--txt3)}
 .note{margin-top:13px;font-size:12.5px;color:var(--txt2);background:#f7fafe;
   border-left:3px solid var(--blue);border-radius:0 8px 8px 0;padding:9px 13px;line-height:1.65}
 .note.warn{border-left-color:var(--amber);background:#fffaf0;color:#8a5a00}
@@ -393,6 +395,16 @@ main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px
 .cm-step .del:hover{color:var(--red)}
 .cm-add{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
 .cm-add .btn{font-size:12.5px;padding:6px 11px}
+
+/* ── 全局按键（2026-10-30）：标记后跨配置组共用同一份映射 ── */
+.gbtn{border:1px solid var(--line);background:var(--bg2);color:var(--txt3);
+  border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;font-family:inherit;
+  margin-right:7px;flex:0 0 auto;white-space:nowrap}
+.gbtn:hover{border-color:var(--blue)}
+.gbtn.on{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:700}
+.gbadge{display:inline-block;margin-left:6px;padding:0 5px;border-radius:4px;
+  background:var(--blue-l);color:var(--blue-d);font-size:10.5px;font-weight:700;
+  vertical-align:1px;letter-spacing:.5px}
 
 /* 语音键：输入法预设 */
 .kb-preset{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px;

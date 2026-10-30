@@ -831,6 +831,7 @@ internal sealed class Backend : IDisposable
                 vks,
                 binding = Keys.Format(vks),
                 sym = Keys.FormatSymbols(vks),                 // 符号化组合键（列表右侧显示）
+                isGlobal = Keymaps.IsGlobal(b.Id),             // 界面给这一行打「全局」标记
                 rect = Keys.Rects.TryGetValue(b.Id, out var rc)
                     ? new { cx = rc.Cx, cy = rc.Cy, w = rc.W, h = rc.H } : null,
                 img = new { w = Keys.ImgW, h = Keys.ImgH },
@@ -1093,6 +1094,19 @@ internal sealed class Backend : IDisposable
     {
         var n = Keymaps.ResetCurrent();
         return Env.Json(new { ok = true, message = $"已把配置组「{n}」恢复为默认映射。" });
+    }
+
+    /// <summary>
+    /// 开关「全局按键」。开启后这个键在所有配置组里共用同一份映射 ——
+    /// 语音键就属于这类（它跟输入法有关，跟当前用哪套桌面键位无关）。
+    /// </summary>
+    private string SetGlobalCmd(string a0, string a1)
+    {
+        if (string.IsNullOrEmpty(a0) || !Keys.Table.Any(x => x.Id == a0))
+            return Env.Json(new { ok = false, message = $"未知按键 {a0}" });
+        var on = a1 is "1" or "true" or "on" or "yes";
+        var msg = Keymaps.SetGlobal(a0, on);
+        return Env.Json(new { ok = true, message = msg, isGlobal = Keymaps.IsGlobal(a0) });
     }
 
     // ── 宏 / 文本动作库（2026-10-30）────────────────────────────────────────
@@ -1482,6 +1496,10 @@ internal sealed class Backend : IDisposable
             ["cable"] = new JsonObject { ["ok"] = _cableReady, ["hint"] = "虚拟声卡 VB-CABLE" },
             ["mic"] = new JsonObject { ["ok"] = _micOk, ["hint"] = "默认录音设备 = CABLE Output" },
             ["winuhid"] = new JsonObject { ["ok"] = _uhidReady,
+                // ★ 2026-10-30：标为**可选项** —— 没有它程序会回退 SendInput，普通程序照常可用
+                //   （用户实测：这一项是红的，语音却完全正常、也没串出 m）。
+                //   它属于"更可靠的增强"，不是"没有就不能用"，所以不该阻断"全部就绪"。
+                ["optional"] = true,
                 // ★ 2026-10-18：DriverVersion==0 的**真正原因**通常是"驱动装好了但没重启"
                 //   （控制设备 \.\WinUHid 不存在），以前只显示"驱动未安装"，
                 //   用户照着字面意思反复去点安装，白绕好几圈。现在直接说要重启。
@@ -1489,13 +1507,16 @@ internal sealed class Backend : IDisposable
                     ? $"虚拟键盘驱动已就绪（接口 v{WinUhidInjector.DriverVersion}）"
                     : WinUhidInjector.ControlDeviceOpenable()
                         ? "WinUHid 设备槽位被占，稍后会自愈重试"
-                        : "WinUHid 驱动未生效 —— 请重启 Windows（不重启注入只能走 SendInput，豆包会过滤）" },
+                        : "未生效，当前走 SendInput 降级（普通程序可用；提权窗口/游戏/部分输入法长按可能失效）。装完驱动重启一次即可" },
             ["device"] = new JsonObject { ["ok"] = devOk,
                 ["hint"] = driverFreeOn ? $"无驱动模式：键盘 + 钩子吞 m（已吞 {GhostGuard.Swallowed}）"
                        : !Env.RemoteStillKeyboard() ? "遥控器已不是键盘（零 m）"
                        : (devOk ? "键盘模式 + 钩子拦截中（低延迟）" : "遥控器仍在输出 m") },
             ["bridge"] = new JsonObject { ["ok"] = BridgeRunning, ["hint"] = "语音桥运行中" },
-            ["ready"] = _cableReady && _micOk && _uhidReady && devOk,
+            // ★ 2026-10-30：`_uhidReady` **不再**是 ready 的阻断项。
+            //   没有它时走 SendInput 降级，普通程序照常能用；把它算成"没就绪"会让
+            //   首页一直报警，用户以为坏了（实测就是这么误导的）。
+            ["ready"] = _cableReady && _micOk && devOk,
         };
     }
 
@@ -2109,10 +2130,18 @@ internal sealed class Backend : IDisposable
             micOk ? "" : "setDefaultMic", micOk ? "" : "改为 CABLE Output");
 
         // 4 虚拟键盘驱动
+        // ★ 2026-10-30 重新定级：原来是 "bad" + 「会被输入法过滤」，但实际上不可用时
+        //   是**回退 SendInput**，普通程序照常能用（用户实测：某台机器这一项是红的，
+        //   语音却完全正常、也没有串出 m）。把它标成红色故障是**仪表撒谎**，
+        //   会让人以为"坏了"从而忽略真正的故障项。改成 warn，并说清什么场景才失效。
         var uhid = B("uhidReady");
-        Add("虚拟键盘驱动", uhid ? "ok" : "bad",
-            uhid ? "已就绪（注入走虚拟 HID，输入法不会过滤）" : "未就绪：按键只能靠 SendInput，会被输入法过滤",
-            uhid ? "" : "installUhid", uhid ? "" : "一键安装驱动");
+        Add("虚拟键盘驱动", uhid ? "ok" : "warn",
+            uhid
+                ? "已就绪（注入走虚拟 HID，输入法和游戏都不会过滤）"
+                : "未生效：当前回退 SendInput。浏览器/微信/记事本等普通程序照常可用；"
+                  + "但提权窗口（以管理员运行的程序）、全屏游戏、部分输入法的长按识别可能失效。"
+                  + "刚装完驱动的话重启一次即可生效。",
+            uhid ? "" : "installUhid", uhid ? "" : "安装驱动（装完需重启）");
 
         // 5 遥控器设备驱动（remoteKb 是字符串 "NotKeyboard"/"Keyboard"，不是布尔）
         var remoteKbStr = S("remoteKb");
@@ -2470,6 +2499,8 @@ internal sealed class Backend : IDisposable
             "installCable" => InstallCable(),
             "setDefaultMic" => SetDefaultMic(),
             "saveKey" => SaveKey(a0, a1),
+            // 全局按键（2026-10-30）：标记后该键在所有配置组共用同一份映射
+            "setGlobal" => SetGlobalCmd(a0, a1),
             // 宏 / 文本动作库（2026-10-30）：一条 macros.json 同时存文本组与宏
             "getMacros" => GetMacros(),
             "getMacro" => GetMacro(a0),
@@ -2526,6 +2557,11 @@ internal sealed class Backend : IDisposable
             "exportConfig" => ExportConfig(),
             "wizardReset" => WizardReset(),
             "repairDriver" => RepairDriver(a0),
+            // ★ 2026-10-30 修：体检里「一键安装驱动」给出的 action 名是 `installUhid`，
+            //   但 Dispatch 一直没有这个命令 —— 前端是 B[action]() 动态调用，
+            //   于是用户点体检里的修复按钮只会得到「未知方法 installUhid」，按钮是死的。
+            //   语义上和 repairDriver 是同一件事（重建 WinUHid 驱动），直接转过去。
+            "installUhid" => RepairDriver("1"),
             "exportDriverDiag" => ExportDriverDiag(),
             "setAutoSwitchDriver" => SetAutoSwitchDriver(a0),
             "setAutoKeepMic" => SetAutoKeepMic(a0),

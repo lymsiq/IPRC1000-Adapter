@@ -320,7 +320,7 @@ function renderKeyRow(list, it) {
   row.innerHTML = `
     <div class="keythumb" style="${thumbStyle}"></div>
     <div class="keytext">
-      <div class="keyname">${it.name}</div>
+      <div class="keyname">${it.name}${it.isGlobal ? '<span class="gbadge">全局</span>' : ''}</div>
       <div class="keyhid">HID ${it.hid}</div>
     </div>
     <div class="keybind-sym">${bindSym(it)}</div>
@@ -1149,6 +1149,14 @@ function bindMacroAdd() {
 async function initComboPanes(it) {
   COMBO_KEY = it.id;
   COMBO_TAB = 'key';
+
+  // 全局开关的状态来自后端（isGlobal），每次打开都要重置 ——
+  // 不重置的话，上一个键勾着"全局"，这个键会看起来也是全局
+  const gb = $('#comboGlobal');
+  if (gb) {
+    gb.dataset.on = it.isGlobal ? '1' : '0';
+    gb.classList.toggle('on', !!it.isGlobal);
+  }
   TXT.slot = 1;
   if ($('#txtName')) $('#txtName').value = '';
   if ($('#txtBody')) $('#txtBody').value = '';
@@ -1493,15 +1501,25 @@ function renderEnv(s) {
                  ['winuhid','虚拟键盘驱动 WinUHid'],['device','遥控器已不是键盘'],
                  ['bridge','语音桥运行中']];
   const done = items.filter(([k]) => st[k] && st[k].ok).length;
+  // ★ 2026-10-30：标了 optional 的项（目前只有 WinUHid）不参与"没就绪"计数 ——
+  //   它不可用时走 SendInput 降级，普通程序照常能用；把它算成阻断会让首页一直报警。
+  const blocking = items.filter(([k]) => {
+    const it = st[k] || {};
+    return !it.ok && !it.optional;
+  });
   setDot('#d-setup', st.ready ? 'on' : 'warn');
   $('#setupKv').innerHTML = items.map(([k, label]) => {
     const it = st[k] || {};
-    return kvItem((it.ok ? '✔ ' : '✘ ') + label, it.ok ? '就绪' : (it.hint || '未就绪'), it.ok ? 'ok' : 'bad');
+    const ok = !!it.ok;
+    const tail = ok ? '就绪' : (it.optional ? '可选' : (it.hint || '未就绪'));
+    return kvItem((ok ? '✔ ' : (it.optional ? '○ ' : '✘ ')) + label, tail,
+                  ok ? 'ok' : (it.optional ? 'warn' : 'bad'));
   }).join('');
   $('#setupNote').className = 'note' + (st.ready ? '' : ' warn');
   $('#setupNote').innerHTML = st.ready
-    ? `全部就绪（${done}/${items.length}）。语音桥${s.autoStart ? '会在启动后自动拉起' : '需要手动启动'}。`
-    : `还有 ${items.length - done} 项没就绪。点「一键完成全部」自动处理；需要 UAC 的步骤会弹窗。`;
+    ? `全部就绪（${done}/${items.length}）${done < items.length ? '，其中可选项未启用不影响使用' : ''}。`
+      + `语音桥${s.autoStart ? '会在启动后自动拉起' : '需要手动启动'}。`
+    : `还有 ${blocking.length} 项没就绪。点「一键完成全部」自动处理；需要 UAC 的步骤会弹窗。`;
   $('#btnAutoStart').textContent = `启动后自动拉起语音桥：${s.autoStart ? '已开启' : '已关闭'}`;
   $('#btnAutoRun').textContent = `开机自启：${s.autoRun ? '已开启' : '已关闭'}`;
   $('#btnStartMin').textContent = `启动时进托盘：${s.startMinimized ? '已开启' : '已关闭'}`;
@@ -2117,6 +2135,22 @@ function bindUI() {
   // ★ 关闭路径（旧版漏了这三个 → 用户报「点击关闭无法关闭」）：
   //   ① 右上角 ×   ② 点遮罩空白处   ③ Esc
   $('#comboClose').onclick = closeCombo;
+
+  // 全局开关：语音键这类"跟配置组无关"的键，勾上后所有组共用同一份映射
+  const gb = $('#comboGlobal');
+  if (gb) {
+    gb.onclick = async () => {
+      if (!COMBO_KEY) return;
+      const on = gb.dataset.on !== '1';
+      try {
+        const r = JSON.parse(await B.setGlobal(COMBO_KEY, on ? '1' : '0'));
+        toast(r.message, 6000);
+        gb.dataset.on = r.isGlobal ? '1' : '0';
+        gb.classList.toggle('on', !!r.isGlobal);
+        await refresh();                     // 列表里的「全局」徽标要跟着变
+      } catch (e) { toast('切换全局失败：' + e.message, 6000); }
+    };
+  }
   const mask = $('#comboMask');
   if (mask) mask.onclick = (e) => { if (e.target === mask) closeCombo(); };
   document.addEventListener('keydown', (e) => {
@@ -2215,9 +2249,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.143',
+      version: '1.2.144',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.143（构建于 2026-10-30 10:33）',
+      versionLine: 'v1.2.144（构建于 2026-10-30 11:52）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

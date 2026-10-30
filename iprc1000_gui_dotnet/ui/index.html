@@ -216,6 +216,10 @@
               <div class="modal-title" id="comboTitle">设置快捷键</div>
               <div class="modal-sub" id="comboSub">当前：未设置</div>
             </div>
+            <!-- 全局：勾上后这个键在所有配置组共用同一份映射，切配置组不再变化。
+                 语音键属于这类 —— 它跟输入法有关，跟"当前用哪套桌面键位"无关。 -->
+            <button class="gbtn" id="comboGlobal" data-on="0"
+              title="全局：所有配置组共用这个映射，切换配置组时保持不变（语音键建议开启）">全局</button>
             <button class="modal-x" id="comboClose" title="关闭 (Esc)">×</button>
           </div>
           <div class="modal-body">

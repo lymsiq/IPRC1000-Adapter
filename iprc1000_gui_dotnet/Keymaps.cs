@@ -59,13 +59,26 @@ internal static class Keymaps
 ///  10 = **鼠标模式变成一个配置组**（Kind="mouse"）；方块键从"硬编码的特殊键"
 ///       改为**普通可绑定键**，出厂值 = 动作值 `切换配置组`（`KeyAct.SwitchGroup`）。
     /// </summary>
-    private const int Ver_ = 10;
+    private const int Ver_ = 11;
 
     private sealed class Store
     {
         public int Ver { get; set; } = 1;
         public int Active { get; set; }
         public List<Group> Groups { get; set; } = new();
+
+        /// <summary>
+        /// **全局按键**（2026-10-30）：标记在这里的键，在所有配置组里用**同一份映射**，
+        /// 不随配置组切换而变化。
+        ///
+        /// 为什么需要：语音键本质上是"输入法的属性"（豆包=右Alt、微信=Ctrl+Win），
+        /// 它跟"当前在用哪套桌面键位"没有任何关系。原来每个配置组各存一份，
+        /// 于是用户切到鼠标模式后语音键又变回右 Alt —— 表现为"输入法切换没生效"。
+        ///
+        /// 存放位置选在 **Store 顶层**而不是每个 Group 里，是因为"全局"的定义就是
+        /// 不隶属于任何组；放组里就还得有个"哪一组的值才算数"的规则，又多一个歧义源。
+        /// </summary>
+        public Dictionary<string, int[]> Global { get; set; } = new();
     }
 
     private static Store _s = Load();
@@ -89,6 +102,9 @@ internal static class Keymaps
                 if (s is { Groups.Count: > 0 })
                 {
                     if (s.Active < 0 || s.Active >= s.Groups.Count) s.Active = 0;
+                    // 老文件没有这个字段（或显式写成 null）→ 归一化成空字典，
+                    // 后面的 Get/Set 就能无条件用，不必每处判空
+                    s.Global ??= new Dictionary<string, int[]>();
                     // 迁移：把旧的「Codex 编程」组升级成「WorkBuddy 快捷键」映射
                     if (s.Ver < 2)
                     {
@@ -205,6 +221,24 @@ internal static class Keymaps
                         s.Ver = 10;
                         Save(s);
                     }
+
+                    // ★ Ver 11（2026-10-30）：**语音键改为全局** ——
+                    //   它本质是"输入法的属性"（豆包=右Alt / 微信=Ctrl+Win），跟当前用哪套
+                    //   桌面键位无关。原来每组各存一份，切到鼠标模式就变回右 Alt，
+                    //   用户看到的是"首页切了输入法却没生效"（实测就是这个 bug）。
+                    //   取**活动组**的值当全局值：那才是用户当下有意的配置。
+                    if (s.Ver < 11)
+                    {
+                        s.Global ??= new Dictionary<string, int[]>();
+                        if (s.Groups.Count > 0)
+                        {
+                            var at = Math.Clamp(s.Active, 0, s.Groups.Count - 1);
+                            if (s.Groups[at].Map.TryGetValue("voice", out var vv) && vv.Length > 0)
+                                s.Global["voice"] = (int[])vv.Clone();
+                        }
+                        s.Ver = 11;
+                        Save(s);
+                    }
                     return s;
                 }
             }
@@ -311,19 +345,75 @@ internal static class Keymaps
     public static int[] Get(string id)
     {
         lock (Gate)
+        {
+            // ★ 全局优先：语音键这类"跟配置组无关"的键走这里
+            if (_s.Global.TryGetValue(id, out var g)) return g;
             return Current.Map.TryGetValue(id, out var v) ? v : Array.Empty<int>();
+        }
     }
 
-    /// <summary>取指定组的映射（自检用：不切换当前组、不写盘）</summary>
-    public static Dictionary<string, int[]> MapOf(int idx)
-        => idx >= 0 && idx < _s.Groups.Count ? _s.Groups[idx].Map : Current.Map;
+    /// <summary>这个键是不是全局的（界面要显示标记）</summary>
+    public static bool IsGlobal(string id)
+    {
+        lock (Gate) return _s.Global.ContainsKey(id);
+    }
 
-    /// <summary>设置某个按键在当前配置组里的映射（空数组 = 不执行）</summary>
+    /// <summary>当前的全局键列表（自检/界面用）</summary>
+    public static string[] GlobalIds()
+    {
+        lock (Gate) return _s.Global.Keys.ToArray();
+    }
+
+    /// <summary>
+    /// 把某个键设为全局 / 取消全局。
+    /// 设为全局时**用当前组的值**作为全局值；取消时把它写回当前组（否则用户会看到"值突然没了"）。
+    /// </summary>
+    public static string SetGlobal(string id, bool on)
+    {
+        var name = Keys.Table.FirstOrDefault(x => x.Id == id)?.Name ?? id;
+        lock (Gate)
+        {
+            if (on)
+            {
+                var cur = Current.Map.TryGetValue(id, out var v) ? v : Array.Empty<int>();
+                _s.Global[id] = (int[])cur.Clone();
+            }
+            else
+            {
+                if (!_s.Global.TryGetValue(id, out var g)) return $"「{name}」本来就不是全局的";
+                Current.Map[id] = g;              // 值落回当前组，用户不会看到它"消失"
+                _s.Global.Remove(id);
+            }
+        }
+        Save();
+        return on ? $"「{name}」已设为全局：所有配置组共用，切换配置组不再变化"
+                  : $"「{name}」已取消全局：只跟随当前配置组";
+    }
+
+    /// <summary>
+    /// 取指定组的**实际生效**映射（已合并全局键）。
+    ///
+    /// ⚠ 别直接返回 `Groups[idx].Map` —— 全局键的真实值在 Store 顶层，
+    ///   不合并的话 `--map-dump` 和孤儿键回收看到的都是**组里的旧值**，
+    ///   于是 dump 显示 RAlt、实际注入却是 Ctrl+Win（这种"仪表撒谎"比没有仪表更糟）。
+    /// </summary>
+    public static Dictionary<string, int[]> MapOf(int idx)
+    {
+        var g = idx >= 0 && idx < _s.Groups.Count ? _s.Groups[idx].Map : Current.Map;
+        if (_s.Global.Count == 0) return g;
+        var merged = new Dictionary<string, int[]>(g);
+        foreach (var kv in _s.Global) merged[kv.Key] = kv.Value;
+        return merged;
+    }
+
+    /// <summary>设置某个按键的映射（空数组 = 不执行）。全局键写进 Global，其余写当前组</summary>
     public static void Set(string id, int[] vks)
     {
         lock (Gate)
         {
-            if (vks.Length == 0) Current.Map[id] = Array.Empty<int>();
+            // ★ 全局键写到 Global —— 于是「首页切换输入法」这类入口一行都不用改：
+            //   它调的仍是 Set("voice", ...)，效果自然覆盖所有配置组。
+            if (_s.Global.ContainsKey(id)) _s.Global[id] = vks;
             else Current.Map[id] = vks;
         }
         Save();     // ★ 写盘放在锁外：磁盘写不该阻塞按键热路径
