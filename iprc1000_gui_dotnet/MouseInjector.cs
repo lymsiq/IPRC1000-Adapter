@@ -69,6 +69,12 @@ internal static class MouseInjector
     private const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020, MOUSEEVENTF_MIDDLEUP = 0x0040;
     private const uint MOUSEEVENTF_WHEEL = 0x0800, MOUSEEVENTF_HWHEEL = 0x1000;
     private const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
+    /// <summary>
+    /// 让 `MOUSEEVENTF_ABSOLUTE` 的 0..65535 **按整个虚拟桌面**解释，而不是主显示器。
+    /// ★ 2026-10-30：原来这个标志缺了 —— 调用方（本文件内两处 + 宏播放）
+    /// 都是按虚拟桌面算归一化的，缺了它多显示器下会整体偏到主屏上去。
+    /// </summary>
+    private const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
 
     /// <summary>最近一次注入是否被系统接受（false 多为 UIPI 拦截）</summary>
     public static string? LastError { get; private set; }
@@ -142,7 +148,24 @@ internal static class MouseInjector
     }
 
     /// <summary>绝对定位（归一化 0..65535，映射到**整个虚拟桌面**；不走加速曲线）</summary>
-    public static bool MoveAbsolute(int nx, int ny) => Send(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, nx, ny);
+    public static bool MoveAbsolute(int nx, int ny)
+        => Send(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, nx, ny);
+
+    /// <summary>
+    /// 把光标移到**屏幕像素坐标**（支持多显示器负坐标）。宏的 move/click/drag 用这个。
+    ///
+    /// ⚠ 这与 <see cref="MouseEngine"/> 的"只用相对位移、绝不搬光标"是两码事：
+    ///   那条约束是给**鼠标模式**（连续跟手）立的，防止光标跳；
+    ///   宏里"移到指定位置"是用户**明确要求**的行为，必须用绝对定位。
+    /// </summary>
+    public static bool MoveToScreen(int x, int y)
+    {
+        var (vx, vy, vw, vh) = VirtualScreen();
+        if (vw <= 1 || vh <= 1) return false;
+        var nx = (int)Math.Round((x - vx) * 65535.0 / (vw - 1));
+        var ny = (int)Math.Round((y - vy) * 65535.0 / (vh - 1));
+        return MoveAbsolute(Math.Clamp(nx, 0, 65535), Math.Clamp(ny, 0, 65535));
+    }
 
     public static bool Left(bool down) => Send(down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP);
     public static bool Right(bool down) => Send(down ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP);

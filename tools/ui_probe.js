@@ -252,6 +252,73 @@ const PROBE = () => {
         else if (m.kbKeys < 30) bad('屏幕键盘按键过少：主键区 ' + m.kbKeys + ' 个');
         else ok('组合键弹窗正常（' + m.kbKeys + ' 键 / ' + m.mods + ' 修饰键 / 当前=' + m.cur + '）');
         await page.screenshot({ path: path.join(OUT, '03-modal.png') });
+
+        // ★ 2026-10-30：弹窗三页签（按键 / 文本 / 宏）
+        //   这是新增功能最容易坏的地方：页签切了但面板显隐没跟上、文本域塌成 0 高、
+        //   加步骤按钮没绑上、底部说明串页签。全部用断言钉住。
+        const tp = await page.evaluate(() => {
+          const r = {};
+          r.tabs = [...document.querySelectorAll('#comboTabs .cm-tab')].map((b) => b.dataset.tab);
+          switchComboTab('text');
+          r.textVisible = !document.getElementById('paneText').classList.contains('hide');
+          r.keyHidden = document.getElementById('paneKey').classList.contains('hide');
+          r.slots = document.querySelectorAll('#txtSlots .cm-slot').length;
+          r.textH = Math.round(document.getElementById('txtBody').getBoundingClientRect().height);
+          r.noteText = (document.getElementById('comboNote').textContent || '').trim().slice(0, 6);
+          switchComboTab('macro');
+          r.macroVisible = !document.getElementById('paneMacro').classList.contains('hide');
+          r.hasRec = !!document.getElementById('recBtn');
+          r.hasLua = !!document.getElementById('luaBtn');
+          r.hasClear = !!document.getElementById('macClear');
+          document.querySelector('#macAdd button[data-add="keys"]').click();
+          document.querySelector('#macAdd button[data-add="wait"]').click();
+          r.steps = document.querySelectorAll('#macSteps .cm-step').length;
+          r.noteMacro = (document.getElementById('comboNote').textContent || '').trim().slice(0, 6);
+
+          // 失败策略：点一下应在「停 / 跳」之间切（默认停）
+          const of0 = document.querySelector('#macSteps .of');
+          r.ofBefore = of0 ? of0.textContent.trim() : '';
+          if (of0) of0.click();
+          const of1 = document.querySelector('#macSteps .of');
+          r.ofAfter = of1 ? of1.textContent.trim() : '';
+
+          // 粘贴步骤应有**两个**下拉：文本槽位 + 粘贴键（终端要 Ctrl+Shift+V）
+          document.querySelector('#macAdd button[data-add="paste"]').click();
+          const pasteRow = [...document.querySelectorAll('#macSteps .cm-step')]
+            .find((x) => (x.querySelector('.ty') || {}).textContent === '粘贴');
+          r.pasteSelects = pasteRow ? pasteRow.querySelectorAll('select').length : 0;
+
+          document.querySelector('#macSteps .cm-step .del').click();
+          r.stepsAfterDel = document.querySelectorAll('#macSteps .cm-step').length;
+          // 循环遍数：默认必须是 1（触发一次），设成 0 时底部要明确写"一直循环"
+          const lp = document.getElementById('macLoop');
+          r.loopDefault = lp ? lp.value : '(缺)';
+          if (lp) { lp.value = 0; if (lp.onchange) lp.onchange(); }
+          r.footLoop = (document.getElementById('comboCur').textContent || '').trim();
+          switchComboTab('key');
+          r.backKeys = document.querySelectorAll('#kbMain .kb-key, #kbExtra .kb-key').length;
+          return r;
+        });
+        if (tp.tabs.join(',') !== 'key,text,macro') bad('弹窗页签不齐：' + tp.tabs.join(','));
+        else if (!tp.textVisible || !tp.keyHidden) bad('切到「文本」页签时面板显隐不对');
+        else if (tp.slots !== 10) bad('文本槽位数不是 10：' + tp.slots);
+        else if (tp.textH < 80) bad('文本输入框太矮（' + tp.textH + 'px），可能没渲染出来');
+        else if (!tp.macroVisible || tp.steps !== 2 || tp.stepsAfterDel !== 2)
+          bad('宏步骤增删异常：加 3 步后删 1 步，期望 2 步，实得 ' + tp.stepsAfterDel);
+        else if (!tp.hasRec) bad('宏页签缺少「开始录制」按钮');
+        else if (!tp.hasLua) bad('宏页签缺少「导入 .lua」按钮');
+        else if (!tp.hasClear) bad('宏页签缺少「清空」按钮（重新配宏时只能逐条删）');
+        else if (tp.ofBefore !== '停' || tp.ofAfter !== '跳')
+          bad('失败策略按钮不能切换：「' + tp.ofBefore + '」→「' + tp.ofAfter + '」');
+        else if (tp.pasteSelects !== 2)
+          bad('粘贴步骤的下拉不是 2 个（槽位 + 粘贴键），实得 ' + tp.pasteSelects);
+        else if (tp.backKeys < 30) bad('切回「按键」页签后屏幕键盘不见了：' + tp.backKeys);
+        else if (tp.noteText === tp.noteMacro)
+          bad('底部说明没跟着页签变（文本与宏一样：「' + tp.noteText + '」）');
+        else if (tp.loopDefault !== '1') bad('宏的「执行遍数」默认不是 1（是 ' + tp.loopDefault + '），误设会变成循环');
+        else if (!/一直循环/.test(tp.footLoop)) bad('遍数设 0 时底部没提示"一直循环"：「' + tp.footLoop + '」');
+        else ok('弹窗三页签正常（文本 ' + tp.slots + ' 槽 / 宏步骤增删 / 失败策略可切 / 粘贴键可选 / 可录制/导入/清空 / 遍数默认 1）');
+
         await page.keyboard.press('Escape');
         await page.waitForTimeout(220);
         const closed = await page.evaluate(() => {

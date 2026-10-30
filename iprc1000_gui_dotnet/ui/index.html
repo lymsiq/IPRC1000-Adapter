@@ -219,13 +219,74 @@
             <button class="modal-x" id="comboClose" title="关闭 (Esc)">×</button>
           </div>
           <div class="modal-body">
-            <div class="kb-mods" id="kbMods"></div>
-            <div class="kb-preset" id="kbPreset" style="display:none"></div>
-            <div class="kb-main" id="kbMain"></div>
-            <div class="kb-extra" id="kbExtra"></div>
-            <!-- 动作：把这个键配成 切换配置组 / 鼠标左键 / 右键 / 滚轮上 / 滚轮下。
-                 鼠标类走 SendInput，不经虚拟键盘；「切换配置组」= 方块键的出厂值。 -->
-            <div class="kb-mouse" id="kbMouse"></div>
+            <!-- 三页签（2026-10-30）：这个遥控器键按下后干什么 —— 发一个按键 / 粘贴一段文本 / 跑一串宏。
+                 文本和宏都存同一份 macros.json，绑定时写的是负数哨兵（-1001 起）。 -->
+            <div class="cm-tabs" id="comboTabs">
+              <button class="cm-tab on" data-tab="key">按键</button>
+              <button class="cm-tab" data-tab="text">文本</button>
+              <button class="cm-tab" data-tab="macro">宏</button>
+            </div>
+
+            <div class="cm-pane" id="paneKey">
+              <div class="kb-mods" id="kbMods"></div>
+              <div class="kb-preset" id="kbPreset" style="display:none"></div>
+              <div class="kb-main" id="kbMain"></div>
+              <div class="kb-extra" id="kbExtra"></div>
+              <!-- 动作：把这个键配成 切换配置组 / 鼠标左键 / 右键 / 滚轮上 / 滚轮下。
+                   鼠标类走 SendInput，不经虚拟键盘；「切换配置组」= 方块键的出厂值。 -->
+              <div class="kb-mouse" id="kbMouse"></div>
+            </div>
+
+            <!-- 文本：一键把预设文字粘贴到光标处（走剪贴板，不经输入法，中文/emoji 都能过） -->
+            <div class="cm-pane hide" id="paneText">
+              <div class="cm-label">选一组（1–10）<span class="cm-hint" id="txtHint"></span></div>
+              <div class="cm-slots" id="txtSlots"></div>
+              <input class="cm-name" id="txtName" maxlength="40" placeholder="名称（可选，例如「报价话术」）">
+              <textarea class="cm-text" id="txtBody" rows="7"
+                placeholder="点这里输入要一键粘贴的文字…&#10;支持多行、中文、emoji。粘贴时不会经过输入法。"></textarea>
+              <div class="cm-row">
+                <button class="btn ghost" id="txtTest">试一下粘贴</button>
+                <span class="cm-hint">会把光标处的当前内容覆盖掉，先点好目标输入框</span>
+              </div>
+            </div>
+
+            <!-- 宏：按键 / 等待 / 粘贴 / 点击 四类步骤，按顺序执行 -->
+            <div class="cm-pane hide" id="paneMacro">
+              <!-- 录制：点完 3 秒才真正开始，那 3 秒用来把鼠标移回目标窗口
+                   （否则点「开始录制」那一下会被自己录进去） -->
+              <div class="cm-row">
+                <button class="btn" id="recBtn" data-on="0">开始录制</button>
+                <span class="cm-hint" id="recHint">录键盘 + 鼠标点击/拖拽；不录自由移动</span>
+              </div>
+              <div class="cm-row">
+                <input class="cm-name" id="macName" maxlength="40" placeholder="宏名称（可选）">
+                <button class="btn ghost" id="macRun">试运一遍</button>
+              </div>
+              <div class="cm-row">
+                <span class="cm-lab">执行</span>
+                <input class="cm-num" id="macLoop" type="number" min="0" max="999" value="1">
+                <span class="cm-hint" id="macLoopHint">遍 · 1 = 触发一次，0 = 一直循环（按任意遥控器键停）</span>
+              </div>
+              <div class="cm-steps" id="macSteps"></div>
+              <div class="cm-add" id="macAdd">
+                <button class="btn ghost" data-add="keys">+ 按键</button>
+                <button class="btn ghost" data-add="wait">+ 等待</button>
+                <button class="btn ghost" data-add="paste">+ 粘贴文本</button>
+                <button class="btn ghost" data-add="click">+ 点击（图标）</button>
+                <span style="flex:1"></span>
+                <!-- 清空：重新配一个宏时不用逐条删。会二次确认（误点丢很多步很难受） -->
+                <button class="btn ghost" id="macClear" title="清空所有步骤，重新配">清空</button>
+              </div>
+              <!-- 罗技 Lua 导入：只做子集提取，不是 Lua 解释器 -->
+              <div class="cm-row">
+                <button class="btn ghost" id="luaBtn">导入 .lua（罗技）</button>
+                <input type="file" id="luaFile" accept=".lua,.txt" style="display:none">
+                <span class="cm-hint">只认线性序列；按住连点/压枪这类会明确报错并指行号</span>
+              </div>
+              <div class="note">「按键」填虚拟键码，逗号分隔（<b>17,65</b> = Ctrl+A）。
+                「点击」复用按键面板里的「截图点击」：按采集过的图标找，找不到就停下，不会瞎点。</div>
+            </div>
+
             <div class="kb-foot">
               <span class="kb-cur">当前：<b id="comboCur">未设置</b></span>
               <span class="grow"></span>

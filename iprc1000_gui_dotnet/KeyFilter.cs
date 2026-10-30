@@ -154,6 +154,35 @@ internal sealed class KeyFilter : IDisposable
     }
 
     /// <summary>
+    /// **宏播放器专用**：把一个组合键按下/抬起，复用现有的「整份报告快照」下发路径。
+    ///
+    /// 为什么不自己造一套注入：卡键防护（整份报告重算 / 孤儿键回收 / 看门狗）
+    /// 全都挂在 <see cref="_heldButtons"/> + <see cref="InjectSet"/> 上。
+    /// 宏如果绕过它们单独发键，一旦中途异常就是**永久卡键**，
+    /// 而这个 bug 只在用户机器上偶发、几乎无法复现。
+    ///
+    /// `bid` 用 `__mac` 前缀，不会与任何遥控器按键 id 冲突，也不会去查映射表。
+    /// </summary>
+    public void InjectTransient(string bid, int[] vks, bool pressed)
+    {
+        // 释放时允许空 vks：那是"把这个 bid 全部放掉"的兜底用法
+        if (pressed && (vks is null || vks.Length == 0)) return;
+        if (pressed)
+        {
+            // 同名 bid 已按住 → 先放掉，避免"两次按下一次抬起"留下残影
+            if (_heldButtons.ContainsKey(bid)) ForceReleaseButton(bid, "宏重复按下，先放掉上一次");
+            lock (_heldLock) _heldButtons[bid] = (vks, DateTime.UtcNow);
+            InjectSet(ComputeIntended());
+        }
+        else
+        {
+            bool had;
+            lock (_heldLock) had = _heldButtons.Remove(bid);
+            if (had) InjectSet(ComputeIntended());
+        }
+    }
+
+    /// <summary>
     /// 本程序**可能**注入的全部 VK（所有配置组的映射值 + 全部修饰键）。
     ///
     /// 孤儿键回收器只在这个集合里找、绝不碰别的键 —— 所以连**上一个实例被强杀时
@@ -174,6 +203,9 @@ internal sealed class KeyFilter : IDisposable
                     foreach (var v in vks) set.Add(v);
         }
         catch { }
+        // ★ 宏里出现的键也必须算进来 —— 否则孤儿键回收器不认它们：
+        //   宏播放中途崩溃留下的键会被当成"不是我们按的"而永远不释放。
+        try { foreach (var v in Macros.AllInjectableVks()) set.Add(v); } catch { }
         foreach (var m in new[] { 0xA5, 0xA4, 0x12, 0xA3, 0xA2, 0x11, 0xA1, 0xA0, 0x10, 0x5B, 0x5C })
             set.Add(m);
         return set.ToArray();
@@ -575,6 +607,22 @@ internal sealed class KeyFilter : IDisposable
     public void ApplyButton(string bid, bool pressed, string src = "rawinput")
     {        try { OnButton?.Invoke(bid, pressed); } catch { }
 
+        // ★★ 宏播放期间**按任意遥控器键 = 停止**（2026-10-30 由"只放行触发键"改成这样）。
+        //   理由：用户配完宏很可能忘了绑在哪个键上，那时唯一出口就应该是"随便按一个"；
+        //   "按了没反应"比"被打断"更像故障。抬起不处理 —— 抬起也算中断会让一次按键触发两次停止。
+        //
+        //   为什么必须在 ApplyButton（而不是 KeyAct）里拦：宏发的键和用户按的键共用
+        //   _heldButtons + 整份报告，两边同时改就会串键（宏按 Ctrl+A 的过程里插进一个方向键，
+        //   结果不可预测）。
+        if (MacroPlayer.IsRunning)
+        {
+            if (pressed) MacroPlayer.StopByKey(bid);
+            EtwKeySource.AppendLog(
+                $"APPLY  {bid}  {(pressed ? "DOWN" : "UP")}  来源={src}  宏播放中"
+                + (pressed ? $"（{(MacroPlayer.IsTrigger(bid) ? "触发键" : "其他键")} ⇒ 停止）" : "，抬起忽略"));
+            return;
+        }
+
         // ★ 2026-10-29 无驱动模式：按住语音键期间吞掉遥控器自带的 31 Hz 幽灵 `m`。
         //   必须在这里（两种按键来源共用的漏斗）而不是注入路径 —— 幽灵键是**遥控器自己发的**，
         //   跟我们注入了什么无关。
@@ -626,7 +674,7 @@ internal sealed class KeyFilter : IDisposable
                 }
 
                 EtwKeySource.AppendLog(
-                    $"APPLY  {bid}  {(pressed ? "DOWN" : "UP")}  来源={src}  映射={name}（鼠标动作）");
+                    $"APPLY  {bid}  {(pressed ? "DOWN" : "UP")}  来源={src}  映射={name}（动作）");
                 if (pressed && !InjectEnabled)
                 {
                     EtwKeySource.AppendLog($"INJ  {bid} 未注入：InjectEnabled=false（映射={name}）");

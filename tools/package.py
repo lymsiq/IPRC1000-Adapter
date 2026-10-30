@@ -217,6 +217,43 @@ SRC_REQUIRED = [
     ("日志记录按住时长", "iprc1000_gui_dotnet/KeyFilter.cs", '按住 {holdMs:F0} ms'),
     # ★ v1.2.40：桥重启要清按住集合；面板"按住"要反映真实状态
     ("桥重启清按住集合", "iprc1000_gui_dotnet/Backend.cs", 'ClearHeld("语音桥重启，之前的 UP 不会再来")'),
+    # ★ v1.2.139：宏/文本动作库（2026-10-30）
+    #   这四条是"被删掉就出大事"的实现 —— 宏一旦绕过现有注入路径，就是永久卡键。
+    ("宏复用现有注入路径", "iprc1000_gui_dotnet/MacroPlayer.cs", "KeyFilter.InjectTransient"),
+    ("宏的键进孤儿回收", "iprc1000_gui_dotnet/KeyFilter.cs", "Macros.AllInjectableVks()"),
+    ("宏播放中放行中断键", "iprc1000_gui_dotnet/KeyFilter.cs", "MacroPlayer.IsTrigger(bid)"),
+    ("宏有总预算兜底", "iprc1000_gui_dotnet/MacroPlayer.cs", "超过总时长上限"),
+    ("粘贴等够再还原剪贴板", "iprc1000_gui_dotnet/MacroPlayer.cs", "SleepCancellable(PasteDelayMs)"),
+    ("宏引用区间不与鼠标动作重叠", "iprc1000_gui_dotnet/KeyAct.cs", "Macros.IsRef(vk)"),
+    ("macros.json 原子写", "iprc1000_gui_dotnet/Macros.cs", "File.Replace(tmp, File_, File_ + \".bak\""),
+    ("宏界面三页签", "iprc1000_gui_dotnet/ui/index.html", 'id="comboTabs"'),
+    # ★ v1.2.140：循环 + 可观测性（对着 KeymouseGo 的 issues 收的）
+    #   这四条防的是"静默失控"：循环停不下来、无限循环没有刹车、失败查不出第几步。
+    ("任意键都能打断宏", "iprc1000_gui_dotnet/KeyFilter.cs", "MacroPlayer.StopByKey(bid)"),
+    ("无限循环有硬时长上限", "iprc1000_gui_dotnet/MacroPlayer.cs", "MaxTotalMs { get; set; } = 600_000"),
+    ("坏数据不能变成无限循环", "iprc1000_gui_dotnet/Macros.cs", "it.Loop < 0 ? 1 :"),
+    ("试运行强制只跑一遍", "iprc1000_gui_dotnet/MacroPlayer.cs", "Loop = 1, Steps = it.Steps"),
+    ("每步留痕（第几步失败）", "iprc1000_gui_dotnet/MacroPlayer.cs", "MACRO {no}/{it.Steps.Count}"),
+    ("宏起止弹托盘气泡", "iprc1000_gui_dotnet/MainForm.cs", "MacroPlayer.Notify +="),
+    # ★ v1.2.141：录制 + 鼠标步骤 + 可配项（2026-10-30）
+    #   每条都对应一个"删掉就会出事"的机制，不是装饰性断言。
+    ("录制滤掉自己的注入", "iprc1000_gui_dotnet/Recorder.cs", "(info.flags & LLMHF_INJECTED) == 0"),
+    ("录制不记自由移动", "iprc1000_gui_dotnet/Recorder.cs", "if (_recMouseDown) Add("),
+    ("拖拽一步表达（起点+终点）", "iprc1000_gui_dotnet/Recorder.cs", "X2 = e.X, Y2 = e.Y"),
+    ("拖拽抬起在 finally", "iprc1000_gui_dotnet/MacroPlayer.cs", "ClickButton(st.Button, false);"),
+    ("绝对定位要带 VIRTUALDESK", "iprc1000_gui_dotnet/MouseInjector.cs", "MOUSEEVENTF_VIRTUALDESK"),
+    ("坐标点击前校验窗口", "iprc1000_gui_dotnet/MacroPlayer.cs", "WrongWindow(st)"),
+    ("粘贴键可配（终端场景）", "iprc1000_gui_dotnet/MacroPlayer.cs", "DoPaste(st.Slot, st.PasteKey"),
+    ("失败策略 skip 要留痕", "iprc1000_gui_dotnet/MacroPlayer.cs", "已设置为跳过继续"),
+    # ★ v1.2.142：罗技 Lua 导入（只做子集提取）
+    ("Lua 拒绝按住循环", "iprc1000_gui_dotnet/LuaImport.cs", "按住期间持续循环"),
+    ("Lua 支持 scancode 数字", "iprc1000_gui_dotnet/LuaImport.cs", "VkOfScancode"),
+    ("Lua Sleep 变按住时长", "iprc1000_gui_dotnet/LuaImport.cs", "pendingHoldMs += ms"),
+    ("Lua 无坐标点击走光标位", "iprc1000_gui_dotnet/LuaImport.cs", "Target = \"cursor\""),
+    # ★ v1.2.143：按官方 Appendix A 校准键码表（之前小键盘被错映射成方向键）
+    ("Lua 扩展键 scancode 表", "iprc1000_gui_dotnet/LuaImport.cs", "0x148 => 0x26"),
+    ("Lua 小键盘不是方向键", "iprc1000_gui_dotnet/LuaImport.cs", "0x47 => 0x67"),
+    ("Lua 左键默认不上报的提示", "iprc1000_gui_dotnet/LuaImport.cs", "EnablePrimaryMouseButtonEvents"),
     ("按住状态取真实集合", "iprc1000_gui_dotnet/Backend.cs", "PatchEtwPressed"),
     # ★ v1.2.39：探针提示要说清"要重启"（原来只显示"驱动未安装"）
     ("驱动探针提示重启", "iprc1000_gui_dotnet/Backend.cs", "请重启 Windows（不重启注入只能走 SendInput"),
@@ -464,7 +501,7 @@ SRC_REQUIRED = [
     # ★★ 鼠标动作映射（2026-10-16 用户要求）：把任意按键配成 左键/右键/滚轮上/滚轮下
     ("映射支持动作值", "iprc1000_gui_dotnet/KeyAct.cs", "public const int Left = -1"),
     ("动作值走 SendInput（不进虚拟键盘）", "iprc1000_gui_dotnet/KeyFilter.cs", "KeyAct.IsSingleAction"),
-    ("鼠标动作有日志留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "（鼠标动作）"),
+    ("鼠标动作有日志留痕", "iprc1000_gui_dotnet/KeyFilter.cs", "映射={name}（动作）"),
     ("解析认识动作名", "iprc1000_gui_dotnet/Keys.cs", "KeyAct.FromName"),
     ("动作值有纯逻辑自检", "iprc1000_gui_dotnet/KeyAct.cs", "public static string SelfTest"),
     ("鼠标动作自检有 CLI 入口", "iprc1000_gui_dotnet/Program.cs", "--mouseact-test"),
@@ -961,7 +998,7 @@ if __name__ == "__main__":
     # ── ① 主包（框架依赖，约 2.5 MB）──
     publish_fresh()
     tgt = build()
-    verify()
+    ok_main = verify()
 
     # ── ② 免运行时版（自包含 + 压缩，约 64 MB）──
     #    需求来源：门店机器常年「无网 + 店员没有管理员权限」，
@@ -970,7 +1007,7 @@ if __name__ == "__main__":
     print()
     publish_fresh(out=FULL_PUB, self_contained=True, compressed=True)
     full_tgt = build(pub=FULL_PUB, target=FULL_PKG, variant="full")
-    verify(zp=FULL_ZP, title="免运行时版", self_contained=True, source_checks=False)
+    ok_full = verify(zp=FULL_ZP, title="免运行时版", self_contained=True, source_checks=False)
 
     # ── 单文件安装包（IPRC1000_Setup_v<版本>.exe）──
     #    载荷 = 刚打好的免运行时版（含 .NET 8）；引导程序本身用 net48（Win10/11 自带）。
@@ -1010,3 +1047,10 @@ if __name__ == "__main__":
         h = hashlib.sha256(open(p, "rb").read()).hexdigest()
         mb = os.path.getsize(p) / 1024 / 1024
         print(f"   sha256 {os.path.basename(p):40s} {mb:7.1f} MB  {h}")
+
+    # ★★ 2026-10-30：检查未通过必须让**退出码非 0**。
+    #   之前只打印「★ 有检查未通过 ✗」但 exit 0 —— 外层脚本/CI 根本看不出失败，
+    #   实测就这样带着一条红断言把包打了出去。
+    if not (ok_main and ok_full):
+        print("\n★ 检查有未通过项 —— 包已生成，但**不要发版**（先修断言或代码）")
+        sys.exit(1)

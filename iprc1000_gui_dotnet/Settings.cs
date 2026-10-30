@@ -244,6 +244,26 @@ internal static class Settings
         set { _data.KeySource = value; Save(); }
     }
 
+    /// <summary>
+    /// 宏的「粘贴文本」步骤执行后，是否把剪贴板**还原**成原来的内容。
+    /// 默认 true —— 不还原等于每次用宏都悄悄改掉用户的剪贴板。
+    /// </summary>
+    public static bool MacroRestoreClipboard
+    {
+        get => _data.MacroRestoreClipboard;
+        set { _data.MacroRestoreClipboard = value; Save(); }
+    }
+
+    /// <summary>
+    /// 发出 Ctrl+V 之后等多久才还原剪贴板（毫秒）。
+    /// ★ 不能太短：粘贴是**异步**的，浏览器/Electron 读完剪贴板之前就还原，会粘成旧内容。
+    /// </summary>
+    public static int MacroPasteDelayMs
+    {
+        get => _data.MacroPasteDelayMs <= 0 ? 400 : Math.Clamp(_data.MacroPasteDelayMs, 150, 3000);
+        set { _data.MacroPasteDelayMs = Math.Clamp(value, 150, 3000); Save(); }
+    }
+
     private static void Save()
     {
         try
@@ -283,6 +303,10 @@ internal static class Settings
         /// </summary>
         public bool AutoKeepDefaultMic { get; set; }
         public string KeySource { get; set; } = "auto";
+        /// <summary>宏粘贴后是否还原剪贴板（默认 true）</summary>
+        public bool MacroRestoreClipboard { get; set; } = true;
+        /// <summary>Ctrl+V 之后等多久还原剪贴板（毫秒，默认 400）</summary>
+        public int MacroPasteDelayMs { get; set; } = 400;
         /// <summary>
         /// 是否写文本日志。**默认 false**（发布版性能优先，见 LogSwitch 的说明）。
         /// 排查问题时在环境设置页勾上，或设环境变量 `IPRC1000_LOG=on`。

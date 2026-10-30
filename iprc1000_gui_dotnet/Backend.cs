@@ -63,6 +63,11 @@ internal sealed class Backend : IDisposable
     {
         _filter = f;
         _filter.InjectEnabled = true;
+        // ★ 宏播放器拿同一个注入器 —— 宏必须复用现有注入路径（整份报告 / 孤儿回收 / 看门狗），
+        //   自己另发键的话一次异常就是永久卡键。
+        MacroPlayer.Attach(_filter);
+        MacroPlayer.RestoreClipboard = Settings.MacroRestoreClipboard;
+        MacroPlayer.PasteDelayMs = Settings.MacroPasteDelayMs;
         // ★ 鼠标模式路由：**只有四个方向键**由鼠标引擎接管（返回 true = 已消费，不走键盘映射）。
         //   挂在 ApplyButton 这个"两种按键来源共用的唯一漏斗"上，所以 ETW / 钩子两种模式都成立。
         //
@@ -862,6 +867,20 @@ internal sealed class Backend : IDisposable
                 ["configured"] = items.Count(i => i.vks.Length > 0),
                 ["total"] = items.Count,
             },
+            // 宏/文本摘要（只带名称和长度/步数，**不带正文**）——
+            // 并进 getState 是为了不额外增加一次每 2 秒的跨进程调用；正文等点开某条时再取。
+            ["macros"] = System.Text.Json.Nodes.JsonNode.Parse(Macros.StateJson()),
+            // 宏的运行进度：界面据此显示"第 2/5 遍"、已跑多久、为什么停。
+            // ★ 这三个字段必须是**实时读**（不是缓存），否则界面显示的是上一次的状态。
+            ["macroRun"] = new JsonObject
+            {
+                ["running"] = MacroPlayer.IsRunning,
+                ["num"] = MacroPlayer.RunningNum,
+                ["round"] = MacroPlayer.Round,
+                ["total"] = MacroPlayer.TotalRounds,
+                ["elapsedMs"] = MacroPlayer.ElapsedMs,
+                ["stopReason"] = MacroPlayer.StopReason,
+            },
             ["reg"] = JsonSerializer.SerializeToNode(Env.RegState()),
             ["cable"] = JsonSerializer.SerializeToNode(_cableCache),
             ["bridge"] = BridgeStatus(),
@@ -1074,6 +1093,156 @@ internal sealed class Backend : IDisposable
     {
         var n = Keymaps.ResetCurrent();
         return Env.Json(new { ok = true, message = $"已把配置组「{n}」恢复为默认映射。" });
+    }
+
+    // ── 宏 / 文本动作库（2026-10-30）────────────────────────────────────────
+    //
+    // 一条 macros.json 同时存「文本组 1-10」和「宏」，文本本身就是"只有一步 paste 的宏"。
+    // 界面两个编辑视图，数据是同一个 —— 不会出现"文本改了宏没改"。
+
+    private string GetMacros()
+        => "{\"ok\":true,\"items\":" + Macros.StateJson() + "}";
+
+    private string GetMacro(string a0)
+    {
+        if (!int.TryParse(a0, out var num)) return Env.Json(new { ok = false, message = "参数错误" });
+        return "{\"ok\":true,\"item\":" + Macros.ItemJson(num) + "}";
+    }
+
+    /// <summary>JSON 里取整数：**不用 GetValue&lt;int&gt;**，因为前端可能传字符串或浮点数，
+    /// 那会抛 InvalidOperationException 而不是给个默认值</summary>
+    private static int IntOf(System.Text.Json.Nodes.JsonNode? n, int def)
+        => int.TryParse(n?.ToString() ?? "", out var v) ? v : def;
+
+    private string SaveTextCmd(string a0)
+    {
+        try
+        {
+            var n = System.Text.Json.Nodes.JsonNode.Parse(a0);
+            var msg = Macros.SaveText(IntOf(n?["slot"], 0), n?["name"]?.ToString() ?? "",
+                                      n?["text"]?.ToString() ?? "");
+            return Env.Json(new { ok = true, message = msg });
+        }
+        catch (Exception e) { return Env.Json(new { ok = false, message = "保存失败：" + e.Message }); }
+    }
+
+    private string SaveMacroCmd(string a0)
+    {
+        try
+        {
+            var n = System.Text.Json.Nodes.JsonNode.Parse(a0);
+            var steps = new List<Macros.Step>();
+            if (n?["steps"] is System.Text.Json.Nodes.JsonArray arr)
+            {
+                foreach (var s in arr)
+                {
+                    var st = new Macros.Step
+                    {
+                        Type = s?["type"]?.ToString() ?? Macros.StepWait,
+                        HoldMs = IntOf(s?["holdMs"], 30),
+                        Ms = IntOf(s?["ms"], 80),
+                        Slot = IntOf(s?["slot"], 1),
+                    };
+                    if (s?["vks"] is System.Text.Json.Nodes.JsonArray va)
+                    {
+                        var list = new List<int>();
+                        foreach (var x in va) { var v = IntOf(x, 0); if (v > 0) list.Add(v); }
+                        st.Vks = list.ToArray();
+                    }
+                    steps.Add(st);
+                }
+            }
+            var msg = Macros.SaveMacro(IntOf(n?["num"], 0), n?["name"]?.ToString() ?? "", steps,
+                                       IntOf(n?["loop"], 1), out var saved);
+            return Env.Json(new { ok = !msg.Contains("失败") && !msg.Contains("找不到"), message = msg, num = saved });
+        }
+        catch (Exception e) { return Env.Json(new { ok = false, message = "保存失败：" + e.Message }); }
+    }
+
+    private string DeleteMacroCmd(string a0)
+    {
+        if (!int.TryParse(a0, out var num)) return Env.Json(new { ok = false, message = "参数错误" });
+        return Env.Json(new { ok = true, message = Macros.Delete(num) });
+    }
+
+    private string RunMacroCmd(string a0)
+    {
+        if (!int.TryParse(a0, out var num)) return Env.Json(new { ok = false, message = "参数错误" });
+        return Env.Json(new { ok = true, message = MacroPlayer.RunSync(num) });
+    }
+
+    private string TestPasteCmd(string a0)
+    {
+        if (!int.TryParse(a0, out var slot)) return Env.Json(new { ok = false, message = "参数错误" });
+        if (string.IsNullOrEmpty(Macros.TextOfSlot(slot)))
+            return Env.Json(new { ok = false, message = $"文本 {slot} 还没有内容" });
+        return Env.Json(new { ok = true, message = MacroPlayer.PasteTest(slot) });
+    }
+
+    // ── 录制（2026-10-30）──────────────────────────────────────────────────
+    //
+    // 录制走**独立的高级钩子**，与注入路径完全分开：只读不写。
+    // 钩子回调里靠 LLKHF_INJECTED / LLMHF_INJECTED 把自己注入的事件滤掉，
+    // 否则"播放宏的同时顺手按了录制"会把宏自己发的键又录一遍。
+
+    private string StartRecordCmd()
+    {
+        var msg = Recorder.Start();
+        return Env.Json(new { ok = Recorder.IsRecording, message = msg });
+    }
+
+    private string StopRecordCmd()
+    {
+        if (!Recorder.IsRecording) return Env.Json(new { ok = false, message = "当前没有在录制" });
+        var msg = Recorder.Stop();
+        return Env.Json(new { ok = true, message = msg + " · " + Recorder.Summary() });
+    }
+
+    private string TakeRecordCmd()
+    {
+        var steps = Recorder.TakeSteps(out var summary);
+        if (steps.Count == 0) return Env.Json(new { ok = false, message = "没录到操作" });
+        // 录完就清空缓冲：否则用户连点两次「取回」会拿到重复的步骤
+        Recorder.Cancel();
+        return "{\"ok\":true,\"message\":" + System.Text.Json.JsonSerializer.Serialize(summary)
+             + ",\"steps\":" + Macros.StepsToJson(steps) + "}";
+    }
+
+    private string CancelRecordCmd()
+    {
+        Recorder.Cancel();
+        return Env.Json(new { ok = true, message = "已放弃这次录制" });
+    }
+
+    private string RecordStateCmd()
+    {
+        return Env.Json(new
+        {
+            ok = true,
+            recording = Recorder.IsRecording,
+            events = Recorder.EventCount,
+            elapsedMs = Recorder.ElapsedMs,
+        });
+    }
+
+    /// <summary>
+    /// 罗技 Lua 导入。**失败也要把警告带回去** —— 用户需要知道"哪几行被跳过了"，
+    /// 否则导入出来的宏少了几步，他只会觉得"这功能不准"。
+    /// </summary>
+    private string ImportLuaCmd(string a0)
+    {
+        var r = LuaImport.Parse(a0);
+        var warnJson = System.Text.Json.JsonSerializer.Serialize(r.Warnings);
+        if (!r.Ok)
+        {
+            var msg = r.Error.Length > 0 ? r.Error : "没解析出可执行步骤";
+            return "{\"ok\":false,\"message\":" + System.Text.Json.JsonSerializer.Serialize(msg)
+                 + ",\"warnings\":" + warnJson + "}";
+        }
+        return "{\"ok\":true,\"message\":"
+             + System.Text.Json.JsonSerializer.Serialize($"已导入 {r.Steps.Count} 步")
+             + ",\"warnings\":" + warnJson
+             + ",\"steps\":" + Macros.StepsToJson(r.Steps) + "}";
     }
 
     public string StartBridge()
@@ -2301,6 +2470,22 @@ internal sealed class Backend : IDisposable
             "installCable" => InstallCable(),
             "setDefaultMic" => SetDefaultMic(),
             "saveKey" => SaveKey(a0, a1),
+            // 宏 / 文本动作库（2026-10-30）：一条 macros.json 同时存文本组与宏
+            "getMacros" => GetMacros(),
+            "getMacro" => GetMacro(a0),
+            "saveText" => SaveTextCmd(a0),
+            "saveMacro" => SaveMacroCmd(a0),
+            "deleteMacro" => DeleteMacroCmd(a0),
+            "runMacro" => RunMacroCmd(a0),
+            "testPaste" => TestPasteCmd(a0),
+            // 录制（2026-10-30）：键盘 + 鼠标点击/移动/拖拽 → 步骤
+            "startRecord" => StartRecordCmd(),
+            "stopRecord" => StopRecordCmd(),
+            "takeRecord" => TakeRecordCmd(),
+            "cancelRecord" => CancelRecordCmd(),
+            "recordState" => RecordStateCmd(),
+            // 罗技 Lua 导入（2026-10-30）：只做子集提取，不做 Lua 解释器
+            "importLua" => ImportLuaCmd(a0),
             "switchGroup" => SwitchGroup(a0),
             "newGroup" => NewGroup(),
             "renameGroup" => RenameGroup(a0, a1),

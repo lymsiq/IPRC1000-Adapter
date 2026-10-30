@@ -57,6 +57,9 @@ internal static class Keys
         [0xA4] = "左 Alt", [0xA5] = "右 Alt",
         [0xAD] = "静音", [0xAE] = "音量-", [0xAF] = "音量+", [0x5D] = "菜单键",
         [0xB0] = "下一曲", [0xB1] = "上一曲", [0xB2] = "停止", [0xB3] = "播放/暂停",
+        // ★ 2026-10-30：0xDB/0xDD 进了出厂默认（Ctrl+[ / Ctrl+] 切换标签），
+        //   不补这两项的话界面和 --map-dump 会显示成「Ctrl+0xDB」，用户看不懂。
+        [0xDB] = "[", [0xDD] = "]",
     };
 
     private static readonly HashSet<int> Mods = new() { 0x11, 0x10, 0x12, 0x5B, 0x5C, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5 };
@@ -124,7 +127,8 @@ internal static class Keys
                     // 负数只认那几个哨兵值 —— 其余的必须**明确报错**，
                     // 不能放进映射表里等注入时才炸（那会变成一个静默的怪故障）
                     if (p.StartsWith('-') && int.TryParse(p, out var neg) && !KeyAct.Is(neg))
-                        throw new ArgumentException($"不认识的鼠标动作：{p}（只有 鼠标左键/右键/滚轮上/滚轮下）");
+                        throw new ArgumentException(
+                            $"不认识的动作值：{p}（只有 鼠标左键/右键/滚轮上/滚轮下/切换配置组/截图点击，或宏引用 -1001 起）");
                     throw new ArgumentException($"无法解析：{p}");
                 }
             }

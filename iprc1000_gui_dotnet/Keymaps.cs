@@ -444,6 +444,17 @@ internal static class Keymaps
 /// ★ 冻结版本（Ver 9）：以下键位是用户逐键实测确认后的**最终定稿**，
 ///   与 `%APPDATA%\IPRC1000 Adapter\keymap.json` 里当时的内容逐键一致。
 ///   改动前请先确认这是有意的，不要顺手"优化"。
+///
+/// ★★ 2026-10-30 二次定稿（v1.2.138）：按真机上正在使用的配置组重新冻结，
+///   与用户当时的 `keymap.json`（Active=0「默认配置组 1」/第 1 组「鼠标模式」）逐键一致。
+///   相对 Ver 9 的 6 处变化：
+///     power         Win+L   → Ctrl+F4             （锁屏用不上，关标签更常用）
+///     account       Win+E   → 截图点击（-6）        （Win+E 与 back 的资源管理器语义冲突）
+///     channel_up    PageUp  → Ctrl+[              （跟 WorkBuddy 组的"上一个任务"对齐）
+///     channel_down  PgDn    → Ctrl+]              （同上）
+///     last          Alt+Tab → Ctrl+Alt+Tab        （粘滞式，松手不消失，选窗口更稳）
+///     mouse.exit    Esc     → 鼠标左键（-1）       （鼠标模式没有窗口要退，左键是刚需）
+///   ⚠ 只影响**新建/恢复默认**；已存在的 keymap.json **不会被覆盖**（不升 Ver、不触发迁移）。
 /// </summary>
 internal static class Defaults
 {
@@ -458,7 +469,7 @@ internal static class Defaults
     public static Dictionary<string, int[]> Plain() => new()
     {
         // 遥控器按键        注入的键
-        ["power"] = new[] { 0x5B, 0x4C },              // Win+L  锁屏
+        ["power"] = new[] { 0x11, 0x73 },              // Ctrl+F4  关闭当前标签/文档
         ["back"] = new[] { 0x08 },                     // Backspace（浏览器/资源管理器=后退）
         ["menu"] = new[] { 0x5D },                     // 菜单键（右键菜单，多数程序都认）
         ["exit"] = new[] { 0x1B },                     // Esc
@@ -470,16 +481,16 @@ internal static class Defaults
         ["right"] = new[] { 0x27 },
         ["favorite"] = new[] { 0x5B, 0x10, 0x53 },     // Win+Shift+S  区域截图
         ["voice"] = new[] { 0xA5 },                    // ★ 右 Alt —— 豆包「长按模式」说话
-        ["account"] = new[] { 0x5B, 0x45 },            // Win+E  资源管理器
+        ["account"] = new[] { KeyAct.ClickIcon },      // 动作值：截图点击（找采集过的图标并单击）
         ["play_pause"] = new[] { 0xB3 },               // 播放/暂停
         ["fast_forward"] = new[] { 0x12, 0x1B },       // Alt+Esc  按任务栏顺序切换窗口
         ["rewind"] = new[] { 0x5B, 0x44 },             // Win+D  显示桌面
-        ["channel_up"] = new[] { 0x21 },               // PageUp
-        ["channel_down"] = new[] { 0x22 },             // PageDown
+        ["channel_up"] = new[] { 0x11, 0xDB },         // Ctrl+[  上一个标签/任务
+        ["channel_down"] = new[] { 0x11, 0xDD },       // Ctrl+]  下一个标签/任务
         ["volume_up"] = new[] { 0xAF },                // 系统音量 +
         ["volume_down"] = new[] { 0xAE },              // 系统音量 -
         ["mute"] = new[] { 0xAD },                     // 系统静音
-        ["last"] = new[] { 0x12, 0x09 },               // Alt+Tab 切换窗口
+        ["last"] = new[] { 0x12, 0x11, 0x09 },         // Ctrl+Alt+Tab  粘滞切换窗口（松手不消失）
         // ★ 方块键不再是"硬编码的特殊键"：它是一个**普通可绑定键**，
         //   出厂值 = 动作值「切换配置组」（负数哨兵，见 KeyAct）。用户可以改绑成任何键。
         ["square"] = new[] { KeyAct.SwitchGroup },
@@ -488,9 +499,10 @@ internal static class Defaults
     /// <summary>
     /// **鼠标模式组**（Kind = "mouse"）—— 这一组**就是鼠标模式本身**。
     ///
-    /// 默认映射 = <see cref="Plain"/> 原样，**只把四个方向键清空**：
-    /// 方向键在鼠标组里由 <see cref="MouseEngine"/> 接管（按住加速移动），
-    /// 走不了普通映射；其余按键（含确认、info、语音…）**全部沿用默认组**，
+    /// 默认映射 = <see cref="Plain"/> 原样，只做两处覆盖：
+    ///   ① 四个方向键**清空** —— 由 <see cref="MouseEngine"/> 接管（按住加速移动），走不了普通映射；
+    ///   ② `exit` 改成**鼠标左键** —— 鼠标模式下没有窗口焦点要退，左键才是刚需。
+    /// 其余按键（含确认、info、语音…）**全部沿用默认组**，
     /// 用户可以随时在弹窗里改成任何东西（比如把确认改成「鼠标左键」就能恢复
     /// "按住方向 + 按住确认 = 拖拽"）。
     /// </summary>
@@ -499,6 +511,11 @@ internal static class Defaults
         var m = Plain();
         foreach (var d in new[] { "up", "down", "left", "right" })
             m[d] = Array.Empty<int>();       // 交给引擎，不注入按键
+
+        // ★ 2026-10-30 按真机实测配置冻结：鼠标模式下 Esc 没有意义（没有窗口焦点要退），
+        //   改成**鼠标左键**才是刚需 —— 配合方向键移动就能完成"移动→点击"，
+        //   不需要再回到默认组。这一处是**唯一**偏离 Plain 的键（方向键除外）。
+        m["exit"] = new[] { KeyAct.Left };
         return m;
     }
 

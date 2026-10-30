@@ -55,10 +55,21 @@ internal static class KeyAct
     // ★ 2026-10-18 修：原来写 `vk >= SwitchGroup(-5) && vk <= Left(-1)`，
     //   新增 ClickIcon(-6) 后它被判"虚拟键码越界"（真机报错就是这句）。
     //   区间必须覆盖**最小的哨兵**，否则每加一个动作都要改这里。
-    public static bool Is(int vk) => vk >= ClickIcon && vk <= Left;
+    // ★ 2026-10-30：宏引用（`-1001` 起，见 <see cref="Macros"/>) 是**另一段不连续区间**，
+    //   不能靠"扩大这个范围"来覆盖 —— 那会把 -7..-999 这些**无意义的空洞**也判成合法，
+    //   于是一个手改错的值会被当成动作送进注入层，而不是被拒掉。
+    public static bool Is(int vk) => (vk >= ClickIcon && vk <= Left) || Macros.IsRef(vk);
 
     /// <summary>是不是鼠标类动作</summary>
     public static bool IsMouse(int vk) => vk >= WheelDown && vk <= Left;
+
+    /// <summary>宏引用在界面/日志里的显示名。目标被删了也要能看出来（不能显示成空白）</summary>
+    private static string MacroLabel(int vk)
+    {
+        var it = Macros.FindByRef(vk);
+        if (it is null) return "（目标已删除）";
+        return (it.Kind == Macros.KindText ? "输入文本" : "执行宏") + "：" + it.Name;
+    }
 
     /// <summary>中文名（界面与日志用）；不是鼠标动作返回 null</summary>
     public static string? NameOf(int vk) => vk switch
@@ -69,6 +80,7 @@ internal static class KeyAct
         WheelDown => "滚轮下",
         SwitchGroup => "切换配置组",
         ClickIcon => "截图点击",
+        _ when Macros.IsRef(vk) => MacroLabel(vk),
         _ => null,
     };
 
@@ -101,11 +113,16 @@ internal static class KeyAct
         SwitchGroup => true,
         // 截图点击**只在按下时**做一次（它是一次性动作，抬起无需处理）
         ClickIcon => down && ClickIconNow(),
+        // ★ 宏引用：按下 = 开始播放（正在播同一个则=中断），抬起什么都不做。
+        //   一次性语义和「切换配置组」一致 —— 等抬起就等于"丢一次 UP 这个键就失灵"。
+        _ when Macros.IsRef(vk) => down && MacroPlayer.Toggle(Macros.RefBase - vk),
         _ => false,
     };
 
-    /// <summary>截图点击：找图标并单击。结果写进日志（失败原因要能看出来）。</summary>
-    private static bool ClickIconNow()
+    /// <summary>截图点击：找图标并单击。结果写进日志（失败原因要能看出来）。
+    /// 2026-10-30 由 private 改 public：宏里的「点击」步骤要复用同一套实现，
+    /// **不要**在宏里另写一份截图匹配 —— 两份实现迟早行为不一致。</summary>
+    public static bool ClickIconNow()
     {
         try
         {

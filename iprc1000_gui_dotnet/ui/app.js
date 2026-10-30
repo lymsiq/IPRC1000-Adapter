@@ -30,6 +30,35 @@ const VK_SYM = {0x11:'Ctrl',0x12:'Alt',0x10:'Shift',0x5B:'Win'};
 const KEY_ACTS = [['切换配置组',-5],['鼠标左键',-1],['鼠标右键',-2],['滚轮上',-3],['滚轮下',-4],['截图点击',-6]];
 const ACT_NAME = Object.fromEntries(KEY_ACTS.map(([n,v]) => [v, n]));
 const isKeyAct = (v) => Number.isInteger(v) && v >= -6 && v <= -1;
+
+/* ── 宏 / 文本组的引用值（后端 Macros.RefBase = -1000）──
+   绑定值 = -1000 - 编号：文本槽 1..10 → -1001..-1010；宏 → -1101 起。
+   和上面的鼠标动作（-6..-1）是**两段不重叠区间** —— 后端 KeyAct.Is() 也是分开判的，
+   所以这里不能简单写成"负数就是动作"（那会把 -7..-999 这些空洞也当成合法值）。 */
+const MACRO_REF_BASE = -1000;
+const isMacroRef = (v) => Number.isInteger(v) && v < MACRO_REF_BASE && v >= MACRO_REF_BASE - 999;
+const macroNumOf = (v) => MACRO_REF_BASE - v;
+const isAct = (v) => isKeyAct(v) || isMacroRef(v);
+
+/* 宏/文本摘要（来自 state.macros，只有名称和长度/步数，没有正文） */
+let MACRO_ITEMS = [];
+
+function macroItemOf(v) {
+  if (!isMacroRef(v)) return null;
+  const num = macroNumOf(v);
+  return MACRO_ITEMS.find((x) => x.num === num) || null;
+}
+
+/* 动作值 → 界面文字。「目标已删除」必须显式说出来：
+   绑了宏又删掉宏的用户，如果这里显示空白，会以为"这个键坏了"。 */
+function actLabelOf(v) {
+  if (isMacroRef(v)) {
+    const it = macroItemOf(v);
+    if (!it) return '（目标已删除）';
+    return (it.kind === 'text' ? '输入文本：' : '执行宏：') + it.name;
+  }
+  return ACT_NAME[v] || '动作值';
+}
 let kbMods = new Set();    // 已选修饰键
 let kbKey = null;          // 已选主键 vk
 let kbKeyLabel = '';       // 主键显示名
@@ -365,8 +394,8 @@ function renderGroups(s) {
 function kbPreviewText() {
   const parts = [...kbMods].map(v => VK_SYM[v] || String(v));
   if (kbKey !== null) {
-    parts.push(isKeyAct(kbKey)
-      ? (ACT_NAME[kbKey] || '动作值')                                       // 负数不能当 VK 打印
+    parts.push(isAct(kbKey)
+      ? actLabelOf(kbKey)                                                   // 负数不能当 VK 打印
       : (kbKeyLabel || ('0x' + kbKey.toString(16).toUpperCase())));
   }
   return parts.length ? parts.join(' + ') : '';
@@ -605,8 +634,8 @@ function selectKey(id) {
     else if (vk === 0xA5) { kbKey = vk; kbKeyLabel = 'RightAlt'; }        // 右 Alt（豆包说话）
     else { kbKey = vk; kbKeyLabel = null; }
   });
-  if (kbKey !== null && isKeyAct(kbKey)) {
-    kbKeyLabel = ACT_NAME[kbKey] || '动作值';           // 负数：键盘表里根本没有它
+  if (kbKey !== null && isAct(kbKey)) {
+    kbKeyLabel = actLabelOf(kbKey);                     // 负数：键盘表里根本没有它
   } else if (kbKey !== null && !kbKeyLabel) {
     // 从键盘表里反查显示名
     const all = KB_ROWS.flat().concat(KB_EXTRA);
@@ -615,10 +644,7 @@ function selectKey(id) {
   }
 
   $('#comboTitle').textContent = `设置「${it.name}」的快捷键（${it.label}）`;
-  $('#comboNote').textContent =
-    '点修饰键（Ctrl / Alt / Shift / Win，可多选）再点主键；只选修饰键也可保存；点「不执行」= 该键不注入。'
-    + '动作只能单独用：左/右键按住—抬起成对（按住方向 + 按住左键 = 拖拽），'
-    + '滚轮按下滚一格，「切换配置组」按下即生效（方块键的出厂值就是它）。';
+  // 底部说明不在这里设：由 paintComboNote() 按当前页签决定（切页签时也要跟着变）
   const th = $('#comboThumb');
   if (th && it.rect) {
     const { cx, cy, w, h } = it.rect;
@@ -657,9 +683,508 @@ function selectKey(id) {
 
   paintKb();
   $('#comboMask').classList.remove('hide');
+  // 三页签初始化（异步：如果这个键绑的是宏/文本，会载入内容并自动切过去）
+  initComboPanes(it);
 }
 
-function closeCombo() { $('#comboMask').classList.add('hide'); }
+function closeCombo() {
+  // 弹窗关掉时把录制相关的东西收干净：
+  // 倒计时还在跑就不该继续启动；已经在录就必须停 —— 用户看不到任何状态提示，
+  // 后台悄悄录下去只会让人困惑（而且再打开弹窗会看到一堆莫名的步骤）。
+  if (REC_TIMER) { clearInterval(REC_TIMER); REC_TIMER = null; }
+  const rb = $('#recBtn');
+  if (rb && rb.dataset.on === '1') {
+    try { B.cancelRecord(); } catch (e) { }
+    rb.dataset.on = '0';
+    rb.textContent = '开始录制';
+    if ($('#recHint')) $('#recHint').textContent = '录键盘 + 鼠标点击/拖拽；不录自由移动';
+  }
+  $('#comboMask').classList.add('hide');
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   弹窗三页签：按键 / 文本 / 宏（2026-10-30）
+   ──────────────────────────────────────────────────────────────────────
+   一个遥控器键按下后只能干一件事，所以三者**互斥**：
+     · 按键页签 → 保存 int[]（现有行为，一行没动）
+     · 文本页签 → 存文本组（slot 1-10）+ 把键绑到 -1000-slot
+     · 宏页签   → 存宏（多步）+ 把键绑到 -1000-num
+   文本和宏都写同一份 macros.json —— 文本本身就是"只有一步 paste 的宏"。
+   ══════════════════════════════════════════════════════════════════════ */
+
+let COMBO_TAB = 'key';
+let COMBO_KEY = null;
+const TXT = { slot: 1 };
+const MAC = { num: 0, steps: [], loop: 1 };
+const STEP_LABEL = { keys: '按键', wait: '等待', paste: '粘贴', click: '点击', move: '移动', drag: '拖拽' };
+
+/* 底部说明按页签切换 —— 原来这段文案写死在 selectKey 里，
+   结果切到「文本」「宏」页签时还在讲修饰键怎么点，属于**界面上显示错信息**。 */
+const COMBO_NOTE = {
+  key: '点修饰键（Ctrl / Alt / Shift / Win，可多选）再点主键；只选修饰键也可保存；点「不执行」= 该键不注入。'
+    + '动作只能单独用：左/右键按住—抬起成对（按住方向 + 按住左键 = 拖拽），'
+    + '滚轮按下滚一格，「切换配置组」按下即生效（方块键的出厂值就是它）。',
+  text: '一键把这段文字粘贴到光标处：走剪贴板 + Ctrl+V，不经输入法，中文和 emoji 都能过。'
+    + '粘贴完成后会把你原来的剪贴板内容还回去。',
+  macro: '按顺序执行：按键 / 等待 / 粘贴 / 点击 / 移动 / 拖拽。'
+    + '播放中按任意遥控器键 = 停止；执行遍数填 0 表示一直循环（最长 10 分钟自动停）。',
+};
+
+function paintComboNote() {
+  const el = $('#comboNote');
+  if (el) el.textContent = COMBO_NOTE[COMBO_TAB] || COMBO_NOTE.key;
+}
+
+/* vks 数组 → 可读文字（列表/底部状态用，不依赖后端） */
+function vkNameOf(v) {
+  const all = KB_ROWS.flat().concat(KB_EXTRA);
+  const hit = all.find((x) => x[1] === v);
+  return hit ? hit[0] : ('0x' + v.toString(16).toUpperCase());
+}
+function vksText(vks) {
+  if (!vks || !vks.length) return '不执行';
+  const mods = [], keys = [];
+  vks.forEach((v) => {
+    if (isAct(v)) keys.push(actLabelOf(v));
+    else if (v === 0x11 || v === 0x12 || v === 0x10 || v === 0x5B) mods.push(VK_SYM[v] || String(v));
+    else keys.push(vkNameOf(v));
+  });
+  return mods.concat(keys).join('+');
+}
+
+function switchComboTab(name) {
+  COMBO_TAB = name;
+  const tabs = $('#comboTabs');
+  if (tabs) [...tabs.querySelectorAll('.cm-tab')].forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
+  [['key', '#paneKey'], ['text', '#paneText'], ['macro', '#paneMacro']].forEach(([k, sel]) => {
+    const p = $(sel);
+    if (p) p.classList.toggle('hide', k !== name);
+  });
+  if (name === 'text') renderTextPane();
+  if (name === 'macro') renderMacroPane();
+  paintComboFoot();
+  paintComboNote();
+}
+
+/* 底部「当前：」跟着页签走 —— 保存前必须能看清"这一下会写成什么" */
+function paintComboFoot() {
+  const el = $('#comboCur');
+  if (!el) return;
+  if (COMBO_TAB === 'text') { el.textContent = `文本 ${TXT.slot}（粘贴）`; return; }
+  if (COMBO_TAB === 'macro') {
+    // 运行中优先显示进度：否则用户在循环跑的时候看到"宏（4 步）"会以为没动
+    const mr = (state && state.macroRun) || {};
+    if (mr.running) {
+      const tot = mr.total === 0 ? '∞' : mr.total;
+      el.textContent = `运行中 · 第 ${mr.round}/${tot} 遍`;
+      return;
+    }
+    if (!MAC.steps.length) { el.textContent = '宏（还没加步骤）'; return; }
+    const lp = Number($('#macLoop') ? $('#macLoop').value : 1);
+    const lpTxt = lp === 0 ? ' · 一直循环' : (lp > 1 ? ` · ${lp} 遍` : '');
+    el.textContent = `宏（${MAC.steps.length} 步${lpTxt}）`;
+    return;
+  }
+  const it = ((state && state.keys && state.keys.items) || []).find((x) => x.id === COMBO_KEY);
+  el.textContent = (it && it.vks && it.vks.length) ? vksText(it.vks) : '未设置';
+}
+
+function renderTextPane() {
+  const wrap = $('#txtSlots');
+  if (!wrap) return;
+  const has = new Set(MACRO_ITEMS.filter((x) => x.kind === 'text' && (x.len || 0) > 0).map((x) => x.num));
+  wrap.innerHTML = Array.from({ length: 10 }, (_, i) => {
+    const n = i + 1;
+    return `<div class="cm-slot${n === TXT.slot ? ' on' : ''}${has.has(n) ? ' has' : ''}" data-slot="${n}">${n}</div>`;
+  }).join('');
+  wrap.querySelectorAll('.cm-slot').forEach((b) => {
+    b.onclick = () => loadTextSlot(Number(b.dataset.slot));
+  });
+  const hint = $('#txtHint');
+  if (hint) hint.textContent = has.size ? `已有 ${has.size} 组有内容` : '还没有任何一组有内容';
+}
+
+async function loadTextSlot(slot) {
+  TXT.slot = slot;
+  renderTextPane();
+  try {
+    const r = JSON.parse(await B.getMacro(String(slot)));
+    const it = (r && r.item) || {};
+    const nm = $('#txtName'), bd = $('#txtBody');
+    if (nm) nm.value = it.name && !/^文本 \d+$/.test(it.name) ? it.name : '';
+    if (bd) bd.value = it.text || '';
+  } catch (e) {
+    if ($('#txtName')) $('#txtName').value = '';
+    if ($('#txtBody')) $('#txtBody').value = '';
+  }
+  paintComboFoot();
+}
+
+async function saveTextPane() {
+  const body = $('#txtBody') ? $('#txtBody').value : '';
+  if (!body.trim()) { toast('文本是空的，先输入内容', 4000); return false; }
+  const r = JSON.parse(await B.saveText(JSON.stringify({
+    slot: TXT.slot,
+    name: $('#txtName') ? $('#txtName').value.trim() : '',
+    text: body,
+  })));
+  if (!r.ok) { toast(r.message || '保存失败', 5000); return false; }
+  return true;
+}
+
+/* 新建步骤的默认值。集中一处，避免"某个入口漏了字段"→ 存盘后字段变成 undefined。 */
+function defStep(t) {
+  return {
+    type: t,
+    vks: t === 'keys' ? [17, 65] : [],
+    holdMs: 30,
+    ms: t === 'wait' ? 300 : 0,
+    slot: TXT.slot || 1,
+    target: 'icon',
+    x: 0, y: 0, x2: 0, y2: 0,
+    sw: 0, sh: 0,
+    winTitle: '',
+    button: 0,
+    pasteKey: [0x11, 0x56],
+    onFail: 'stop',
+  };
+}
+
+function renderMacroPane() {
+  const wrap = $('#macSteps');
+  if (!wrap) return;
+
+  if (!MAC.steps.length) {
+    wrap.innerHTML = '<div class="note">还没有步骤。点下面按钮加一步；「按键」里的键码用逗号分隔，如 <b>17,65</b> = Ctrl+A。</div>';
+  } else {
+    // 粘贴键的两个常用选项；手改过的自定义值也要保留成第三项（不能静默丢）
+    const PKEY = [['17,86', 'Ctrl+V'], ['17,16,86', 'Ctrl+Shift+V']];
+    wrap.innerHTML = MAC.steps.map((s, i) => {
+      const t = (s.type || '').toLowerCase();
+      let pm = '';
+      if (t === 'keys') {
+        pm = `<input data-i="${i}" data-f="vks" value="${(s.vks || []).join(',')}" placeholder="17,65">`
+           + `<input class="w56" data-i="${i}" data-f="holdMs" type="number" min="10" max="2000"`
+           + ` value="${s.holdMs || 30}" title="按住多少毫秒再抬起">`;
+      } else if (t === 'wait') {
+        pm = `<input class="w56" data-i="${i}" data-f="ms" type="number" min="0" max="10000" value="${s.ms || 0}">`
+           + `<span class="rd">毫秒</span>`;
+      } else if (t === 'paste') {
+        const pk = (s.pasteKey || [0x11, 0x56]).join(',');
+        const pkOpts = PKEY.map(([v, n]) => `<option value="${v}"${v === pk ? ' selected' : ''}>${n}</option>`).join('')
+          + (PKEY.some(([v]) => v === pk) ? '' : `<option value="${pk}" selected>自定义</option>`);
+        pm = `<select data-i="${i}" data-f="slot">${Array.from({ length: 10 }, (_, k) => {
+          const n = k + 1;
+          const it = MACRO_ITEMS.find((x) => x.kind === 'text' && x.num === n);
+          const nm = it && it.len ? it.name : '（空）';
+          return `<option value="${n}"${n === (s.slot || 1) ? ' selected' : ''}>${n} · ${nm}</option>`;
+        }).join('')}</select>`
+           + `<select data-i="${i}" data-f="pasteKey">${pkOpts}</select>`;
+      } else if (t === 'click') {
+        pm = `<select data-i="${i}" data-f="target">`
+           + `<option value="icon"${s.target !== 'coord' ? ' selected' : ''}>图标匹配（找不到就停）</option>`
+           + `<option value="coord"${s.target === 'coord' ? ' selected' : ''}>坐标 ${s.x ?? 0},${s.y ?? 0}</option>`
+           + `</select>`;
+      } else if (t === 'move') {
+        pm = `<span class="rd">→ ${s.x ?? 0},${s.y ?? 0}</span>`;
+      } else if (t === 'drag') {
+        pm = `<span class="rd">${s.x ?? 0},${s.y ?? 0} → ${s.x2 ?? 0},${s.y2 ?? 0}</span>`;
+      } else {
+        pm = `<span class="rd">不认识的步骤类型「${s.type}」</span>`;
+      }
+      const of = s.onFail === 'skip'
+        ? `<button class="of skip" data-of="${i}" title="失败时跳过继续 · 点一下改成「停下」">跳</button>`
+        : `<button class="of" data-of="${i}" title="失败时整条停下 · 点一下改成「跳过」">停</button>`;
+      return `<div class="cm-step"><span class="idx">${i + 1}</span>`
+        + `<span class="ty">${STEP_LABEL[t] || s.type}</span>`
+        + `<span class="pm">${pm}</span>${of}`
+        + `<button class="del" data-del="${i}" title="删掉这一步">×</button></div>`;
+    }).join('');
+  }
+
+  // 参数改动直接写回 MAC.steps（onchange 而不是 oninput：避免每敲一个字符就重排）
+  wrap.querySelectorAll('input,select').forEach((el) => {
+    el.onchange = () => {
+      const i = Number(el.dataset.i), f = el.dataset.f, s = MAC.steps[i];
+      if (!s) return;
+      if (f === 'vks') {
+        s.vks = el.value.split(/[,\s]+/)
+          .map((x) => parseInt(x, 10))
+          .filter((x) => Number.isInteger(x) && x > 0 && x <= 0xFF);
+      } else if (f === 'pasteKey') {
+        s.pasteKey = el.value.split(',').map((x) => parseInt(x, 10)).filter((x) => x > 0);
+      } else if (f === 'target') {
+        s.target = el.value;                   // x/y 保持不变（录制时已经记下了）
+      } else {
+        s[f] = Number(el.value) || 0;
+      }
+      paintComboFoot();
+    };
+  });
+  // 失败策略：点一下在 停 / 跳 之间切
+  wrap.querySelectorAll('.of').forEach((b) => {
+    b.onclick = () => {
+      const i = Number(b.dataset.of), s = MAC.steps[i];
+      if (!s) return;
+      s.onFail = s.onFail === 'skip' ? 'stop' : 'skip';
+      renderMacroPane();
+    };
+  });
+  wrap.querySelectorAll('.del').forEach((b) => {
+    b.onclick = () => { MAC.steps.splice(Number(b.dataset.del), 1); renderMacroPane(); };
+  });
+  paintComboFoot();
+}
+
+async function loadMacro(num) {
+  try {
+    const r = JSON.parse(await B.getMacro(String(num)));
+    const it = (r && r.item) || {};
+    MAC.num = it.num || 0;
+    // ★ 必须把所有字段都带上。漏一个（比如 x/y）就会变成"打开弹窗→保存→坐标没了"，
+    //   这种静默数据丢失比直接报错难查得多。
+    MAC.steps = (it.steps || []).map((s) => ({
+      type: s.type,
+      vks: s.vks || [],
+      holdMs: s.holdMs,
+      ms: s.ms,
+      slot: s.slot,
+      target: s.target,
+      x: s.x, y: s.y, x2: s.x2, y2: s.y2,
+      sw: s.sw, sh: s.sh,
+      winTitle: s.winTitle,
+      button: s.button,
+      pasteKey: s.pasteKey,
+      onFail: s.onFail,
+    }));
+    // 0 = 一直循环，必须原样保留（`it.loop || 1` 会把 0 变成 1，静默改掉用户的设置）
+    MAC.loop = Number.isFinite(it.loop) && it.loop >= 0 ? it.loop : 1;
+    const nm = $('#macName');
+    if (nm) nm.value = it.name && !/^宏 \d+$/.test(it.name) ? it.name : '';
+  } catch (e) {
+    MAC.num = 0; MAC.steps = []; MAC.loop = 1;
+  }
+  if ($('#macLoop')) $('#macLoop').value = MAC.loop;
+  renderMacroPane();
+}
+
+async function saveMacroPane() {
+  if (!MAC.steps.length) { toast('宏至少要有一' + '步', 4000); return 0; }
+  const lp = Number($('#macLoop') ? $('#macLoop').value : 1);
+  MAC.loop = Number.isFinite(lp) && lp >= 0 ? Math.min(Math.round(lp), 999) : 1;
+  const r = JSON.parse(await B.saveMacro(JSON.stringify({
+    num: MAC.num,
+    name: $('#macName') ? $('#macName').value.trim() : '',
+    steps: MAC.steps,
+    loop: MAC.loop,
+  })));
+  if (!r.ok) { toast(r.message || '保存失败', 5000); return 0; }
+  MAC.num = r.num || 0;
+  return MAC.num;
+}
+
+/* 步进按钮 + 「试运一遍」：试运行**先保存再跑** ——
+   不然跑的是上一次存进文件的旧版本，改了半天看不到效果，会以为"改了没生效"。 */
+/* ── 录制（2026-10-30）──
+   流程：点「开始录制」→ 3 秒倒计时 → 真正开始 → 点「停止录制」→ 取回步骤。
+   ★ 倒计时不是花架子：**「开始录制」那一下本身就是一次鼠标点击**，
+     不倒计时它会被录成第一条步骤。
+   ★ 录到的步骤是**追加**到现有列表，不是替换 —— 替换会静默吃掉用户手写的步骤。 */
+let REC_TIMER = null;
+
+async function recToggle() {
+  const btn = $('#recBtn'), hint = $('#recHint');
+  if (!btn) return;
+  const idleHint = '录键盘 + 鼠标点击/拖拽；不录自由移动';
+
+  // ① 倒计时中再点 = 取消
+  if (REC_TIMER) {
+    clearInterval(REC_TIMER); REC_TIMER = null;
+    btn.textContent = '开始录制';
+    if (hint) hint.textContent = idleHint;
+    return;
+  }
+
+  // ② 正在录 → 停止并取回
+  if (btn.dataset.on === '1') {
+    btn.disabled = true;
+    try {
+      const r = JSON.parse(await B.stopRecord());
+      if (r.message) toast(r.message, 6000);
+      const t = JSON.parse(await B.takeRecord());
+      if (t.ok && Array.isArray(t.steps) && t.steps.length) {
+        MAC.steps = MAC.steps.concat(t.steps);
+        renderMacroPane();
+        toast(t.message + ' · 已追加到步骤列表（不想要的可以逐条删）', 8000);
+      } else if (t.message) {
+        toast(t.message, 5000);
+      }
+    } catch (e) {
+      toast('取回录制失败：' + e.message, 6000);
+    } finally {
+      btn.disabled = false;
+      btn.dataset.on = '0'; btn.textContent = '开始录制';
+      if (hint) hint.textContent = idleHint;
+    }
+    return;
+  }
+
+  // ③ 3 秒倒计时后开始
+  let n = 3;
+  btn.textContent = `取消（${n} 秒后开始）`;
+  if (hint) hint.textContent = '现在把鼠标移到目标窗口上，3 秒后开始录制';
+  REC_TIMER = setInterval(async () => {
+    n--;
+    if (n > 0) { btn.textContent = `取消（${n} 秒后开始）`; return; }
+    clearInterval(REC_TIMER); REC_TIMER = null;
+    try {
+      const r = JSON.parse(await B.startRecord());
+      if (!r.ok) { toast(r.message || '录制启动失败', 6000); btn.textContent = '开始录制'; return; }
+      btn.dataset.on = '1'; btn.textContent = '停止录制';
+      if (hint) hint.textContent = '录制中…做一遍你的操作，做完点「停止录制」';
+    } catch (e) {
+      toast('录制启动失败：' + e.message, 6000);
+      btn.textContent = '开始录制';
+    }
+  }, 1000);
+}
+
+/* ── 罗技 Lua 导入 ──
+   后端只做"子集提取"：线性序列能转，`while IsMouseButtonPressed(...)` 这类
+   「按住期间持续循环」会**明确报错并指行号**（那是连点/压枪，不是我们能执行的模型）。
+   失败时的原因必须完整显示 —— 只弹一句"导入失败"等于没给信息。 */
+async function importLuaText(text) {
+  let r;
+  try { r = JSON.parse(await B.importLua(text)); }
+  catch (e) { toast('导入失败：' + e.message, 6000); return; }
+
+  if (!r.ok) {
+    toast(r.message || '导入失败', 10000);
+    if (r.warnings && r.warnings.length) console.warn('Lua 导入警告：\n' + r.warnings.join('\n'));
+    return;
+  }
+  MAC.steps = MAC.steps.concat(r.steps);
+  renderMacroPane();
+  let msg = r.message;
+  if (r.warnings && r.warnings.length) {
+    msg += `，${r.warnings.length} 条警告（细节看控制台）`;
+    console.warn('Lua 导入警告：\n' + r.warnings.join('\n'));
+  }
+  toast(msg + ' · 已追加到步骤列表', 9000);
+}
+
+function bindMacroAdd() {
+  const add = $('#macAdd');
+  if (add) {
+    add.querySelectorAll('button[data-add]').forEach((b) => {
+      b.onclick = () => {
+        const t = b.dataset.add;
+        if (MAC.steps.length >= 50) { toast('一个宏最多 50 步', 4000); return; }
+        MAC.steps.push(defStep(t));
+        renderMacroPane();
+      };
+    });
+  }
+  const run = $('#macRun');
+  if (run) {
+    run.onclick = async () => {
+      if (!MAC.steps.length) { toast('先加步骤', 3000); return; }
+      const num = await saveMacroPane();
+      if (!num) return;
+      run.disabled = true;
+      try {
+        const r = JSON.parse(await B.runMacro(String(num)));
+        toast(r.message || '已执行', 6000);
+      } finally { run.disabled = false; }
+    };
+  }
+  const lpIn = $('#macLoop');
+  if (lpIn) lpIn.onchange = () => { paintComboFoot(); };
+
+  const recBtn = $('#recBtn');
+  if (recBtn) recBtn.onclick = () => recToggle();
+
+  // 罗技 Lua 导入：前端读文件内容，后端只做解析（不碰文件系统）
+  const luaBtn = $('#luaBtn'), luaFile = $('#luaFile');
+  if (luaBtn && luaFile) {
+    luaBtn.onclick = () => luaFile.click();
+    luaFile.onchange = async () => {
+      const f = luaFile.files && luaFile.files[0];
+      if (!f) return;
+      let text = '';
+      try { text = await f.text(); }
+      catch (e) { toast('读文件失败：' + e.message, 6000); return; }
+      luaFile.value = '';
+      await importLuaText(text);
+    };
+  }
+
+  const clr = $('#macClear');
+  if (clr) {
+    clr.onclick = () => {
+      if (!MAC.steps.length) { toast('步骤列表已经是空的', 3000); return; }
+      // 二次确认：清空是唯一一个"一次操作丢掉很多内容"的入口，误点很难受
+      if (!window.confirm(`清空这 ${MAC.steps.length} 步？`)) return;
+      MAC.steps = [];
+      renderMacroPane();
+      toast('已清空，可以重新配，或点「开始录制」做一遍', 4000);
+    };
+  }
+
+  const t = $('#txtTest');
+  if (t) {
+    t.onclick = async () => {
+      if (!(await saveTextPane())) return;
+      t.disabled = true;
+      try {
+        const r = JSON.parse(await B.testPaste(String(TXT.slot)));
+        toast(r.message || '已粘贴', 6000);
+      } finally { t.disabled = false; }
+    };
+  }
+}
+
+/* 打开弹窗时初始化三页签：重置编辑态 → 按当前绑定定位页签 → 载入内容。
+   ★ 必须重置：否则上一个键编辑到一半的文本/步骤会串到这个键上，一保存就写错。 */
+async function initComboPanes(it) {
+  COMBO_KEY = it.id;
+  COMBO_TAB = 'key';
+  TXT.slot = 1;
+  if ($('#txtName')) $('#txtName').value = '';
+  if ($('#txtBody')) $('#txtBody').value = '';
+  MAC.num = 0; MAC.steps = []; MAC.loop = 1;
+  if ($('#macName')) $('#macName').value = '';
+  if ($('#macLoop')) $('#macLoop').value = 1;
+
+  const vks = it.vks || [];
+  if (vks.length === 1 && isMacroRef(vks[0])) {
+    const mi = macroItemOf(vks[0]);
+    if (mi && mi.kind === 'text' && mi.num >= 1 && mi.num <= 10) {
+      TXT.slot = mi.num;
+      switchComboTab('text');
+      await loadTextSlot(mi.num);
+      return;
+    }
+    if (mi && mi.kind === 'seq') {
+      await loadMacro(mi.num);
+      switchComboTab('macro');
+      return;
+    }
+  }
+  switchComboTab('key');
+  renderTextPane();
+}
+
+/* 顶层绑定：预览模式（浏览器直接打开 ui/index.html）**不调 bindUI()**，
+   而页签切换和步进按钮是纯前端交互、不依赖后端桥，所以放这里两种模式都能用。
+   （与 initAdvToggle 同一个理由，见文件末尾。） */
+(function initComboPanesTopLevel() {
+  const tabs = $('#comboTabs');
+  if (tabs) {
+    tabs.querySelectorAll('.cm-tab').forEach((b) => { b.onclick = () => switchComboTab(b.dataset.tab); });
+  }
+  bindMacroAdd();
+})();
 
 async function editKey(it) {
   const cur = it.vks && it.vks.length ? it.vks.join('+') : '';
@@ -1090,6 +1615,7 @@ async function refresh() {
   try {
     state = JSON.parse(await B.getState());
   } catch (e) { return; }
+  MACRO_ITEMS = state.macros || [];
   renderJourney(state);
   renderOverview(state);
   renderKeys(state);
@@ -1563,6 +2089,24 @@ function bindUI() {
   };
   $('#kbSave').onclick = async () => {
     const it = curKey(); if (!it) return;
+
+    // 文本页签：先存内容，再把这个键绑到 文本槽(slot) 的引用值
+    if (COMBO_TAB === 'text') {
+      if (!(await saveTextPane())) return;
+      const r = JSON.parse(await B.saveKey(it.id, String(MACRO_REF_BASE - TXT.slot)));
+      toast(r.message, 5000);
+      closeCombo(); await refresh(); return;
+    }
+
+    // 宏页签：先存宏（拿到编号），再绑定
+    if (COMBO_TAB === 'macro') {
+      const num = await saveMacroPane();
+      if (!num) return;
+      const r = JSON.parse(await B.saveKey(it.id, String(MACRO_REF_BASE - num)));
+      toast(r.message, 5000);
+      closeCombo(); await refresh(); return;
+    }
+
     const v = comboVks();
     const r = JSON.parse(await B.saveKey(it.id, v.join(',')));
     toast(r.message, 5000);
@@ -1671,9 +2215,9 @@ function boot() {
       admin: true,
       // 预览用的示例版本号 —— 真实值来自 csproj 的 <Version>（Env.AppVersion）。
       // 改版本时顺手同步这里即可（仅影响"直接用浏览器打开 ui/index.html"的预览与截图）。
-      version: '1.2.137',
+      version: '1.2.143',
       buildStamp: '2026-10-16 09:50',
-      versionLine: 'v1.2.137（构建于 2026-10-30 11:20）',
+      versionLine: 'v1.2.143（构建于 2026-10-30 10:33）',
       device: {
         connected: true, paired: true, lastKey: '确认', lastState: '已翻译',
         detail: { hid: [{ id: 'HID\\{00001124-...}_VID&00020a5c_PID&8502', online: true }],

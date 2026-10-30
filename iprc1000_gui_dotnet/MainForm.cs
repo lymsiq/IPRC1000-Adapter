@@ -250,6 +250,23 @@ internal sealed class MainForm : Form
             catch { }
         };
 
+        // ★ 宏的开始/结束要有**即时反馈**。KeymouseGo 的 #124 就是抱怨
+        //   "首行等待很长时，没法判断脚本到底起没起"——宏有长等待时同样有这个盲区。
+        //   用托盘气泡而不是只靠界面 toast：用户跑宏时通常在别的程序里，看不到我们界面。
+        //   Notify 在播放线程上触发，必须切回 UI 线程再碰托盘。
+        MacroPlayer.Notify += (msg) =>
+        {
+            try
+            {
+                if (!IsHandleCreated) return;
+                BeginInvoke(new Action(() =>
+                {
+                    try { _tray.ShowBalloonTip(2000, Env.AppName, msg, ToolTipIcon.None); } catch { }
+                }));
+            }
+            catch { }
+        };
+
         // ★ 不再在构造函数里建 WebView2 控件。
         //   开机自启走的是 `StartMinimized`（默认开）—— 那种情况下用户根本看不到界面，
         //   却要先付 **341 ms（启动开销的 51%）+ 356 MB（常驻内存的 78%）**。

@@ -200,6 +200,18 @@ internal static class Program
             File.WriteAllText(pm, KeyAct.SelfTest());
             return;
         }
+
+        // 宏 / 文本动作库自检：--macro-test [输出文件]
+        //   纯逻辑，不注入、不写配置文件。钉的是"不会崩、但用户按了没反应/按错东西"那类
+        //   静默错误：编号↔绑定值往返、区间不与鼠标动作重叠、参数夹紧、序列化往返、编号去重。
+        if (args.Length > 0 && args[0] == "--macro-test")
+        {
+            var pm = args.Length > 1 ? args[1] : Path.Combine(Env.AppDir, "macro_test.txt");
+            var rep = Macros.SelfTest();
+            File.WriteAllText(pm, rep);
+            Console.WriteLine(rep);
+            return;
+        }
 #endif
 
         // 抖动缓冲自检：--jitter-test [输出文件]
