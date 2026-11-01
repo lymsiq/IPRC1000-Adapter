@@ -65,6 +65,69 @@ def clear_fingerprint():
             shutil.rmtree(os.path.join(base, name), ignore_errors=True)
 
 
+def msvc_env():
+    """补齐 MSVC 的编译/链接环境（PATH + LIB + INCLUDE）。
+
+    ★ 2026-11-01 踩坑：删掉 target/ 之后全量重编，build script 需要在**宿主机**链接，
+      这时才暴露出环境依赖：
+        · 在 Git Bash 里跑 → link.exe 解析到 /usr/bin/link（GNU 的），报
+          "link: extra operand ... Try 'link --help'"；
+        · 换成另一个 shell 跑 → 干脆找不到 link.exe。
+      根因是 VS 的 VC 工具目录不在 PATH 里、LIB/INCLUDE 也没设。
+      本函数按 vswhere 的安装位置推导这些变量，让打包不再依赖"当前 shell 恰好是对的"。
+    """
+    env = os.environ.copy()
+    vswhere = r"C://Program Files (x86)//Microsoft Visual Studio//Installer//vswhere.exe"
+    install = None
+    if os.path.exists(vswhere):
+        try:
+            r = subprocess.run(
+                [vswhere, "-latest", "-products", "*",
+                 "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                 "-property", "installationPath"],
+                capture_output=True, text=True)
+            install = (r.stdout or "").strip() or None
+        except Exception:
+            install = None
+    if not install:
+        for cand in (r"D://BuildTools//VS2022", r"C://BuildTools//VS2022",
+                     r"C://Program Files//Microsoft Visual Studio//2022//BuildTools"):
+            if os.path.isdir(os.path.join(cand, "VC", "Tools", "MSVC")):
+                install = cand
+                break
+    if not install:
+        print("  ! 没找到 Visual Studio/BuildTools，沿用当前环境")
+        return env
+
+    msvc_root = os.path.join(install, "VC", "Tools", "MSVC")
+    vers = sorted(os.listdir(msvc_root)) if os.path.isdir(msvc_root) else []
+    if not vers:
+        return env
+    vc = os.path.join(msvc_root, vers[-1])
+
+    sdk_root = r"C://Program Files (x86)//Windows Kits//10"
+    sdk_lib = os.path.join(sdk_root, "Lib")
+    sdk_vers = sorted(os.listdir(sdk_lib)) if os.path.isdir(sdk_lib) else []
+    sdk = sdk_vers[-1] if sdk_vers else None
+
+    path = [os.path.join(vc, "bin", "Hostx64", "x64")]
+    lib = [os.path.join(vc, "lib", "x64")]
+    inc = [os.path.join(vc, "include")]
+    if sdk:
+        path.append(os.path.join(sdk_root, "bin", sdk, "x64"))
+        lib += [os.path.join(sdk_root, "Lib", sdk, "ucrt", "x64"),
+                os.path.join(sdk_root, "Lib", sdk, "um", "x64")]
+        inc += [os.path.join(sdk_root, "Include", sdk, "ucrt"),
+                os.path.join(sdk_root, "Include", sdk, "um"),
+                os.path.join(sdk_root, "Include", sdk, "shared"),
+                os.path.join(sdk_root, "Include", sdk, "winrt")]
+
+    env["PATH"] = os.pathsep.join(path + [env.get("PATH", "")])
+    env["LIB"] = os.pathsep.join(lib)
+    env["INCLUDE"] = os.pathsep.join(inc)
+    return env
+
+
 def build(what="主程序"):
     """cargo build --release，遇到文件锁自动清一次重试。"""
     # 实测：杀软扫描可能持续几次重试的时间，所以按 1s/3s/8s 递增等待，最多 4 次。
@@ -72,7 +135,7 @@ def build(what="主程序"):
     delays = [1, 3, 8]
     for attempt in range(1, len(delays) + 2):
         print(f"  编译{what}（第 {attempt} 次）…")
-        r = subprocess.run(["cargo", "build", "--release"], cwd=ROOT,
+        r = subprocess.run(["cargo", "build", "--release"], cwd=ROOT, env=msvc_env(),
                            capture_output=True, text=True, encoding="utf-8", errors="replace")
         if r.returncode == 0:
             return

@@ -146,6 +146,73 @@ fn rotate_log(path: &std::path::Path, keep: usize, max_bytes: u64) {
 pub static LOGS_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// 当前是否写日志（供各模块查询）
+// ── 「唤回界面」的命名事件 ──────────────────────────────────────────────
+//
+// 为什么需要：2026-11-01 真机——界面收进托盘后，用户双击 exe 想把它叫回来，
+// 结果第二个实例只打印一行"已经有一个在运行"就静默退出，**屏幕上什么都没发生**
+// 用户看到的就是"程序卡死了"。
+// （另外：强杀进程后 Windows 会留一个僵尸托盘图标，点它同样没反应——
+//   这两条路都断了，用户就真的没有任何入口。）
+//
+// 所以加一个**命名事件**：第一个实例创建它并轮询；后来者打开它、SetEvent，然后退出。
+// 效果就是"再点一次图标 ⇒ 界面回来"，符合用户直觉，也不依赖托盘图标是否有效。
+
+static SHOW_EV: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn CreateEventW(attr: *const std::ffi::c_void, manual: i32, init: i32, name: *const u16) -> isize;
+    fn OpenEventW(access: u32, inherit: i32, name: *const u16) -> isize;
+    fn SetEvent(h: isize) -> i32;
+    fn WaitForSingleObject(h: isize, ms: u32) -> u32;
+    fn CloseHandle(h: isize) -> i32;
+}
+const EVENT_MODIFY_STATE: u32 = 0x0002;
+
+fn show_event_name() -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    std::ffi::OsStr::new("Global\\Iprc1000_ShowWindow")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+/// 主实例：创建（或打开已有）事件句柄，供后来者 SetEvent。
+fn create_show_event() {
+    let name = show_event_name();
+    unsafe {
+        // 自动重置：Wait 一次就清掉，不需要手动 ResetEvent
+        let h = CreateEventW(std::ptr::null(), 0, 0, name.as_ptr());
+        if h != 0 {
+            SHOW_EV.store(h, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+}
+
+/// 后来者：请求已有实例把界面显示出来。
+fn signal_show_event() -> bool {
+    let name = show_event_name();
+    unsafe {
+        let h = OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr());
+        if h == 0 {
+            return false;
+        }
+        let ok = SetEvent(h) != 0;
+        let _ = CloseHandle(h);
+        ok
+    }
+}
+
+/// 主实例轮询：有没有人请求唤回（非阻塞）。
+fn show_event_fired() -> bool {
+    let h = SHOW_EV.load(std::sync::atomic::Ordering::SeqCst);
+    if h == 0 {
+        return false;
+    }
+    // WAIT_OBJECT_0 = 0
+    unsafe { WaitForSingleObject(h, 0) == 0 }
+}
+
 pub fn logs_on() -> bool {
     LOGS_ON.load(std::sync::atomic::Ordering::Relaxed)
 }
@@ -387,6 +454,12 @@ fn main() {
         backend::acquire_single_instance()
     };
     if !got_instance {
+        // ★★ 关键：**先把已有实例的界面叫回来**，否则用户双击图标毫无反应 = "卡死"。
+        if signal_show_event() {
+            eprintln!("[i] 已有实例在运行，已请求它把界面显示出来（本进程退出）。");
+        } else {
+            eprintln!("[i] 已有实例在运行，但唤回信号没发出去（旧版本不支持）。");
+        }
         eprintln!("[!] 已经有一个 IPRC1000 在运行，本次启动退出。");
         eprintln!("    原因：两个实例会互相停掉对方的 ETW 会话，表现为「进程在、但按键语音都没反应」。");
         eprintln!("    请用**托盘图标左键单击**打开已有实例（或托盘右键 →「打开界面」）。");
@@ -395,6 +468,7 @@ fn main() {
         std::process::exit(0);
     }
 
+    create_show_event();
     eprintln!("\n===== 启动 {} =====", chrono_like_now());
     if let Some((rss, h, t)) = self_stats() {
         eprintln!("[资源] 启动基线 RSS {rss} MB · 句柄 {h} · 线程 {t}");
@@ -494,7 +568,9 @@ fn main() {
             // ★ 同时丢弃隐藏之前积累的陈旧唤回信号：否则一关闭就立刻重建，
             //   表现成"点了关闭，窗口闪一下就回来了"。
             SHOW_REQ.store(false, Ordering::SeqCst);
-            while !SHOW_REQ.swap(false, Ordering::SeqCst) {
+            // 两条唤回入口都认：托盘图标（SHOW_REQ）与"再双击一次 exe"（命名事件）。
+            // 后者在托盘图标失效（强杀留下的僵尸图标）时是唯一还活着的入口。
+            while !SHOW_REQ.swap(false, Ordering::SeqCst) && !show_event_fired() {
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
             eprintln!("[i] 收到唤回信号 ⇒ 重建界面");
