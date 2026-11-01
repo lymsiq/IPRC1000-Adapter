@@ -818,7 +818,16 @@ pub struct Bridge {
     tap_latched: bool,
     /// 每个键**按下的时刻**（看门狗用）。UP 丢了时靠它兜底释放，
     /// 否则那个键会永久留在"按下"状态（遥控器按住期间不上报，没人能纠正）。
-    held_at: [Option<Instant>; 256],
+    /// 每个键**最迟放手时刻**（毫秒时间戳；0 = 没按住）。
+    ///
+    /// ★★ 2026-11-01（#2 统一每键 deadline）：原来这里是 `[Option<Instant>; 256]`，
+    ///   与看门狗里的 `max_hold_ms` 合起来表达同一件事，但分成两半。
+    ///   现在合并成一个数：**按下即写好到期时刻**，看门狗只做"到点没到点"的比较。
+    ///   顺带满足 #3 的前置条件——无锁状态需要原子 u64，`Option<Instant>` 不行。
+    deadline_ms: [u64; 256],
+    /// 语音键本次按下的时刻（0 = 未按）。租约只回答"还该按多久"，
+    /// 回答不了"按了多久"——会话静默守卫需要后者。
+    voice_pressed_at_ms: u64,
     /// 本段会话是否已经用第一条报文"记过基线"（见下方 handle_hid_report 的说明）
     seeded: bool,
     /// 基线里"已经按着"的键（只用于记账，**它的 UP 不发**，否则会出现"无对应的松开"）
@@ -873,7 +882,8 @@ impl Bridge {
             udp,
             key_sink,
             held: [false; 256],
-            held_at: [None; 256],
+            deadline_ms: [0; 256],
+            voice_pressed_at_ms: 0,
             voice_missing: 0,
             last_report_at: None,
             last_frame_seen: None,
@@ -1380,7 +1390,7 @@ impl Bridge {
                     continue;   // held[0x10] 只能由 reconcile_voice 改
                 }
                 self.held[u] = false;
-                self.held_at[u] = None;
+                self.deadline_ms[u] = 0;
                 if crate::settings::is_mouse_active() {
                     if let Some(slot) = dir_slot(u as u8) {
                         crate::mouse_move::set_dir(slot, false);
@@ -1430,7 +1440,7 @@ impl Bridge {
                         }
                     }
                     self.held[u] = true;
-                    self.held_at[u] = Some(Instant::now());
+                    self.arm_deadline(u);
                     continue;
                 }
                 // ★ 录制中：遥控器按键**不注入**，避免录进去、也避免打到前台窗口
@@ -1442,7 +1452,7 @@ impl Bridge {
                     if let Some(slot) = dir_slot(u as u8) {
                         crate::mouse_move::set_dir(slot, true);
                         self.held[u] = true;
-                        self.held_at[u] = Some(Instant::now());
+                        self.arm_deadline(u);
                         {
                             let mut st = self.stats.lock().unwrap_or_else(|e| e.into_inner());
                             st.last_key_usage = u as u8;
@@ -1481,7 +1491,7 @@ impl Bridge {
                             eprintln!("[宏] {r}");
                         });
                         self.held[u] = true;
-                        self.held_at[u] = Some(Instant::now());
+                        self.arm_deadline(u);
                         if !diag::QUIET.load(Ordering::Relaxed) {
                             eprintln!("[宏] 起播 #{num}（{n_steps} 步，循环 {lp}）");
                         }
@@ -1508,12 +1518,12 @@ impl Bridge {
                             eprintln!("[组] 已切换到 {next}「{name}」");
                         }
                         self.held[u] = true;
-                        self.held_at[u] = Some(Instant::now());
+                        self.arm_deadline(u);
                         continue;
                     }
                     crate::mouse_act::fire(act, true);
                     self.held[u] = true;
-                    self.held_at[u] = Some(Instant::now());
+                    self.arm_deadline(u);
                     {
                         let mut st = self.stats.lock().unwrap_or_else(|e| e.into_inner());
                         st.last_key_usage = u as u8;
@@ -1563,7 +1573,7 @@ impl Bridge {
                     continue;   // held[0x10] 只能由 reconcile_voice 改
                 }
                 self.held[u] = true;
-                self.held_at[u] = Some(Instant::now());
+                self.arm_deadline(u);
                 {
                     // 记录"最近按了什么"，界面左侧栏靠它显示"已检测：↑ 上"
                     let mut st = self.stats.lock().unwrap_or_else(|e| e.into_inner());
@@ -1636,7 +1646,9 @@ impl Bridge {
             return;
         }
         self.held[0x10] = want;
-        self.held_at[0x10] = if want { Some(Instant::now()) } else { None };
+        self.deadline_ms[0x10] = if want { VOICE_LEASE_MS.load(Ordering::Relaxed) } else { 0 };
+        // 语音键"刚按下多久"由这个字段回答（会话静默守卫要用，看不出租约）
+        self.voice_pressed_at_ms = if want { diag::now_ms() } else { 0 };
         if want {
             self.seeded_held[0x10] = false;   // 从这一刻起归我们管，基线记账作废
             self.voice_missing_since = None;
@@ -1797,6 +1809,25 @@ impl Bridge {
         eprintln!("[音频] 空闲 180 秒，已关闭输出流（省 3~4 个线程；下次说话自动重开）");
     }
 
+    /// 某个键"最迟放手时刻"的分档上限（毫秒）。语音键走租约，这里只是兜底值。
+    fn max_hold_ms(u: usize) -> u64 {
+        match u {
+            0x10 => 20_000,
+            // 修饰键粘住最致命（Ctrl 粘住 = 全键盘变快捷键），15 秒就该放
+            0x11 | 0x12 | 0x5B | 0xA0 | 0xA1 | 0xA2 | 0xA3 | 0xA4 | 0xA5 => 15_000,
+            // 方向键在鼠标模式下本来就要长按
+            0x4F | 0x50 | 0x51 | 0x52 => 60_000,
+            _ => 20_000,
+        }
+    }
+
+    /// 按下某个键时记下它的到期时刻（`deadline_ms`，0 = 未按住）。
+    ///
+    /// **单一表示**：不再有"held_at 时刻 + 阈值表"两半，也没有第二处阈值。
+    fn arm_deadline(&mut self, u: usize) {
+        self.deadline_ms[u] = diag::now_ms().saturating_add(Self::max_hold_ms(u));
+    }
+
     fn watchdog_held(&mut self) {
         // ★ 阈值按"键的性质"分档（照 C# 版经验）：
         //   修饰键卡住最致命（Ctrl 粘住 = 全键盘变快捷键），15 秒就该放；
@@ -1805,15 +1836,6 @@ impl Bridge {
         //   原来统一 60 秒 —— 用户体感就是"卡死了"。
         //   ⚠ 语音键（0x10）在循环里被**整条跳过**：它的松手由判据①②和"10 s 无音频"负责，
         //     计时判据只会误杀长句（见循环内说明）。所以这里的 0x10 分支不再使用。
-        fn max_hold_ms(u: usize) -> u128 {
-            match u {
-                0x10 => 20_000,
-                // 其它修饰键：Ctrl/Shift 粘住最致命（全键盘变快捷键），15 秒就该放
-                0x11 | 0x12 | 0x5B | 0xA0 | 0xA1 | 0xA2 | 0xA3 | 0xA4 | 0xA5 => 15_000,
-                0x4F | 0x50 | 0x51 | 0x52 => 60_000,
-                _ => 20_000,
-            }
-        }
         let mut released = false;
         for u in 0..256usize {
             if !self.held[u] {
@@ -1833,17 +1855,19 @@ impl Bridge {
             if u == 0x10 {
                 continue;
             }
-            let Some(at) = self.held_at[u] else {
-                self.held_at[u] = Some(Instant::now());   // 老状态没记时刻：补一个，下一轮再判
-                continue;
-            };
-            // 仍按"键的性质"分档；语音键已在上面跳过，走不到这里。
-            let limit = max_hold_ms(u);
-            if at.elapsed().as_millis() < limit {
+            // ★ 统一 deadline：按下时就写好了到期时刻，这里只做一次比较。
+            //   语音键在上面已跳过，由租约（reconcile_voice）管。
+            let now = diag::now_ms();
+            if self.deadline_ms[u] == 0 {
+                self.arm_deadline(u);   // 老状态没记时刻：补一个，下一轮再判
                 continue;
             }
+            if now < self.deadline_ms[u] {
+                continue;
+            }
+            let limit = Self::max_hold_ms(u);
             self.held[u] = false;
-            self.held_at[u] = None;
+            self.deadline_ms[u] = 0;
             self.seeded_held[u] = false;
             self.emit_key(Some(u as u8), false);
             released = true;
@@ -1900,7 +1924,7 @@ impl Bridge {
             }
             if self.held[u] {
                 self.held[u] = false;
-                self.held_at[u] = None;
+                self.deadline_ms[u] = 0;
                 // 基线里"早已按着"的键，我们从没发过它的 DOWN ⇒ 这里也不发 UP，
                 // 否则面板会出现"松开比按下多"（用户实测 17 下 / 28 松）。
                 if self.seeded_held[u] {
@@ -2194,10 +2218,11 @@ impl Bridge {
                 //   被放掉 ⇒ 豆包走内容整理"（真机 20 次里 3 次）。
                 //   推迟一整轮即可：音频一到 `last_frame_at` 就会刷新，条件自然失效。
                 const VOICE_FRESH_MS: u128 = 1_500;
-                let voice_held_ms = self.held_at[0x10]
-                    .filter(|_| self.held[0x10])
-                    .map(|x| x.elapsed().as_millis())
-                    .unwrap_or(u128::MAX);
+                let voice_held_ms: u128 = if self.held[0x10] && self.voice_pressed_at_ms != 0 {
+                    diag::now_ms().saturating_sub(self.voice_pressed_at_ms) as u128
+                } else {
+                    u128::MAX
+                };
                 if self.held[0x10] && voice_held_ms < VOICE_FRESH_MS {
                     if !diag::QUIET.load(Ordering::Relaxed) {
                         eprintln!(
