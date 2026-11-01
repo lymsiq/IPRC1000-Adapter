@@ -481,6 +481,14 @@ fn main() {
         //   托盘线程独立存活，左键/菜单「打开界面」会把 SHOW_REQ 置位。
         if HIDE_REQUESTED.swap(false, Ordering::SeqCst) {
             eprintln!("[i] 界面已收进托盘（UI 线程结束，GL 上下文与框架内存已交还系统）");
+            // ★★ 2026-11-01（真机：点关闭按钮"无反应"）：
+            //   `run_native` 返回了，但 **HWND 仍留在桌面上** —— 成了"僵尸窗口"：
+            //   没有事件循环，点 X 没有任何人处理，用户看到的就是"关了没反应"。
+            //   （我上一轮把"标题还在"误判成陈旧属性，实际是窗口真的还活着。）
+            destroy_leftover_window();
+            // ★ 同时丢弃隐藏之前积累的陈旧唤回信号：否则一关闭就立刻重建，
+            //   表现成"点了关闭，窗口闪一下就回来了"。
+            SHOW_REQ.store(false, Ordering::SeqCst);
             while !SHOW_REQ.swap(false, Ordering::SeqCst) {
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
@@ -1004,4 +1012,27 @@ fn clean_stale_trace() {
         .stderr(std::process::Stdio::null())
         .creation_flags(CREATE_NO_WINDOW)
         .status();
+}
+
+/// 销毁 `run_native` 返回后可能残留的窗口句柄。
+///
+/// 为什么需要：eframe 事件循环退出后，HWND 不一定会被销毁。留下的是"僵尸窗口"——
+/// 看得见、点关闭没反应（没有消息循环在跑），还会挡住下面的窗口。
+/// 补一刀：先 WM_CLOSE 让窗口走正常销毁流程，再 DestroyWindow 兜底。
+fn destroy_leftover_window() {
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::*;
+    unsafe {
+        let title: Vec<u16> = "IPRC1000 原生内核"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let h = FindWindowW(None, windows::core::PCWSTR(title.as_ptr()));
+        if h.0 != 0 {
+            let _ = PostMessageW(h, WM_CLOSE, WPARAM(0), LPARAM(0));
+            if DestroyWindow(h).is_err() {
+                eprintln!("[i] 残留窗口 DestroyWindow 失败（可能已被系统收回）");
+            }
+        }
+    }
 }
