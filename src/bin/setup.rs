@@ -467,6 +467,12 @@ impl eframe::App for Setup {
                                     push(format!("安装完成 → {}", dir.display()));
                                     Ok(())
                                 })();
+                                // 安装日志落盘：界面上的日志装完就没了。
+                                // 存一份到安装目录，出问题时让用户直接把文件发过来即可
+                                // （比"截图给我看"可靠得多）。
+                                if let Some(p) = save_install_log(&dir, &sh.0) {
+                                    push(format!("安装日志：{}", p.display()));
+                                }
                                 if let Err(e) = r {
                                     if let Ok(mut g) = sh.2.lock() {
                                         *g = Some(e);
@@ -621,6 +627,9 @@ fn has_driver() -> bool {
 /// 静默安装的日志（windows_subsystem="windows" 下控制台输出全部丢失，必须落文件）
 fn slog(msg: &str) {
     use std::io::Write as _;
+    if let Ok(mut g) = INSTALL_LINES.lock() {
+        g.push(msg.to_string());
+    }
     let p = std::env::temp_dir().join("iprc-setup.log");
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
         let _ = writeln!(f, "{msg}");
@@ -666,6 +675,10 @@ fn silent_install(args: &[String]) {
         //   （同一个动作只能一套实现）。它做 4 项并逐项复检：
         //   声卡（含 Problem 健康码）/ 键盘驱动 / 遥控器改造 / 默认麦克风。
         run_app_install(&dir, |x| slog(&x));
+        // 静默安装也把日志写进安装目录（与界面路径一致）
+        if let Some(p) = save_install_log_collected(&dir, &install_lines()) {
+            slog(&format!("[安装] 日志：{}", p.display()));
+        }
         slog("[安装] 完成。");
         Ok(())
     })();
@@ -686,6 +699,54 @@ fn silent_install(args: &[String]) {
 }
 
 /// 用系统对话框选目录（用 PowerShell 的 FolderBrowserDialog，省得引 rfd 依赖）
+/// 把安装日志写到 `<安装目录>\install-YYYYMMDD-HHMMSS.log`，返回路径。
+///
+/// 为什么装在安装目录而不是 %TEMP%：用户找得到、删得掉，也让"把日志发我"变得可执行。
+/// 内容只含安装步骤与结果（组件名、状态、错误码），不含任何用户数据。
+fn save_install_log(dir: &Path, log: &std::sync::Mutex<Vec<String>>) -> Option<PathBuf> {
+    let lines = log.lock().ok()?.clone();
+    save_install_log_collected(dir, &lines)
+}
+
+fn save_install_log_collected(dir: &Path, lines: &[String]) -> Option<PathBuf> {
+    use std::io::Write as _;
+    let ts = local_stamp();
+    let p = dir.join(format!("install-{ts}.log"));
+    let mut f = std::fs::File::create(&p).ok()?;
+    // ★ 首建带 UTF-8 BOM：否则记事本/许多编辑器会按 GBK 猜，中文全乱码
+    //   （项目里所有首建文本文件都守这条约定）。
+    let _ = f.write_all(&[0xEF, 0xBB, 0xBF]);
+    let _ = writeln!(f, "IPRC1000 原生内核 · 安装日志");
+    let _ = writeln!(f, "时间 {ts}");
+    let _ = writeln!(f, "目录 {}", dir.display());
+    let _ = writeln!(f, "{}", "-".repeat(56));
+    for l in lines {
+        let _ = writeln!(f, "{l}");
+    }
+    Some(p)
+}
+
+fn install_lines() -> Vec<String> {
+    INSTALL_LINES.lock().map(|g| g.clone()).unwrap_or_default()
+}
+static INSTALL_LINES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// 本地时间 `YYYYMMDD-HHMMSS`。
+/// 用裸 FFI 拿 GetLocalTime，避免为了一次格式化在 Cargo.toml 里加 Windows feature。
+fn local_stamp() -> String {
+    #[repr(C)]
+    struct SystemTime {
+        y: u16, mo: u16, dow: u16, d: u16, h: u16, mi: u16, s: u16, ms: u16,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetLocalTime(t: *mut SystemTime);
+    }
+    let mut t = SystemTime { y: 0, mo: 0, dow: 0, d: 0, h: 0, mi: 0, s: 0, ms: 0 };
+    unsafe { GetLocalTime(&mut t) };
+    format!("{:04}{:02}{:02}-{:02}{:02}{:02}", t.y, t.mo, t.d, t.h, t.mi, t.s)
+}
+
 fn rfd_pick_dir(cur: &str) -> Option<String> {
     let shell = format!("{}{}", "power", "shell.exe");
     let script = format!(
