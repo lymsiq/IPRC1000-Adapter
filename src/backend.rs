@@ -846,6 +846,11 @@ pub struct Bridge {
     /// 静默兜底不能用 `voice_had_audio`，那个只在 held[0x10] 为真时置位，
     /// 而点按模式下 held 只有 60 ms（说话期间是 false）。
     tap_started_ms: u64,
+    /// 最近一次**真正注入**语音键（0x10）的时刻。
+    /// 用来给"对账"一个宽限：刚注入完就立刻查 GetAsyncKeyState，
+    /// 系统还没来得及反映 ⇒ 会误判成"没按"并补发一份重复的 DOWN。
+    /// 60 ms 的点按几乎每次都撞上（真机日志里能直接看到）。
+    last_voice_inject_ms: u64,
     /// 每个键**按下的时刻**（看门狗用）。UP 丢了时靠它兜底释放，
     /// 否则那个键会永久留在"按下"状态（遥控器按住期间不上报，没人能纠正）。
     /// 每个键**最迟放手时刻**（毫秒时间戳；0 = 没按住）。
@@ -929,6 +934,7 @@ impl Bridge {
             tap_followup: iprc1000_native::voice::TapFollowUp::None,
             tap_awaiting: false,
             tap_started_ms: 0,
+            last_voice_inject_ms: 0,
             last_ts: 0,
             stats,
             wav,
@@ -1748,6 +1754,7 @@ impl Bridge {
         }
         self.emit_key(Some(0x10), want);
         self.flush_inline();
+        self.last_voice_inject_ms = diag::now_ms();
     }
 
     /// 对账：租约说"按着"，去问系统（GetAsyncKeyState）是否真的按着；不是就补发一次整份报告。
@@ -1755,6 +1762,14 @@ impl Bridge {
     /// 成本：每 500 ms 一次 `GetAsyncKeyState`（微秒级）—— 比任何超时判据都便宜，
     /// 而且它直接读系统的真相，不是我们的账本。
     fn verify_voice_injected(&mut self) {
+        // ★ 宽限：刚注入过语音键（150 ms 内）就先别对账 —— 系统还没来得及反映，
+        //   这时候查 GetAsyncKeyState 必然"说没按"，于是补发一份重复的 DOWN。
+        //   点按模式只有 60~100 ms，几乎每次都会撞上（真机日志可见）。
+        if self.last_voice_inject_ms != 0
+            && diag::now_ms().saturating_sub(self.last_voice_inject_ms) < 150
+        {
+            return;
+        }
         let now = Instant::now();
         if let Some(t) = self.last_voice_verify {
             if now.duration_since(t).as_millis() < 500 {
