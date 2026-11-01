@@ -842,6 +842,10 @@ pub struct Bridge {
     /// 而"松手"分支挂在 `held[u] && !now[u]` 里 ⇒ 根本进不去，第二下永远发不出来。
     /// 而且**不能**无条件对每个空报文都补一下：空闲时按别的键也会产生空报文。
     tap_awaiting: bool,
+    /// 点按模式：第一下发出的时刻。用来判断"这次按压之后音频来过没有"——
+    /// 静默兜底不能用 `voice_had_audio`，那个只在 held[0x10] 为真时置位，
+    /// 而点按模式下 held 只有 60 ms（说话期间是 false）。
+    tap_started_ms: u64,
     /// 每个键**按下的时刻**（看门狗用）。UP 丢了时靠它兜底释放，
     /// 否则那个键会永久留在"按下"状态（遥控器按住期间不上报，没人能纠正）。
     /// 每个键**最迟放手时刻**（毫秒时间戳；0 = 没按住）。
@@ -924,6 +928,7 @@ impl Bridge {
             voice_had_audio: false,
             tap_followup: iprc1000_native::voice::TapFollowUp::None,
             tap_awaiting: false,
+            tap_started_ms: 0,
             last_ts: 0,
             stats,
             wav,
@@ -1589,6 +1594,7 @@ impl Bridge {
                         //   给第一下也加间隔等于白送 50 ms 延迟。
                         self.voice_arm(iprc1000_native::voice::TAP_HOLD_MS);
                         self.tap_awaiting = true;   // 等松手那一拍
+                        self.tap_started_ms = diag::now_ms();
                         eprintln!("[点按] 按下 ⇒ 立即发一次点按（{} ms 后由 tick 弹起）",
                             iprc1000_native::voice::TAP_HOLD_MS);
                     } else if self.held[0x10] {
@@ -1771,6 +1777,7 @@ impl Bridge {
         // 切换触发方式时清掉待办的点按与"等第二下"标记，
         // 否则切回按住模式还可能莫名多发一下。
         self.tap_awaiting = false;
+        self.tap_started_ms = 0;
         if self.tap_followup.is_pending() {
             self.tap_followup = iprc1000_native::voice::TapFollowUp::None;
             self.voice_disarm("切换触发方式");
@@ -2292,6 +2299,31 @@ impl Bridge {
                 None => {}
             }
             let _ = TapFollowUp::None;   // 保持 use 不产生告警
+        }
+
+        // ★★ 点按模式的静默兜底：第一下发出去之后，如果音频停了很久还没等到"松手"，
+        //   就判松手报文丢了，自动补第二下 —— 否则豆包会一直停在录音状态。
+        //   判据要两个条件同时成立：
+        //     ① 这次按压之后**确实来过音频**（last_frame_ms > tap_started_ms），
+        //        否则"刚按下还没开口"也会被误判成说完；
+        //     ② 距最后一帧音频已超过 TAP_AUTO_END_SILENCE_MS。
+        if crate::settings::TRIGGER_IDX.load(Ordering::Relaxed) == 1 && self.tap_awaiting {
+            let now = diag::now_ms();
+            let last = self
+                .stats
+                .lock()
+                .map(|s| s.last_frame_ms)
+                .unwrap_or(0);
+            if last > self.tap_started_ms
+                && now.saturating_sub(last) > iprc1000_native::voice::TAP_AUTO_END_SILENCE_MS
+            {
+                eprintln!(
+                    "[点按] 音频已静默 {} ms 仍无松手报文 ⇒ 判定松手丢失，自动补第二下",
+                    now.saturating_sub(last)
+                );
+                self.tap_awaiting = false;
+                self.tap_followup = iprc1000_native::voice::TapFollowUp::schedule(now);
+            }
         }
 
         // ★★ 30 秒无音频强制收口（用户已定：要）。
