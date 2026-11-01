@@ -12,4 +12,5 @@
 //! 约定：本层**不许**使用 `crate::backend`、`windows`、`std::fs`、`Mutex`。
 //! 新增逻辑前先问一句：它能不能写成"输入 → 输出"？能就放这里。
 
+pub mod report;
 pub mod voice;

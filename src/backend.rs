@@ -1260,12 +1260,8 @@ impl Bridge {
         let t = std::time::Instant::now();
         self.last_report = Some(t);
 
-        let mut now = [false; 256];
-        for &u in usages {
-            if u != 0 {
-                now[u as usize] = true;
-            }
-        }
+        // 纯函数：报文 → 按键集合（见 report::key_set，有单测）
+        let now = iprc1000_native::report::key_set(usages);
 
 
         // ⓪ 本段的第一条报文：只当基线、**不发任何按键事件**。
@@ -1350,10 +1346,8 @@ impl Bridge {
         //   这里只保留时间戳给诊断/统计用。
         self.last_report_at = Some(Instant::now());
 
-        const GHOST: [u8; 2] = [0x01, 0x0C];
-        let has_real = usages.iter().any(|&u| u != 0 && !GHOST.contains(&u));
-        let all_empty = usages.iter().all(|&u| u == 0);
-        if !has_real && !all_empty {
+        // 纯函数：只含幽灵 usage（0x01 / 0x0C）的报文不是键盘快照（见 report::is_ghost_only）
+        if iprc1000_native::report::is_ghost_only(usages) {
             self.stats.lock().unwrap_or_else(|e| e.into_inner()).ghost_reports += 1;
             return;
         }
@@ -1405,7 +1399,7 @@ impl Bridge {
                     //   现在只认**空报文**（真机反复验证：真正的松手一定是 `[]`）：
                     //     · 空报文   ⇒ 把租约收到 now（更快的放手，0.5~10 ms）
                     //     · 非空报文 ⇒ **完全不动租约**，让它按 T_PAUSE 自己到期
-                    if all_empty {
+                    if iprc1000_native::report::is_empty(usages) {
                         self.voice_disarm("松手（空报文）");
                     }
                     continue;   // held[0x10] 只能由 reconcile_voice 改
