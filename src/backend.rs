@@ -765,6 +765,22 @@ fn remote_present() -> bool {
 #[cfg(not(target_os = "windows"))]
 fn remote_present() -> bool { true }
 
+/// ## 锁序铁律（改这块之前必读）
+///
+/// 本结构体同时被四条线程访问：ETW 回调（热路径）、统计/落盘线程、UI 线程、托盘线程。
+/// 涉及**两把锁**时，顺序**永远**是：
+///
+/// ```text
+///   桥锁（Arc<Mutex<Bridge>>）  →  stats 锁（Bridge::stats）
+/// ```
+///
+/// 反过来的写法（先 stats 再桥锁）与热路径形成**锁序反转**：
+/// 热路径持桥锁等 stats，另一边持 stats 等桥锁 ⇒ 双方永久互等。
+/// 症状是"进程活着、界面和按键全停"，且取决于两线程时序、极难复现。
+/// 2026-11-01 在统计线程里发现并修正过一处（原来就是 st→br）。
+///
+/// 另：**热路径里不要做 I/O**（写文件、弹框、等子进程）。一次慢盘就顶住 ETW 回调，
+/// 缓冲溢出后表现为"丢事件"，而且日志里看不出因果。
 pub struct Bridge {
     hpf: Option<[Hpf; 2]>,
     udp: Option<UdpSink>,
@@ -2620,7 +2636,11 @@ pub fn run_backend() {
                 }
             }
             let (json, stat_line, blocked) = {
-                let Ok(s) = st.lock() else { continue };
+                // ★★ 锁序铁律：**永远先 br 后 st**（热路径就是 br→st）。
+                //   这里原来是 st→br，与热路径相反 ⇒ 经典锁序反转：
+                //     热路径持有 br、等 st；统计线程持有 st、等 br ⇒ 双方永久互等。
+                //   症状是"进程活着但界面/按键全停"，而且取决于两线程时序、极难复现。
+                //   2026-11-01 修正：改成 br→st，与热路径同序（st 的获取移到下面）。
                 // ★★ 2026-11-01（#3 热路径无锁化的**第一步**：先测量，不猜）：
                 //   统计线程每 2 秒抢一次同一把桥锁，测量"从想拿到真拿到"的等待时间。
                 //   这个数就是热路径被 UI/统计/录制挡住的程度 —— 一旦出现 >20ms 的等待，
@@ -2628,6 +2648,7 @@ pub fn run_backend() {
                 //   无锁化才有依据、也才有验收标准。
                 let lock_t0 = Instant::now();
                 let Ok(g) = br.lock() else { continue };
+                let Ok(s) = st.lock() else { continue };   // ★ br 之后再拿 st
                 {
                     let wait_us = lock_t0.elapsed().as_micros() as u64;
                     let prev = LOCK_WAIT_MAX_US.load(Ordering::Relaxed);
