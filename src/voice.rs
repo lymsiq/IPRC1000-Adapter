@@ -202,9 +202,21 @@ pub const TAP_GAP_MS: u64 = 50;
 pub const TAP_HOLD_MS: u64 = 60;
 
 impl TapFollowUp {
-    /// 用户松手时调用：排一次补点击。
-    pub fn on_release(now_ms: u64) -> Self {
+    /// 排一次"点按"（**按下 → 间隔 → 弹起**，模拟一次键盘按键）。
+    ///
+    /// ★★ 2026-11-01 二次修正（用户实测）：点按模式**不是**"按住整段、松手补一次"。
+    ///   正确语义是**两次独立的点按**：
+    ///     · 按下语音键 ⇒ 发一次点按（豆包：弹出语音框、开始录音）
+    ///     · 松开语音键 ⇒ 再发一次点按（豆包：结束对话）
+    ///   期间**不需要**把右 Alt 压着 —— 音频走 CABLE 虚拟麦克风，与右 Alt 是否按住无关，
+    ///   遥控器按住只是在传音频。压着反而会让豆包把"两下点按"看成"一次长按"。
+    pub fn schedule(now_ms: u64) -> Self {
         TapFollowUp::Wait(now_ms.saturating_add(TAP_GAP_MS))
+    }
+
+    /// 兼容旧名（按下/松手两处都调它）
+    pub fn on_release(now_ms: u64) -> Self {
+        Self::schedule(now_ms)
     }
 
     /// tick 驱动：到点了就返回该做的动作。
@@ -257,6 +269,26 @@ mod tap_tests {
         // 用户在 20 ms 内又按下了（真实连按）
         f = TapFollowUp::None; // 由调用方置 None 表示"新的一段开始"
         assert_eq!(f.tick(1_050), None, "取消后不能再补点击");
+    }
+
+    /// ★ 点按模式是**两次点按**：按下一次、松手一次，各自完整的按下+弹起
+    #[test]
+    fn press_and_release_each_produce_one_tap() {
+        // 按下 ⇒ 第一次点按
+        let mut f = TapFollowUp::schedule(1_000);
+        assert_eq!(f.tick(1_050), Some(TapAction::Press));
+        assert_eq!(f.tick(1_110), Some(TapAction::Release));
+        assert!(!f.is_pending(), "第一次点按结束后不应残留");
+
+        // 说话进行中（假设 3 秒）—— 期间**不应该**有任何注入
+        assert_eq!(f.tick(2_000), None);
+        assert_eq!(f.tick(3_500), None);
+
+        // 松手 ⇒ 第二次点按
+        f = TapFollowUp::schedule(4_000);
+        assert_eq!(f.tick(4_050), Some(TapAction::Press));
+        assert_eq!(f.tick(4_110), Some(TapAction::Release));
+        assert!(!f.is_pending());
     }
 
     /// 间隔与按住时长都在合理范围（不连按、也不像长按）

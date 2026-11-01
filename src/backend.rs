@@ -837,6 +837,11 @@ pub struct Bridge {
     /// 点按模式的锁存状态：true = 语音键"已按下并保持"，等下一次按下时释放。
     /// 只在 `trigger == tap` 时有意义（2026-10-31）。
     tap_followup: iprc1000_native::voice::TapFollowUp,
+    /// 点按模式：第一下已发出去、还等松手那一拍。
+    /// 为什么需要它：点按模式下 `held[0x10]` 在 60 ms 后就变回 false，
+    /// 而"松手"分支挂在 `held[u] && !now[u]` 里 ⇒ 根本进不去，第二下永远发不出来。
+    /// 而且**不能**无条件对每个空报文都补一下：空闲时按别的键也会产生空报文。
+    tap_awaiting: bool,
     /// 每个键**按下的时刻**（看门狗用）。UP 丢了时靠它兜底释放，
     /// 否则那个键会永久留在"按下"状态（遥控器按住期间不上报，没人能纠正）。
     /// 每个键**最迟放手时刻**（毫秒时间戳；0 = 没按住）。
@@ -918,6 +923,7 @@ impl Bridge {
             voice_missing_since: None,
             voice_had_audio: false,
             tap_followup: iprc1000_native::voice::TapFollowUp::None,
+            tap_awaiting: false,
             last_ts: 0,
             stats,
             wav,
@@ -1371,6 +1377,21 @@ impl Bridge {
             self.voice_missing_since = None;
         }
 
+        // ★★ 点按模式：松手（空报文）⇒ 发第二下。必须放在 UP 循环**之前**：
+        //   点按模式下按下那一下 60 ms 就已弹起，`held[0x10]` 是 false，
+        //   UP 循环根本不会进语音分支，第二下永远发不出来（实测会缺一次）。
+        //   用 `tap_awaiting` 而不是"每个空报文都补"：空闲时按别的键也会产生空报文，
+        //   无条件补就会凭空多出一次语音点击。
+        if crate::settings::TRIGGER_IDX.load(Ordering::Relaxed) == 1
+            && self.tap_awaiting
+            && iprc1000_native::report::is_empty(usages)
+        {
+            self.tap_awaiting = false;
+            self.tap_followup = iprc1000_native::voice::TapFollowUp::schedule(diag::now_ms());
+            eprintln!("[点按] 松手 ⇒ {} ms 后发第二下（豆包结束对话）",
+                iprc1000_native::voice::TAP_GAP_MS);
+        }
+
         // ① 先放掉不再按住的（升序，保证事件顺序确定）
         for u in 0..256usize {
             if self.held[u] && !now[u] {
@@ -1399,14 +1420,7 @@ impl Bridge {
                     //     · 非空报文 ⇒ **完全不动租约**，让它按 T_PAUSE 自己到期
                     if iprc1000_native::report::is_empty(usages) {
                         self.voice_disarm("松手（空报文）");
-                        // 点按模式：松手后再补一次瞬发点击（= 豆包"再按一次"⇒ 结束对话）。
-                        // 时序由 tick 驱动，见 voice::TapFollowUp。
-                        if crate::settings::TRIGGER_IDX.load(Ordering::Relaxed) == 1 {
-                            self.tap_followup =
-                                iprc1000_native::voice::TapFollowUp::on_release(diag::now_ms());
-                            eprintln!("[点按] 松手 ⇒ 排一次补点击（{} ms 后）",
-                                iprc1000_native::voice::TAP_GAP_MS);
-                        }
+                        // （点按模式的"第二下"在 UP 循环之前处理，见 tap_awaiting）
                     }
                     continue;   // held[0x10] 只能由 reconcile_voice 改
                 }
@@ -1557,16 +1571,27 @@ impl Bridge {
                 }
                 if u == 0x10 {
                     // ★★ 租约模型：语音键的所有语义都在这里，且只写租约、不写 held。
-                    // ★★ 2026-11-01（点按模式定案：方案 A —— 松手自动结束）：
-                    //   原来这里是"第一次按下锁存、第二次按下才放"，租约设成
-                    //   `u64::MAX/4` 相当于永不到期 ⇒ **用户按一下就松手，右 Alt 永久按住**
-                    //   （`release_all_held_with` 里还专门保留它，等于没有兜底）。
                     //
-                    //   现在：按下与按住模式**完全一样**（arm T_NOVOICE）；
-                    //   区别只在"松手"时——点按模式会补一次瞬发点击，让豆包结束对话。
-                    //   用户感知：按住 → 说 → 松手就结束，不用按第二下。
-                    self.tap_followup = iprc1000_native::voice::TapFollowUp::None;
-                    if self.held[0x10] {
+                    // ★★ 2026-11-01（点按模式，两次修正后的最终语义）：
+                    //   点按模式 = **两次独立的"点按"**：
+                    //     按下语音键 ⇒ 发一次点按（按下→弹起）⇒ 豆包弹框、开始录音
+                    //     松手       ⇒ 再发一次点按            ⇒ 豆包结束对话
+                    //   中间说话期间**不保持右 Alt** —— 音频走 CABLE 虚拟麦克风，
+                    //   与键盘无关；压着右 Alt 反而会被豆包看成"一次长按"。
+                    //
+                    //   （第一版曾写成"按住整段 + 松手补一次"，实测豆包看到的是长按，已废弃。）
+                    if crate::settings::TRIGGER_IDX.load(Ordering::Relaxed) == 1 {
+                        // ★★ 点按模式（2026-11-01 二次修正）：**按下这一下本身就是一次点按**
+                        //   —— 按下→弹起，模拟一次键盘按键，让豆包弹出语音框开始录音。
+                        //   这段时间**不保持右 Alt**：音频走 CABLE 虚拟麦克风，与键盘无关，
+                        //   遥控器按住只是在传音频。压着反而会被豆包看成"长按"。
+                        // ★ 按下这一下**立刻发**：间隔（TAP_GAP_MS）只用于"松手后那一下"，
+                        //   给第一下也加间隔等于白送 50 ms 延迟。
+                        self.voice_arm(iprc1000_native::voice::TAP_HOLD_MS);
+                        self.tap_awaiting = true;   // 等松手那一拍
+                        eprintln!("[点按] 按下 ⇒ 立即发一次点按（{} ms 后由 tick 弹起）",
+                            iprc1000_native::voice::TAP_HOLD_MS);
+                    } else if self.held[0x10] {
                         // 按住期间又收到 0x10 —— 物理上只可能是"松开又按下"：
                         // 按住期间遥控器零报文；而固件 30 秒自动收工那次松手**不发**报文，
                         // 所以我们漏掉了那次松开。这里只续租、不重发报告（避免
@@ -1743,7 +1768,9 @@ impl Bridge {
 
     /// 切换「按住 / 点按」时清掉锁存 —— 否则上一次还锁着，切回按住模式的第一次按会没反应。
     pub fn reset_tap_latch(&mut self) {
-        // 切换触发方式时清掉待办的补点击（否则切到按住模式还会莫名多一下）
+        // 切换触发方式时清掉待办的点按与"等第二下"标记，
+        // 否则切回按住模式还可能莫名多发一下。
+        self.tap_awaiting = false;
         if self.tap_followup.is_pending() {
             self.tap_followup = iprc1000_native::voice::TapFollowUp::None;
             self.voice_disarm("切换触发方式");
@@ -2212,7 +2239,10 @@ impl Bridge {
         //     会把一个已经结束的会话又续上 —— 21:28 实测：
         //       21:28:36.092 放开（松手（空报文））
         //       21:28:36.118 tick 又把它按上（26 ms 的假按下，豆包看到一次短按）
-        if self.held[0x10] {
+        // ★★ 点按模式**不续租**：那里的"按住"只有 60 ms（一次模拟点按），
+        //   若让音频帧续租，这一下点按会被拉成整段长按 —— 豆包看到的就不是"点两下"了。
+        let tap_mode_now = crate::settings::TRIGGER_IDX.load(Ordering::Relaxed) == 1;
+        if self.held[0x10] && !tap_mode_now {
             let now = diag::now_ms();
             // ★ 用 renew 而不是直接 now+T_PAUSE：音频帧可能乱序/迟到，
             //   直接覆盖会把租约改短（表现为"说着说着被放开"）。见 voice::renew 的说明。
@@ -2252,12 +2282,12 @@ impl Bridge {
             use iprc1000_native::voice::{TapAction, TapFollowUp};
             match self.tap_followup.tick(now) {
                 Some(TapAction::Press) => {
-                    eprintln!("[点按] 补点击 ⇒ 按下（{} ms）", iprc1000_native::voice::TAP_HOLD_MS);
+                    eprintln!("[点按] 松手后那一下 ⇒ 按下右Alt");
                     self.voice_arm(iprc1000_native::voice::TAP_HOLD_MS);
                 }
                 Some(TapAction::Release) => {
-                    eprintln!("[点按] 补点击 ⇒ 放开");
-                    self.voice_disarm("点按补点击结束");
+                    eprintln!("[点按] ⇒ 弹起右Alt（这一段结束）");
+                    self.voice_disarm("点按结束");
                 }
                 None => {}
             }
