@@ -1643,13 +1643,13 @@ impl Bridge {
     /// 续租：从现在起 `ms` 毫秒内右 Alt 应该按住。
     fn voice_arm(&mut self, ms: u64) {
         let now = diag::now_ms();
-        VOICE_LEASE_MS.store(now.saturating_add(ms), Ordering::Relaxed);
+        VOICE_LEASE_MS.store(iprc1000_native::voice::arm(now, ms), Ordering::Relaxed);
         self.reconcile_voice("arm");
     }
 
     /// 收口：让租约立刻到期（松手 / 断链 / 退出 / 解卡键）。
     fn voice_disarm(&mut self, why: &str) {
-        VOICE_LEASE_MS.store(diag::now_ms(), Ordering::Relaxed);
+        VOICE_LEASE_MS.store(iprc1000_native::voice::disarm(diag::now_ms()), Ordering::Relaxed);
         self.reconcile_voice(why);
     }
 
@@ -1658,7 +1658,10 @@ impl Bridge {
     /// 它被三处调用：租约写入后立即对账（保证松手仍是 0.5~10 ms）、
     /// tick 每 50 ms（保证"没有事件也会到期"）、以及退出/解卡键。
     fn reconcile_voice(&mut self, why: &str) {
-        let want = diag::now_ms() < VOICE_LEASE_MS.load(Ordering::Relaxed);
+        let want = iprc1000_native::voice::should_hold(
+            diag::now_ms(),
+            VOICE_LEASE_MS.load(Ordering::Relaxed),
+        );
         if want == self.held[0x10] {
             // 状态已经对齐 —— 但还要问一句系统：注入真的生效了吗？
             if want {
@@ -2196,7 +2199,13 @@ impl Bridge {
         //       21:28:36.118 tick 又把它按上（26 ms 的假按下，豆包看到一次短按）
         if self.held[0x10] {
             let now = diag::now_ms();
-            VOICE_LEASE_MS.store(now.saturating_add(T_PAUSE_MS), Ordering::Relaxed);
+            // ★ 用 renew 而不是直接 now+T_PAUSE：音频帧可能乱序/迟到，
+            //   直接覆盖会把租约改短（表现为"说着说着被放开"）。见 voice::renew 的说明。
+            let prev = VOICE_LEASE_MS.load(Ordering::Relaxed);
+            VOICE_LEASE_MS.store(
+                iprc1000_native::voice::renew(prev, now, T_PAUSE_MS),
+                Ordering::Relaxed,
+            );
         }
         if self.held[0x10] {
             self.voice_had_audio = true;   // 仅诊断用：放开时写进日志
