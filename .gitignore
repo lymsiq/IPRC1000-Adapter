@@ -1,0 +1,25 @@
+# ── 构建产物（844 MB，绝不入库）──
+/target/
+
+# ── 根目录的构建副本 ──
+# 正式产物由打包脚本生成；仓库里只保留源码与资源。
+# 注意：只忽略**根目录**的 exe/dll，assets/ 下的驱动包必须入库。
+/*.exe
+/*.dll
+/*.pdb
+/*.ilk
+/*.exp
+
+# ── 打包中间物 ──
+# 由「exe + assets」生成，可随时重建（见 VERSION.md 的打包流程）。
+src/payload.zip
+
+# ── 运行期产物 ──
+*.log
+*.tmp
+
+# ── 编辑器/系统 ──
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

@@ -1,0 +1,2 @@
+// 把图标嵌进 exe（资源管理器/任务栏/Alt+Tab 用的就是这个）
+1 ICON "icon.ico"

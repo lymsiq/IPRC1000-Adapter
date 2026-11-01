@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>IPRC1000 Adapter</title>
+<link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="skin.css" />
+</head>
+<body>
+<div class="app">
+
+  <!-- ═══════════ 左侧栏 ═══════════ -->
+  <aside class="rail">
+    <div class="logo" title="IPRC1000 Adapter">
+      <svg viewBox="0 0 24 24" width="18" height="18">
+        <rect x="3" y="5" width="18" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <circle cx="9.5" cy="12" r="1.6" fill="currentColor"/>
+        <circle cx="14.5" cy="12" r="1.6" fill="currentColor"/>
+      </svg>
+    </div>
+
+    <div class="brand"><span class="badge">i</span> IPRC1000 Adapter</div>
+
+    <nav class="nav">
+      <button class="nav-btn active" data-page="overview" title="功能总览">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
+        <span class="nav-txt">功能总览</span>
+      </button>
+      <button class="nav-btn" data-page="keys" title="按键映射">
+        <svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="11" rx="2.4" stroke-width="1.7" fill="none"/><path d="M7 10.6h.01M10.3 10.6h.01M13.6 10.6h.01M16.9 10.6h.01M7.6 14.2h8.8" stroke-width="1.9"/></svg>
+        <span class="nav-txt">按键映射</span>
+      </button>
+      <button class="nav-btn" data-page="env" title="环境设置">
+        <svg viewBox="0 0 24 24"><path d="M3 13.5h3l2-5.5 3.2 10L14 11l1.9 2.5H21" stroke-width="1.9" fill="none"/></svg>
+        <span class="nav-txt">环境设置</span>
+      </button>
+    </nav>
+
+    <div class="device">
+      <div class="remote"><img src="remote.png" alt="IPRC1000 遥控器" draggable="false" /></div>
+      <div class="dev-name">IPRC1000</div>
+      <div class="dev-hint" id="devHint">已检测：确认</div>
+    </div>
+
+    <!-- 底部固定区：连接状态 + 版本。用包裹层承载 margin-top:auto，
+         否则 auto 外边距会把后加的版本行挤出可视区（.rail 是 overflow:hidden）。 -->
+    <div class="rail-bottom">
+      <div class="rail-foot">
+        <span class="dot" id="linkDot"></span><span id="linkText">等待遥控器连接</span>
+      </div>
+      <!-- 版本 + 构建时间：一眼确认手上跑的是哪一版（本项目反复吃过"是不是最新 exe"的亏） -->
+      <div class="rail-ver" id="railVer" title="程序版本与构建时间">—</div>
+    </div>
+  </aside>
+
+  <!-- ═══════════ 右侧内容 ═══════════ -->
+  <main>
+
+    <!-- ── 功能总览 ── -->
+    <section class="page" id="page-overview">
+      <header class="page-head">
+        <h1>功能总览</h1>
+        <p>遥控器与适配功能的实时状态</p>
+      </header>
+
+      <!-- ③ 第一次使用：四步清单。全部完成自动收起；点任一步跳到对应页面 -->
+      <details class="journey" id="journey" open>
+        <summary>
+          <span class="journey-h">第一次使用</span>
+          <span class="journey-prog" id="journeyProg">0 / 4 项已确认</span>
+        </summary>
+        <!-- 向导条：未完成时显示"第 N 步"，当前步没通过就禁用「下一步」 -->
+        <div class="wizard" id="wizardBar" style="display:none">
+          <b id="wizardStep">第 1 / 4 步</b>
+          <span id="wizardHint" class="wizard-hint"></span>
+          <button type="button" class="btn" id="wizardNext">下一步</button>
+        </div>
+        <div class="journey-list" id="journeyList">
+          <button type="button" class="jstep" data-go="overview">
+            <b>01</b>
+            <span><i>配对遥控器</i><em>同时按住「下」+「LAST」进入搜索模式，再到系统蓝牙里添加 IPRC1000</em></span>
+            <u class="jdot"></u>
+          </button>
+          <button type="button" class="jstep" data-go="env">
+            <b>02</b>
+            <span><i>语音环境就绪</i><em>虚拟键盘驱动 + 虚拟声卡；缺哪项就在「环境设置」点哪项</em></span>
+            <u class="jdot"></u>
+          </button>
+          <button type="button" class="jstep" data-go="env">
+            <b>03</b>
+            <span><i>默认麦克风设为 CABLE Output</i><em>输入法若跟随系统默认麦克风，这一步必需</em></span>
+            <u class="jdot"></u>
+          </button>
+          <button type="button" class="jstep" data-go="overview">
+            <b>04</b>
+            <span><i>按住语音键说 2 秒</i><em>面板「最近收到音频」一动，这一步就自动打勾（只验一次，重启也不再退回）</em></span>
+            <u class="jdot"></u>
+          </button>
+        </div>
+      </details>
+      <!-- ★ 语音输入法 / 语音键：这两行是**设置**（不是待办），所以放在「第一次使用」之外 ——
+           向导 4/4 完成后上面那张卡片会自动隐藏，这两行仍然保留 ✓（2026-10-30）-->
+      <div class="ime-panel">
+        <!-- 2026-10-29：语音输入法选择从「环境设置」搬到首页 —— 它本来就是"第一次使用"的一个决定。
+             不计入上面 4 步的进度（它是选择，不是待办）。 -->
+        <div class="ime-pick">
+          <span class="ime-label">语音输入法</span>
+          <span class="ime-seg">
+            <button type="button" data-ime="doubao">豆包</button>
+            <button type="button" data-ime="wechat">微信输入法</button>
+            <button type="button" data-ime="custom">自定义</button>
+          </span>
+          <em class="ime-hint" id="imeHint"></em>
+        </div>
+        <!-- 语音键：触发方式（按住说话 / 点按一次）+ 热键可改（2026-10-30）-->
+        <div class="ime-pick ime-voice">
+          <span class="ime-label">语音键</span>
+          <span class="ime-seg" id="voiceTriggerSeg">
+            <button type="button" data-vt="hold" title="按住遥控器语音键 = 按住热键，松开才结束。适合**旧版**豆包 / 微信输入法（按住说话）">按住说话</button>
+            <button type="button" data-vt="tap" title="**新版豆包**用这个：按下弹语音框开始说话，**松手自动结束**（会替你补一次点按）。按住遥控器期间麦克风才有声音">点按一次</button>
+          </span>
+          <span class="ime-hotkey" id="voiceHotkey">—</span>
+          <button class="btn ghost" id="btnEditVoiceKey" title="按下想用的组合键（Esc 取消）">改键</button>
+        </div>
+      </div>
+      <!-- 检测到反作弊时显示（空 note 由 CSS 折叠，不占位） -->
+      <div class="note warn" id="acWarn"></div>
+
+      <div class="cards">
+        <div class="card">
+          <div class="card-top">
+            <div class="ic ic-blue"><svg viewBox="0 0 24 24"><path d="M7 7h10v10H7z" fill="none" stroke-width="1.8"/></svg></div>
+            <span class="card-title">设备连接</span>
+            <span class="dot" id="d-device"></span>
+          </div>
+          <div class="card-value" id="v-device">等待连接</div>
+          <div class="card-desc" id="s-device">等待 IPRC1000 连接</div>
+        </div>
+
+        <div class="card">
+          <div class="card-top">
+            <div class="ic ic-indigo"><svg viewBox="0 0 24 24"><path d="M4 18V6m6 12V9m6 9v-7" stroke-width="1.9" fill="none"/></svg></div>
+            <span class="card-title">按键映射</span>
+            <span class="dot" id="d-keys"></span>
+          </div>
+          <div class="card-value" id="v-keys">— 个按键已配置</div>
+          <div class="card-desc">支持单键、组合键与媒体键</div>
+        </div>
+
+        <div class="card">
+          <div class="card-top">
+            <div class="ic ic-amber"><svg viewBox="0 0 24 24"><path d="M12 4v10" stroke-width="1.9" fill="none"/><path d="M8.5 10.5 12 14l3.5-3.5" stroke-width="1.9" fill="none"/><path d="M5 19h14" stroke-width="1.9" fill="none"/></svg></div>
+            <span class="card-title">遥控器语音</span>
+            <span class="dot" id="d-voice"></span>
+          </div>
+          <div class="card-value" id="v-voice">语音通道未就绪</div>
+          <div class="card-desc" id="s-voice">等待 BthPort ETW 音频通道</div>
+        </div>
+
+        <div class="card">
+          <div class="card-top">
+            <div class="ic ic-purple"><svg viewBox="0 0 24 24"><path d="M12 3.5 5 7v5c0 4.2 3 7 7 8.5 4-1.5 7-4.3 7-8.5V7z" fill="none" stroke-width="1.7"/></svg></div>
+            <span class="card-title">输入与权限</span>
+            <span class="dot" id="d-perm"></span>
+          </div>
+          <div class="card-value" id="v-perm">需要检查权限</div>
+          <div class="card-desc">仅拦截 IPRC1000，不影响其他键盘</div>
+        </div>
+      </div>
+
+      <div class="opbar">
+        <div class="op-left">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 13h4l2-5 3 10 2.5-7 1.8 2H21" stroke-width="1.8" fill="none"/></svg>
+          <span>当前操作</span>
+          <b id="opKey">—</b>
+        </div>
+        <div class="op-right" id="opState">—</div>
+      </div>
+    </section>
+
+    <!-- ── 按键映射 ── -->
+    <section class="page hidden" id="page-keys">
+      <header class="page-head row">
+        <div>
+          <h1>按键映射</h1>
+          <p>所有遥控器按键均可设置为单键、组合键或媒体键</p>
+        </div>
+        <div class="row">
+          <button class="btn ghost" id="btnExport">导出</button>
+          <button class="btn ghost" id="btnImport">导入</button>
+          <button class="btn ghost" id="btnReset">恢复默认</button>
+        </div>
+      </header>
+
+      <!-- 配置组 Tab + 搜索 -->
+      <div class="grouptabs">
+        <div class="gtabs" id="gTabs"></div>
+        <button class="tabadd" id="gNew" title="复制当前映射并新建配置组">+</button>
+        <button class="tabadd" id="gDel" title="删除当前配置组（至少保留一组）">−</button>
+        <input class="gsearch" id="gSearch" placeholder="搜索：按键名 / HID 值 / 映射动作" spellcheck="false" />
+      </div>
+
+      <!-- 截图点击的全局调参：放在页面上，而不是藏进按键弹窗（2026-10-27 修正） -->
+      <div class="panel-actions" id="clickTune" style="margin:2px 0 10px;flex-wrap:wrap"></div>
+
+      <div class="keys-layout">
+        <!-- 左：遥控器实体图（选中键高亮） -->
+        <aside class="remote-pane">
+          <div class="remote-stage" id="remoteStage">
+            <img src="remote.png" alt="IPRC1000 遥控器" draggable="false" />
+            <!-- 23 个透明热区，选中时高亮 -->
+          </div>
+          <div class="remote-name">IPRC1000</div>
+        </aside>
+
+        <!-- 右：按键列表（每行是该键的缩略图 + 组合键） -->
+        <div class="keys-pane">
+          <div class="keysum" id="keySum"></div>
+          <div class="keylist" id="keyList"></div>
+        </div>
+      </div>
+
+      <!-- 组合键编辑弹窗：点某一行时弹出 -->
+      <div class="mask hide" id="comboMask">
+        <div class="modal" id="comboModal">
+          <div class="modal-head">
+            <div class="modal-thumb" id="comboThumb"></div>
+            <div class="modal-head-text">
+              <div class="modal-title" id="comboTitle">设置快捷键</div>
+              <div class="modal-sub" id="comboSub">当前：未设置</div>
+            </div>
+            <!-- 全局：勾上后这个键在所有配置组共用同一份映射，切配置组不再变化。
+                 语音键属于这类 —— 它跟输入法有关，跟"当前用哪套桌面键位"无关。 -->
+            <button class="gbtn" id="comboGlobal" data-on="0"
+              title="全局：所有配置组共用这个映射，切换配置组时保持不变（语音键建议开启）">全局</button>
+            <button class="modal-x" id="comboClose" title="关闭 (Esc)">×</button>
+          </div>
+          <div class="modal-body">
+            <!-- 三页签（2026-10-30）：这个遥控器键按下后干什么 —— 发一个按键 / 粘贴一段文本 / 跑一串宏。
+                 文本和宏都存同一份 macros.json，绑定时写的是负数哨兵（-1001 起）。 -->
+            <div class="cm-tabs" id="comboTabs">
+              <button class="cm-tab on" data-tab="key">按键</button>
+              <button class="cm-tab" data-tab="text">文本</button>
+              <button class="cm-tab" data-tab="macro">宏</button>
+            </div>
+
+            <div class="cm-pane" id="paneKey">
+              <div class="kb-mods" id="kbMods"></div>
+              <div class="kb-preset" id="kbPreset" style="display:none"></div>
+              <div class="kb-main" id="kbMain"></div>
+              <div class="kb-extra" id="kbExtra"></div>
+              <!-- 动作：把这个键配成 切换配置组 / 鼠标左键 / 右键 / 滚轮上 / 滚轮下。
+                   鼠标类走 SendInput，不经虚拟键盘；「切换配置组」= 方块键的出厂值。 -->
+              <div class="kb-mouse" id="kbMouse"></div>
+            </div>
+
+            <!-- 文本：一键把预设文字粘贴到光标处（走剪贴板，不经输入法，中文/emoji 都能过） -->
+            <div class="cm-pane hide" id="paneText">
+              <div class="cm-label">选一组（1–10）<span class="cm-hint" id="txtHint"></span></div>
+              <div class="cm-slots" id="txtSlots"></div>
+              <input class="cm-name" id="txtName" maxlength="40" placeholder="名称（可选，例如「报价话术」）">
+              <textarea class="cm-text" id="txtBody" rows="7"
+                placeholder="点这里输入要一键粘贴的文字…&#10;支持多行、中文、emoji。粘贴时不会经过输入法。"></textarea>
+              <div class="cm-row">
+                <button class="btn ghost" id="txtTest">试一下粘贴</button>
+                <span class="cm-hint">会把光标处的当前内容覆盖掉，先点好目标输入框</span>
+              </div>
+            </div>
+
+            <!-- 宏：按键 / 等待 / 粘贴 / 点击 四类步骤，按顺序执行 -->
+            <div class="cm-pane hide" id="paneMacro">
+              <!-- 录制：点完 3 秒才真正开始，那 3 秒用来把鼠标移回目标窗口
+                   （否则点「开始录制」那一下会被自己录进去） -->
+              <div class="cm-row">
+                <button class="btn" id="recBtn" data-on="0">开始录制</button>
+                <span class="cm-hint" id="recHint">录键盘 + 鼠标点击/拖拽；不录自由移动，也不录遥控器按键</span>
+              </div>
+              <div class="cm-row">
+                <input class="cm-name" id="macName" maxlength="40" placeholder="宏名称（可选）">
+                <button class="btn ghost" id="macRun">试运一遍</button>
+              </div>
+              <div class="cm-row">
+                <span class="cm-lab">执行</span>
+                <input class="cm-num" id="macLoop" type="number" min="0" max="999" value="1">
+                <span class="cm-hint" id="macLoopHint">遍 · 1 = 触发一次，0 = 一直循环（按任意遥控器键停）</span>
+              </div>
+              <div class="cm-row">
+                <span class="cm-lab">速度</span>
+                <input class="cm-num" id="macSpeed" type="number" min="10" max="400" step="10" value="100">
+                <span class="cm-hint">% · 100 = 原速，200 = 快一倍。只影响等待与按住时长，不影响粘贴后的等待</span>
+              </div>
+              <!-- 行内录键条（2026-10-30 重构，取代原来的「插入按键」嵌套弹框）：
+                   弹框叠在设置弹窗上既挡字又乱；弹框开着时全局钩子还会吞掉
+                   全系统按键（切去别的窗口 Ctrl+V 粘贴截图都不行）。 -->
+              <div class="cm-rec hide" id="keyRec">
+                <span class="cm-rec-dot"></span>
+                <span class="cm-rec-main">
+                  <b id="keyRecTitle">正在等你按一个键…</b>
+                  <em id="keyRecHint">组合键先按住 Ctrl/Alt/Shift/Win 再按主键 · Esc 取消</em>
+                </span>
+                <span class="cm-rec-mods" id="keyRecMods"></span>
+                <select id="keyRecPick" class="cm-rec-pick" title="录不到？直接从常用键里选">
+                  <option value="">常用键…</option>
+                </select>
+                <button class="btn ghost" id="keyRecCancel">取消</button>
+              </div>
+              <div class="cm-steps" id="macSteps"></div>
+              <div class="cm-add" id="macAdd">
+                <button class="btn ghost" data-add="keys">+ 按键</button>
+                <button class="btn ghost" data-add="wait">+ 等待</button>
+                <button class="btn ghost" data-add="paste">+ 粘贴文本</button>
+                <button class="btn ghost" data-add="click">+ 点击</button>
+                <span style="flex:1"></span>
+                <!-- 清空：重新配一个宏时不用逐条删。会二次确认（误点丢很多步很难受） -->
+                <button class="btn ghost" id="macClear" title="清空所有步骤，重新配">清空</button>
+              </div>
+              <!-- 脚本导入：KeymouseGo .txt（只做线性序列提取）-->
+              <div class="cm-row">
+                <button class="btn ghost" id="kmgoBtn">导入 .txt（KeymouseGo）</button>
+                <input type="file" id="kmgoFile" accept=".txt" style="display:none">
+                <span class="cm-hint">只认线性序列；循环/流程控制会明确报错并给行号</span>
+              </div>
+              <div class="note"><b>按键</b>：点「<b>+ 按键</b>」直接录一个键（按下即入列，
+                组合键先按住 Ctrl/Alt/Shift/Win 再按主键）；要改已有步骤就点它右边的 <b>⌨</b>。
+                <b>点击</b>：默认在<b>鼠标当前位置</b>点一下；想按画面找按钮就选「截图匹配」
+                （要先采集图标，没采集会停下并提示）。</div>
+            </div>
+
+            <div class="kb-foot">
+              <span class="kb-cur">当前：<b id="comboCur">未设置</b></span>
+              <span class="grow"></span>
+              <button class="btn ghost" id="kbNone">不执行</button>
+              <button class="btn ghost" id="kbCancel">取消</button>
+              <button class="btn" id="kbSave">保存映射</button>
+            </div>
+            <div class="note" id="comboNote"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── 环境设置 ── -->
+    <section class="page hidden" id="page-env">
+      <header class="page-head" style="order:-1">
+        <h1>环境设置</h1>
+        <p>本机运行环境检查与一键修复</p>
+      </header>
+
+      <!-- ── 分组标题（2026-10-30）：用 order 定位置，不改 DOM 顺序 ── -->
+      <div class="group-head" style="order:9">
+        <b>环境体检</b><span>先看这里：一键确认本机是否就绪</span>
+      </div>
+      <div class="group-head" style="order:19">
+        <b>声音通路</b><span>遥控器 → 虚拟声卡 → 输入法；这一段不通，语音键就没声音</span>
+      </div>
+      <div class="group-head" style="order:29">
+        <b>按键与注入</b><span>遥控器按键怎么送进系统；不出字、卡键都看这里</span>
+      </div>
+      <div class="group-head" style="order:39">
+        <b>鼠标</b><span>把遥控器当鼠标用：开关、手感、实时校准</span>
+      </div>
+      <div class="group-head" style="order:50">
+        <b>启动与高级</b><span>开机自启、注册表、诊断与实验开关（一般不用动）</span>
+        <button class="btn ghost" id="btnAdvToggle">展开</button>
+      </div>
+
+      <!-- 0. 环境自检 · 一键就绪 -->
+      <div class="panel" style="order:10">
+        <div class="panel-head">
+          <div class="ic ic-green"><svg viewBox="0 0 24 24"><path d="M12 3.5 5 7v5c0 4.2 3 7 7 8.5 4-1.5 7-4.3 7-8.5V7z" fill="none" stroke-width="1.7"/><path d="M8.8 12.2 11 14.4l4.4-4.6" stroke-width="1.9" fill="none"/></svg></div>
+          <div class="panel-title">
+            <b>环境自检 · 一键就绪</b>
+            <span>虚拟声卡 → 虚拟键盘驱动 → 设备驱动 → 默认麦克风，缺哪项点哪项</span>
+          </div>
+          <span class="dot" id="d-setup"></span>
+        </div>
+        <div class="kv" id="setupKv"></div>
+        <div class="note" id="setupNote"></div>
+        <div class="note" id="defaultMicNote"></div>
+        <div class="panel-actions">
+          <button class="btn" id="btnSetupAll">一键完成全部</button>
+          <button class="btn ghost" id="btnCheckMic">检查录音设备</button>
+          <button class="btn ghost" id="btnTestTone">发送 1 秒测试音</button>
+          <button class="btn ghost" id="btnSetMic">设为 CABLE Output</button>
+          <button class="btn ghost" id="btnDriverDiag">复制诊断</button>
+          <button class="btn" id="btnDoctor">一键体检</button>
+        </div>
+        <details class="adv">
+          <summary>更多选项：装声卡 / 装驱动 · 设备驱动切换 · 自启动设置</summary>
+          <div class="panel-actions">
+            <button class="btn ghost" id="btnInstallCable2">安装虚拟声卡</button>
+            <button class="btn" id="btnInstallUhid2">一键安装 / 修复虚拟键盘驱动</button>
+            <button class="btn ghost" id="btnSwitchDriver">切换设备驱动</button>
+            <button class="btn ghost" id="btnRevertDriver">还原成键盘驱动</button>
+          </div>
+        </details>
+      </div>
+
+      <!-- 1. 注册表 -->
+      <div class="panel" style="order:51" data-adv="1">
+        <div class="panel-head">
+          <div class="ic ic-blue"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke-width="1.9" fill="none"/></svg></div>
+          <div class="panel-title">
+            <b>本机环境 · 注册表</b>
+            <span>BthPort ETW 需在驱动加载时读到正确配置，改完必须重启</span>
+          </div>
+          <span class="dot" id="d-reg"></span>
+        </div>
+
+        <div class="kv" id="regKv"></div>
+
+        <div class="note" id="regNote"></div>
+
+        <div class="panel-actions">
+          <button class="btn" id="btnApplyReg">应用推荐值</button>
+        </div>
+        <details class="adv">
+          <summary>更多选项：重新检测 · 立即重启</summary>
+          <div class="panel-actions">
+            <button class="btn ghost" id="btnRecheck">重新检测</button>
+            <button class="btn ghost" id="btnReboot">立即重启</button>
+          </div>
+        </details>
+      </div>
+
+      <!-- 2. 虚拟声卡 -->
+      <!-- 声音通路：声卡 + 语音桥合并为一张卡（2026-10-30），避免两个半张卡 -->
+      <div class="card-merge" style="order:20">
+      <div class="panel">
+        <div class="panel-head">
+          <div class="ic ic-indigo"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="3" fill="none" stroke-width="1.8"/><circle cx="9" cy="12" r="2.2" fill="none" stroke-width="1.8"/><path d="M14 10h4M14 14h4" stroke-width="1.8" fill="none"/></svg></div>
+          <div class="panel-title">
+            <b>虚拟声卡 · VB-CABLE</b>
+            <span>把遥控器语音送到输入法：CABLE Input → CABLE Output</span>
+          </div>
+          <span class="dot" id="d-cable"></span>
+        </div>
+
+        <div class="kv" id="cableKv"></div>
+        <div class="note" id="cableNote"></div>
+
+        <div class="panel-actions">
+          <button class="btn" id="btnInstallCable">安装 / 修复虚拟声卡</button>
+          <button class="btn ghost" id="btnSetMicCable">设为默认麦克风</button>
+        </div>
+        <details class="adv">
+          <summary>更多选项：打开官网</summary>
+          <div class="panel-actions">
+            <button class="btn ghost" id="btnOpenCable">打开官网</button>
+          </div>
+        </details>
+      </div>
+
+      <!-- 3. 音频桥 -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="ic ic-amber"><svg viewBox="0 0 24 24"><path d="M4 12h3l2-5 3 10 3-8 2 3h3" stroke-width="1.8" fill="none"/></svg></div>
+          <div class="panel-title">
+            <b>语音桥 · ETW → 虚拟声卡</b>
+            <span>从 BthPort ETW 取完整音频帧并送入 CABLE</span>
+          </div>
+          <span class="dot" id="d-bridge"></span>
+        </div>
+
+        <div class="kv" id="bridgeKv"></div>
+        <!-- 诊断明细：正常时收起，出问题时才展开看 -->
+        <details class="adv">
+          <summary>诊断详情（帧数 / 缓冲 / 权限）</summary>
+          <div class="kv" id="bridgeDiagKv"></div>
+        </details>
+        <div class="note warn" id="keyPathNote"></div>
+        <div class="note" id="bridgeNote"></div>
+
+        <div class="panel-actions">
+          <button class="btn" id="btnBridge">启动语音桥</button>
+        </div>
+        <details class="adv">
+          <summary>更多选项：快捷键注入开关 · 管理员身份重启</summary>
+          <div class="panel-actions">
+            <button class="btn ghost" id="btnInject">关闭快捷键注入</button>
+            <button class="btn ghost" id="btnAdmin">以管理员身份重启本程序</button>
+          </div>
+        </details>
+      </div>
+      </div>
+
+      <!-- 3.5 鼠标模式（开关从「鼠标模式」页搬来） -->
+      <div class="panel" style="order:40">
+        <div class="panel-head">
+          <div class="ic ic-blue"><svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="5"/><path d="M12 7.6v3.9"/></svg></div>
+          <div class="panel-title">
+            <b>鼠标模式</b>
+            <span>遥控器当鼠标用：方向键按住拖动即移动；切换即进出「鼠标模式」配置组</span>
+          </div>
+          <span class="dot" id="d-mouse2"></span>
+        </div>
+        <div class="note" id="mouseToggleNote"></div>
+        <div class="panel-actions">
+          <button class="btn" id="btnMouseToggle">切换到鼠标模式</button>
+        </div>
+      </div>
+
+      <!-- 鼠标参数（原「鼠标模式」页整体搬入） -->
+      <!-- ★ 包裹容器也是 flex 子元素：不给 order 会默认 0 抢到最前（实测踩到） -->
+      <div id="mouseParams" style="order:41;display:flex;flex-direction:column">
+<!-- 0. 模式 -->
+      <div class="panel" style="order:43">
+        <div class="panel-head">
+          <div class="ic ic-blue"><svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="5"/><path d="M12 7.6v3.9"/></svg></div>
+          <div class="panel-title">
+            <b>键盘 / 鼠标模式</b>
+            <span>按遥控器最底部的「方块键」即可切换（按下即生效）</span>
+          </div>
+          <span class="dot" id="d-mouse"></span>
+        </div>
+        <div class="kv" id="mouseKv"></div>
+        <!-- 方块键的作用已移到「按键映射」页的组标签那一行（那里才是"配置组"的地盘），
+             这里只留一句指路 —— 界面约定：同一份数据不许在两处各放一份控件。 -->
+        <div class="note"><b>开/关在本页最上方</b>（环境设置 → 鼠标模式）；下面的手感参数改完即时生效。</div>
+        <div class="note" id="mouseNote"><b>鼠标模式就是一个配置组</b> —— 它在「<b>按键映射</b>」页的
+          配置组标签里，和别的组一样可以改按键。切到它 = 开鼠标模式，切走 = 关。
+          方块键的出厂值就是「切换配置组」，也可以改绑成别的键或鼠标动作。</div>
+        <div class="panel-actions">
+          <button class="btn ghost" id="btnMouseCalib">重新自校准</button>
+        </div>
+      </div>
+
+      <!-- 1. 手感 -->
+      <div class="panel" style="order:41">
+        <div class="panel-head">
+          <div class="ic ic-indigo"><svg viewBox="0 0 24 24"><path d="M4 17c3.5-9 6.5-9 8 0s4.5 3 8-4" fill="none" stroke-width="1.8"/></svg></div>
+          <div class="panel-title">
+            <b>手感</b>
+            <span>改完即时生效（拖动滑条就能在旁边试）</span>
+          </div>
+        </div>
+        <div class="sliders" id="mouseSliders">
+          <label class="slider-row"><span>起步速度</span><input type="range" data-k="minPxPerSec" data-unit=" px/秒" data-dec="0" min="10" max="400" step="10"><b class="val"></b></label>
+          <label class="slider-row"><span>满速</span><input type="range" data-k="maxPxPerSec" data-unit=" px/秒" data-dec="0" min="150" max="3000" step="50"><b class="val"></b></label>
+          <label class="slider-row"><span>加速时长</span><input type="range" data-k="rampMs" data-unit=" ms" data-dec="0" min="0" max="2500" step="50"><b class="val"></b></label>
+          <label class="slider-row"><span>加速曲线</span><input type="range" data-k="rampExponent" data-unit="" data-dec="1" min="1" max="3" step="0.1"><b class="val"></b></label>
+          <label class="slider-row"><span>滚轮起步</span><input type="range" data-k="wheelMinPerSec" data-unit=" 格/秒" data-dec="0" min="1" max="20" step="1"><b class="val"></b></label>
+          <label class="slider-row"><span>滚轮满速</span><input type="range" data-k="wheelMaxPerSec" data-unit=" 格/秒" data-dec="0" min="2" max="40" step="1"><b class="val"></b></label>
+        </div>
+        <div class="switches">
+          <label class="switch"><input type="checkbox" data-k="normalizeDiagonal">斜向归一化<i>不开斜着走快 41%</i></label>
+          <label class="switch"><input type="checkbox" data-k="wheelOnVolumeKeys">音量± 当滚轮<i>默认关，免得占了音量键</i></label>
+          <label class="switch"><input type="checkbox" data-k="rememberMode">记住上次模式<i>否则每次启动回键盘模式</i></label>
+        </div>
+        <div class="note" id="mouseCfgNote"></div>
+        <details class="adv">
+          <summary>更多选项：tick 频率 · 安全超时 · 恢复默认</summary>
+          <div class="sliders">
+            <label class="slider-row"><span>tick 频率</span><input type="range" data-k="tickHz" data-unit=" Hz" data-dec="0" min="30" max="120" step="10"><b class="val"></b></label>
+            <label class="slider-row"><span>方向键超时</span><input type="range" data-k="directionHoldTimeoutSec" data-unit=" 秒" data-dec="0" min="2" max="30" step="1"><b class="val"></b></label>
+            <label class="slider-row"><span>鼠标键超时</span><input type="range" data-k="buttonHoldTimeoutSec" data-unit=" 秒" data-dec="0" min="2" max="30" step="1"><b class="val"></b></label>
+          </div>
+          <div class="panel-actions">
+            <button class="btn ghost" id="btnMouseReset">恢复默认手感</button>
+          </div>
+        </details>
+      </div>
+
+      <!-- 2. 实时校准 -->
+      <div class="panel" style="order:42">
+        <div class="panel-head">
+          <div class="ic ic-green"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18" fill="none" stroke-width="1.7"/><circle cx="12" cy="12" r="4.2" fill="none" stroke-width="1.7"/></svg></div>
+          <div class="panel-title">
+            <b>实时校准</b>
+            <span>切到鼠标模式后按住方向键 —— 光点就是<b>光标此刻的真实位置</b>（一张小地图），右下角是实时速度</span>
+          </div>
+        </div>
+        <div class="pad" id="mousePad">
+          <div class="pad-hint" id="mousePadHint">先切到鼠标模式，再按住遥控器方向键试试</div>
+          <div class="pad-dot" id="mouseDot"></div>
+          <div class="pad-speed" id="mouseSpeedLive"></div>
+        </div>
+        <div class="kv" id="mouseLiveKv"></div>
+      </div>
+      </div>
+
+      <!-- 启动与自动化开关（2026-10-30）：从「环境自检」里拆出来，归入高级组 -->
+      <div class="panel" style="order:52" data-adv="1">
+        <div class="panel-head">
+          <div class="ic ic-blue"><svg viewBox="0 0 24 24"><path d="M12 3.5v6" stroke-width="1.8"/><circle cx="12" cy="12" r="2.6" stroke-width="1.6" fill="none"/><path d="M6.5 21c0-3 2.5-5.4 5.5-5.4s5.5 2.4 5.5 5.4" stroke-width="1.4" fill="none"/></svg></div>
+          <div class="panel-title">
+            <b>启动与自动化</b>
+            <span>开机自启、托盘、自动切驱动、麦克风守护——设一次就不用再管</span>
+          </div>
+        </div>
+        <div class="panel-actions">
+            <button class="btn ghost" id="btnAutoStart">启动后自动拉起语音桥</button>
+            <button class="btn ghost" id="btnAutoRun">开机自启</button>
+            <button class="btn ghost" id="btnStartMin">启动时进托盘</button>
+            <button class="btn ghost" id="btnAutoDrv">启动自动切驱动</button>
+            <button class="btn ghost" id="btnAutoMic">默认麦克风被改走时自动改回</button>
+        </div>
+      </div>
+
+      <!-- 语音时序（高级，2026-10-30）：四个参数各在防一个真机事故，默认值保守 -->
+      <div class="panel" style="order:54" data-adv="1">
+        <div class="panel-head">
+          <div class="ic ic-blue"><svg viewBox="0 0 24 24"><path d="M4 12h4l2.5-5 3 10L16 12h4" fill="none" stroke-width="1.7"/></svg></div>
+          <div class="panel-title">
+            <b>语音时序（高级）</b>
+            <span>调小更跟手；每一项都在防一个具体毛病，超出范围会被自动夹回</span>
+          </div>
+        </div>
+        <div class="panel-actions" style="margin-bottom:8px">
+          <button class="btn ghost" id="btnVtLow">低延迟</button>
+          <button class="btn ghost" id="btnVtMid">平衡（默认）</button>
+          <button class="btn ghost" id="btnVtHigh">稳定</button>
+        </div>
+        <div class="note">低延迟档的<b>声卡缓冲 1024</b> 在部分机器上会断流（输入法读不到数据、直接"内容整理中"）——遇到就切回平衡档。三档只是把下面四个值填好，仍可单独微调后保存。</div>
+        <div class="kv">
+          <label for="vtDebounce">去抖窗口</label>
+          <input id="vtDebounce" type="number" min="40" max="400" step="10" style="width:88px">
+          <span class="hint">ms · 太小会被固件的"假松开"打断（实测抖动间隔 41 ms）</span>
+        </div>
+        <div class="kv">
+          <label for="vtTail">尾音窗口</label>
+          <input id="vtTail" type="number" min="0" max="500" step="10" style="width:88px">
+          <span class="hint">ms · 0 = 关闭，最后一个字更容易被吞</span>
+        </div>
+        <div class="kv">
+          <label for="vtIdleEnd">会话判定</label>
+          <input id="vtIdleEnd" type="number" min="200" max="3000" step="50" style="width:88px">
+          <span class="hint">ms · 说话中途停顿超过它就被切成两段（保存后自动重启桥）</span>
+        </div>
+        <div class="kv">
+          <label for="vtCable">声卡缓冲</label>
+          <input id="vtCable" type="number" min="256" max="7168" step="256" style="width:88px">
+          <span class="hint">samples@48k · 7168≈149 ms 太慢 / 2048≈43 ms 安全 / 1024≈21 ms 实测断流</span>
+        </div>
+        <div class="panel-actions">
+          <button class="btn ghost" id="btnVtSave">保存语音时序</button>
+          <button class="btn ghost" id="btnVtReset">恢复默认</button>
+        </div>
+        <div class="note" id="vtNote"></div>
+      </div>
+
+      <!-- 4. 按键拦截 -->
+      <div class="panel" style="order:30">
+        <div class="panel-head">
+          <div class="ic ic-purple"><svg viewBox="0 0 24 24"><path d="M12 3.5 5 7v5c0 4.2 3 7 7 8.5 4-1.5 7-4.3 7-8.5V7z" fill="none" stroke-width="1.7"/><path d="M9 12l2 2 4-4" stroke-width="1.7" fill="none"/></svg></div>
+          <div class="panel-title">
+            <b>按键拦截 · 按住语音键不出字</b>
+            <span>遥控器是标准蓝牙键盘，不拦截的话语音键会一直输出 m</span>
+          </div>
+          <span class="dot" id="d-uhid"></span><span class="dot hidden" id="d-perm2"></span>
+        </div>
+        <div class="note" id="injectNote"></div>
+        <div class="kv" id="injectKv"></div>
+        <div class="kv" id="keySrcKv"></div>
+        <div class="note" id="keySrcNote"></div>
+        <div class="panel-actions">
+          <button class="btn" id="btnReleaseAll">紧急复位：释放所有按键</button>
+          <button class="btn" id="btnInstallUhid">一键安装 / 修复虚拟键盘驱动</button>
+          <button class="btn ghost" id="btnWizardReset">重跑首次设置</button>
+          <button class="btn ghost" id="btnExportConfig">导出配置</button>
+        </div>
+        <div class="kv" id="uhidKv"></div>
+        <div class="note" id="uhidNote"></div>
+        <div class="switches">
+          <!-- 日志总开关：**默认关**。排查问题时打开，会同时打开界面侧与语音桥侧的日志 -->
+          <label class="switch" id="logSwitch"><input type="checkbox" id="logToggle">写入诊断日志<i>排查用，默认关闭。开了才有<strong>按键/注入轨迹</strong>（key-events.log）</i></label>
+          <!-- 第二级：事件日志（每天几 KB）。关掉它 = 完全不写任何日志。 -->
+          <label class="switch" id="noteSwitch"><input type="checkbox" id="noteToggle">记录事件日志<i>按键/释放等归因，每天几 KB；关掉即完全不记录</i></label>
+          <!-- 无驱动（降级）模式：给装不了 WinUHid 的机器。风险要写在界面上，不能只写文档。 -->
+          <label class="switch" id="driverFreeSwitch"><input type="checkbox" id="driverFreeToggle">无驱动模式（实验·降级）<i>保持遥控器为键盘、靠钩子吞 m。<b>已知不稳</b>：可能刷屏或让键盘暂时打不了字（失控会自动切回驱动模式）。<b>建议优先用「安装虚拟键盘驱动」</b></i></label>
+          <label class="switch" id="zeroGhostSwitch"><input type="checkbox" id="zeroGhostToggle">零漏模式（先吞后补）<i>连第一个 m 也不漏：遥控器刚用过时，单个 m 会晚 60ms 出现</i></label>
+        </div>
+        <div class="note" id="logNote"></div>
+        <details class="adv">
+          <summary>更多选项：测试注入 · 导出驱动手动安装</summary>
+          <div class="panel-actions">
+            <!-- 文案由 app.js 按当前语音键映射动态覆盖，这里给个中性默认值 -->
+            <button class="btn ghost" id="btnTestInject">测试注入语音键</button>
+            <!-- 只在打开诊断日志时出现（发布版默认不写日志，留个"清空"只会让人以为有日志） -->
+            <button class="btn ghost" id="btnClearLog" hidden>清空按键日志</button>
+            <button class="btn ghost" id="btnExportUhid">导出到桌面手动安装</button>
+          </div>
+        </details>
+      </div>
+    </section>
+
+
+  </main>
+
+      <!-- 环境体检弹窗（2026-10-30）：自己的遮罩，别塞进组合键弹窗里 -->
+      <div class="mask hide" id="doctorMask">
+        <div class="modal hidden" id="doctorModal">
+          <div class="modal-head">
+            <div class="modal-head-text">
+              <b>环境体检</b>
+              <span id="doctorSub">逐项检查，失败项可直接修</span>
+            </div>
+            <button class="x" id="doctorClose" title="关闭">✕</button>
+          </div>
+          <div class="doctor-list" id="doctorList"></div>
+          <div class="panel-actions" style="margin-top:4px">
+            <button class="btn" id="doctorCopy">复制报告</button>
+            <button class="btn ghost" id="doctorRerun">重新体检</button>
+          </div>
+        </div>
+      </div>
+</div>
+<script>
+  /* 只用一种桥：WebView2（.NET 版）优先；否则加载本地/qrc 的 qwebchannel.js（PySide6 版） */
+  if (!(window.chrome && window.chrome.webview)) {
+    document.write('<script src="qwebchannel.js"><\/script>');
+    document.write('<script>if (typeof QWebChannel === "undefined")'
+      + 'document.write(\'<script src="qrc:///qtwebchannel/qwebchannel.js"><\\/script>\');<\/script>');
+  }
+</script>
+<script src="app.js"></script>
+</body>
+</html>

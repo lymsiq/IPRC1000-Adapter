@@ -1,0 +1,596 @@
+/* IPRC1000 Adapter — 浅蓝白、圆角卡片、柔和阴影 */
+
+:root{
+  --bg1:#eaf2fd; --bg2:#f7fbff; --bg3:#eef6ff;
+  --rail:rgba(255,255,255,.72);
+  --card:rgba(255,255,255,.86);
+  --line:rgba(120,150,190,.18);
+  --txt:#1f2a37; --txt2:#5b6b80; --txt3:#8a99ad;
+  --blue:#2f80ed; --blue-l:#e3f0ff; --blue-d:#1f6fd8;
+  --green:#22c55e; --amber:#f59e0b; --red:#ef4444; --indigo:#6366f1; --purple:#a855f7;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font:14px/1.5 "Microsoft YaHei UI","Microsoft YaHei",-apple-system,"Segoe UI",sans-serif;
+  color:var(--txt);
+  background:linear-gradient(150deg,var(--bg1) 0%,var(--bg2) 45%,var(--bg3) 100%);
+  overflow:hidden; user-select:none;
+}
+.app{display:flex;height:100vh}
+
+/* ───── 左侧栏 ───── */
+.rail{
+  width:272px;flex:0 0 272px;position:relative;overflow:hidden;
+  background:var(--rail);backdrop-filter:blur(14px);
+  border-right:1px solid var(--line);
+  display:flex;flex-direction:column;padding:12px 16px 10px;
+}
+.logo{
+  width:34px;height:34px;border-radius:11px;display:grid;place-items:center;color:#fff;
+  background:linear-gradient(140deg,#4f9dfd,#2f80ed);box-shadow:0 4px 12px rgba(47,128,237,.35);
+}
+.brand{
+  margin-top:12px;display:flex;align-items:center;gap:7px;
+  font-weight:600;font-size:14.5px;letter-spacing:.2px;
+}
+.badge{
+  width:16px;height:16px;border-radius:50%;background:var(--blue);color:#fff;
+  display:grid;place-items:center;font-size:10.5px;font-weight:700;font-style:normal;
+}
+.nav{margin-top:10px;display:flex;flex-direction:column;gap:4px;width:100%}
+.nav-btn{
+  /* 2026-10-28：图标 → **图标 + 文字**（新手不用悬停猜含义） */
+  width:100%;height:44px;border:0;border-radius:13px;background:transparent;cursor:pointer;
+  display:flex;align-items:center;gap:11px;padding:0 12px;
+  color:var(--txt2);transition:.16s;font:inherit;text-align:left;
+}
+.nav-txt{font-size:13.5px;font-weight:500;letter-spacing:.2px;white-space:nowrap}
+.nav-btn svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linejoin:round;stroke-linecap:round}
+.nav-btn svg rect,.nav-btn svg circle{fill:none}
+.nav-btn:hover{background:rgba(47,128,237,.08);color:var(--blue)}
+.nav-btn.active{background:var(--blue-l);color:var(--blue);box-shadow:inset 0 0 0 1px rgba(47,128,237,.22)}
+
+.device{margin-top:6px;display:flex;flex-direction:column;align-items:center;padding-bottom:2px;min-height:0}
+.remote{filter:drop-shadow(0 10px 22px rgba(35,42,54,.28));flex:0 1 auto;min-height:0;display:flex;justify-content:center}
+/* 图片随窗口高度自适应：用 100vh 减去上方固定部分，窗口矮了图片自动缩小，
+   保证下方的 IPRC1000 / 检测状态 / 连接状态 都能完整显示（此前图片固定 122px 会溢出被裁）。*/
+.remote img{display:block;width:92px;height:auto;max-height:calc(100vh - 300px);
+  object-fit:contain;user-select:none;-webkit-user-drag:none}
+.dev-name{margin-top:8px;font-weight:700;font-size:14px;letter-spacing:.3px}
+.dev-hint{margin-top:4px;font-size:12px;color:var(--blue);background:var(--blue-l);
+  padding:1px 10px;border-radius:99px}
+/* 底部固定区：margin-top:auto 放在包裹层上，让"连接状态+版本"整体贴底。
+   原来 auto 直接放在 .rail-foot 上，后加的版本行会被挤出可视区。 */
+.rail-bottom{margin-top:auto}
+.rail-foot{
+  display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--txt2);
+  border-top:1px solid var(--line);padding-top:11px;
+}
+/* 版本 + 构建时间：很小很淡，但需要时一眼能找到 */
+.rail-ver{
+  margin-top:6px;font-size:11px;color:var(--txt3);
+  font-family:Consolas,"Cascadia Mono",monospace;
+  letter-spacing:.2px;cursor:help;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;
+}
+.dot{width:8px;height:8px;border-radius:50%;background:#c3ccd9;flex:0 0 8px}
+.dot.on{background:var(--green);box-shadow:0 0 0 3px rgba(34,197,94,.16)}
+.dot.warn{background:var(--amber);box-shadow:0 0 0 3px rgba(245,158,11,.16)}
+.dot.err{background:var(--red);box-shadow:0 0 0 3px rgba(239,68,68,.16)}
+
+/* ───── 内容区 ───── */
+main{flex:1;overflow-y:auto;padding:34px 40px 26px}
+main::-webkit-scrollbar{width:9px}
+main::-webkit-scrollbar-thumb{background:rgba(120,150,190,.32);border-radius:9px}
+.page{max-width:1080px}
+.hidden{display:none}
+.page-head{margin-bottom:22px}
+.page-head h1{font-size:27px;font-weight:800;letter-spacing:.4px}
+.page-head p{margin-top:7px;color:var(--txt2);font-size:13.5px}
+.page-head.row{display:flex;align-items:flex-start;justify-content:space-between}
+
+/* 卡片网格 */
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.card{
+  background:var(--card);border:1px solid var(--line);border-radius:16px;padding:17px 19px 19px;
+  box-shadow:0 6px 20px rgba(120,150,190,.10);backdrop-filter:blur(8px);
+}
+.card-top{display:flex;align-items:center;gap:9px}
+.card-title{font-weight:600;font-size:13.5px}
+.card-top .dot{margin-left:auto}
+.card-value{margin-top:16px;font-weight:700;font-size:18px;letter-spacing:.2px}
+.card-desc{margin-top:7px;font-size:12.5px;color:var(--txt3)}
+.ic{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:0 0 30px}
+.ic svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round}
+.ic-blue{background:#e4f1ff;color:#2f80ed}
+.ic-indigo{background:#e8e9ff;color:#5b5fef}
+.ic-amber{background:#fff2e0;color:#e8890c}
+.ic-purple{background:#f6e9ff;color:#a855f7}
+.ic-green{background:#e6f7ec;color:#27ae60}
+
+/* 底部操作条 */
+.opbar{
+  margin-top:20px;background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:13px 19px;display:flex;align-items:center;justify-content:space-between;
+  box-shadow:0 6px 18px rgba(120,150,190,.09);
+}
+.op-left{display:flex;align-items:center;gap:9px;color:var(--txt2);font-size:13.5px}
+.op-left svg{fill:none;stroke:var(--blue);stroke-linecap:round;stroke-linejoin:round}
+.op-left b{color:var(--txt);font-size:15px}
+.op-right{color:var(--green);font-weight:600;font-size:13.5px}
+
+/* ───── 按键映射列表 ───── */
+.keylist{display:flex;flex-direction:column;gap:9px;padding-bottom:18px}
+.keyrow{
+  display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--line);
+  border-radius:13px;padding:12px 18px;cursor:pointer;transition:.15s;
+}
+.keyrow:hover{border-color:rgba(47,128,237,.42);box-shadow:0 6px 18px rgba(47,128,237,.10)}
+.keyrow.sel{border-color:var(--blue);box-shadow:0 0 0 2px rgba(47,128,237,.16)}
+.keyname{font-weight:600;font-size:14px}
+.keyhid{font-size:11.5px;color:var(--txt3);margin-top:2px}
+/* ★ 名称列必须 flex:1 + min-width:0，否则会被右侧定宽的 .keybind-sym 挤成 0 宽 → 名称看起来「不显示」 */
+.keytext{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;justify-content:center}
+.keytext .keyname,.keytext .keyhid{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.keyrow .chev{color:#b8c4d4;margin-left:8px}
+
+/* ───── 面板（环境设置） ───── */
+.panel{
+  background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+  margin-bottom:16px;box-shadow:0 6px 20px rgba(120,150,190,.10);
+}
+.panel-head{display:flex;align-items:flex-start;gap:12px}
+.panel-title{display:flex;flex-direction:column;gap:3px}
+.panel-title b{font-size:15px;font-weight:700}
+.panel-title span{font-size:12.5px;color:var(--txt3)}
+.panel-head .dot{margin-left:auto;margin-top:6px}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:9px;margin-top:15px}
+.kv .item{background:#f5f8fd;border:1px solid var(--line);border-radius:10px;padding:9px 12px}
+.kv .k{font-size:11.5px;color:var(--txt3)}
+.kv .v{margin-top:3px;font-size:14px;font-weight:600;font-family:Consolas,"Cascadia Mono",monospace;word-break:break-all}
+.kv .v.ok{color:#16a34a} .kv .v.bad{color:#e8890c}
+/* 可选项未启用（不影响使用）：用中性灰，不要用告警色 —— 免得让人以为出故障 */
+.kv .v.warn{color:var(--txt3)}
+.note{margin-top:13px;font-size:12.5px;color:var(--txt2);background:#f7fafe;
+  border-left:3px solid var(--blue);border-radius:0 8px 8px 0;padding:9px 13px;line-height:1.65}
+.note.warn{border-left-color:var(--amber);background:#fffaf0;color:#8a5a00}
+/* 说明里的小字（排查提示之类），比正文再淡一档 */
+.dim{color:var(--txt3)}
+.panel-actions{display:flex;gap:9px;margin-top:15px;flex-wrap:wrap}
+/* 次要动作折叠：面板上只留最常用的 1~2 个，其余收进 details（原生折叠，零 JS） */
+.adv{margin-top:9px}
+.adv>summary{display:inline-flex;align-items:center;gap:5px;padding:4px 2px;cursor:pointer;
+  color:var(--txt2);font-size:12.5px;user-select:none;list-style:none;border-radius:7px}
+.adv>summary::-webkit-details-marker{display:none}
+.adv>summary::before{content:'▸';font-size:10px;line-height:1;transition:transform .15s}
+.adv[open]>summary::before{transform:rotate(90deg)}
+.adv>summary:hover{color:var(--blue)}
+.adv .panel-actions{margin-top:8px}
+
+/* 按钮 */
+.btn{
+  border:0;border-radius:10px;padding:9px 17px;font-size:13.5px;font-weight:600;cursor:pointer;
+  background:linear-gradient(140deg,#4f9dfd,#2f80ed);color:#fff;transition:.15s;
+  box-shadow:0 4px 13px rgba(47,128,237,.28);font-family:inherit;
+}
+.btn:hover{filter:brightness(1.05)}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
+.btn.ghost{background:#fff;color:var(--txt2);border:1px solid var(--line);box-shadow:none}
+.btn.ghost:hover{color:var(--blue);border-color:rgba(47,128,237,.45)}
+
+/* Toast */
+#toast{
+  position:fixed;left:50%;bottom:30px;transform:translateX(-50%) translateY(16px);
+  background:rgba(31,42,55,.93);color:#fff;padding:11px 20px;border-radius:11px;font-size:13.5px;
+  opacity:0;transition:.22s;pointer-events:none;max-width:70vw;
+  /* ★ 2026-10-19 修：.mask 是 z-index:60 且带 backdrop-filter:blur(2px)，
+     #toast 原来没有 z-index ⇒ 被压在遮罩**下面**，还被模糊滤镜糊掉（真机"文字模糊、被挡在后面"）。
+     toast 必须盖在所有遮罩之上。 */
+  z-index:999;white-space:pre-line;
+}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+.keysum{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 10px}
+.keysum .pill{font-size:12px;padding:3px 10px;border-radius:99px;background:var(--blue-l);color:var(--blue)}
+.keygroup{font-size:12px;font-weight:700;color:var(--txt2);letter-spacing:.6px;
+  margin:14px 2px 6px;display:flex;align-items:center;gap:8px}
+.keygroup:after{content:'';flex:1;height:1px;background:var(--line)}
+
+
+/* ───── 紧凑模式（整体收紧间距，一屏容纳更多内容）───── */
+.page-head{margin-bottom:12px}
+.page-head h1{font-size:18px}
+.page-head p{font-size:12px;margin-top:3px}
+.panel{padding:13px 15px;margin-bottom:10px;border-radius:12px}
+.panel-head{margin-bottom:8px;gap:9px}
+.panel-title b{font-size:13.5px}
+.panel-title span{font-size:11.5px;margin-top:1px}
+.panel-actions{margin-top:9px;gap:6px}
+.btn{padding:5px 11px;font-size:12.5px;border-radius:8px}
+.btn.ghost{padding:5px 10px}
+.item{padding:5px 0;gap:8px}
+.item .k{font-size:12.5px}
+.item .v{font-size:12.5px}
+.kv{gap:0}
+.note{margin-top:7px;padding:7px 10px;font-size:12px;line-height:1.5;border-radius:9px}
+/* 空的 .note 不显示任何东西 —— 否则它的左边框会留下一道小竖线，看着像半个括号标点。
+   约定：有内容才显示；`.warn` 是"这内容是警告"的意思，不是"显示/隐藏"的开关。 */
+.note:empty{display:none}
+.keyrow{padding:7px 11px;gap:10px;margin-bottom:5px;border-radius:10px}
+.keyname{font-size:13.5px}
+.keyhid{font-size:10.5px}
+.keygroup{margin:10px 2px 5px}
+.keysum{gap:7px;margin:2px 0 8px}
+.keysum .pill{font-size:11.5px;padding:2px 9px}
+.card{padding:12px 14px;border-radius:12px}
+.cards{gap:10px}
+
+
+/* ───── 按键映射页：左遥控器 + 右列表 ───── */
+.keys-layout{display:flex;gap:16px;align-items:flex-start}
+.remote-pane{flex:0 0 196px;display:flex;flex-direction:column;align-items:center;
+  padding:10px 8px 10px;border-radius:14px;background:var(--card,rgba(255,255,255,.72));
+  border:1px solid var(--line)}
+.remote-stage{position:relative;line-height:0}
+.remote-stage img{display:block;width:164px;height:auto;user-select:none;-webkit-user-drag:none}
+/* 热区：默认透明，选中/悬停时高亮 */
+.keyhit{position:absolute;border-radius:9px;box-sizing:border-box;cursor:pointer;
+  transition:background .12s,box-shadow .12s}
+.keyhit:hover{background:rgba(64,150,255,.16)}
+.keyhit.on{background:rgba(0,150,255,.30);box-shadow:0 0 0 2px rgba(0,150,255,.95) inset,
+  0 0 10px rgba(0,150,255,.55)}
+.remote-name{margin-top:8px;font-weight:700;font-size:14px}
+
+.keys-pane{flex:1;min-width:0}
+/* 行内缩略图：用 remote.png 当 sprite 裁出该键那一小块 */
+.keythumb{flex:0 0 34px;width:34px;height:34px;border-radius:9px;background-image:url(remote.png);
+  background-repeat:no-repeat;border:1px solid var(--line);
+  box-shadow:0 1px 3px rgba(20,28,40,.16)}
+.keyrow.sel .keythumb{box-shadow:0 0 0 2px rgba(0,150,255,.85)}
+.keybind-sym{min-width:78px;text-align:right;font-family:ui-monospace,Consolas,monospace;
+  font-size:13.5px;color:var(--txt1,#1e2633);
+  /* ★ 与左边"名字"那一行对齐，而不是相对整个两行块居中。
+     原来（默认 align-items:center）值比名字低 8px，看着像"错位"
+     —— 实测：值 cy=235 / 名字 cy=227。改成 flex-start 后两者同基线。 */
+  align-self:flex-start}
+.keyrow.none .keybind-sym{color:var(--txt3,#98a4b6)}
+
+
+
+/* ───── 组合键编辑弹窗 ───── */
+.mask{position:fixed;inset:0;background:rgba(16,22,32,.32);
+  /* 2026-10-28：原来 42% 黑 + blur(2px)，改键时背景几乎看不清，想对照别的键就得关弹窗。
+     降到 32% 并去掉模糊 —— 弹窗自身有 24px 投影，层级仍然清楚。 */
+  display:flex;align-items:center;justify-content:center;z-index:60}
+.mask.hide{display:none}
+.modal{width:min(560px,92vw);border-radius:16px;background:var(--bg1,#fff);
+  border:1px solid var(--line);box-shadow:0 24px 60px rgba(12,20,32,.34);overflow:hidden;
+  /* 窗口很矮时（如 660px）屏幕键盘比窗口高 —— 让弹窗内部滚动，而不是被切掉底部 */
+  max-height:calc(100vh - 28px);display:flex;flex-direction:column}
+.modal-body{overflow:auto}
+.modal-head{display:flex;align-items:center;gap:12px;padding:14px 16px 12px;
+  border-bottom:1px solid var(--line)}
+.modal-thumb{flex:0 0 40px;width:40px;height:40px;border-radius:10px;
+  background-image:url(remote.png);background-repeat:no-repeat;border:1px solid var(--line)}
+.modal-title{font-weight:700;font-size:15px}
+.modal-head-text{flex:1 1 auto;min-width:0}
+.modal-sub{font-size:12.5px;color:var(--txt2);margin-top:2px;
+  font-family:ui-monospace,Consolas,monospace}
+.modal-x{margin-left:auto;width:28px;height:28px;border:0;border-radius:8px;cursor:pointer;
+  background:transparent;color:var(--txt2);font-size:20px;line-height:1}
+.modal-x:hover{background:var(--line)}
+.modal-body{padding:14px 16px 16px}
+
+
+/* ───── 配置组 Tab + 搜索 ───── */
+.grouptabs{display:flex;align-items:center;gap:6px;margin:0 0 12px;flex-wrap:wrap}
+.gtabs{display:flex;gap:5px;flex-wrap:wrap}
+.gtab{padding:5px 12px;border-radius:9px 9px 0 0;font-size:12.5px;cursor:pointer;
+  border:1px solid var(--line);border-bottom:0;background:var(--bg2,#f4f7fb);color:var(--txt2)}
+.gtab.on{background:var(--bg1,#fff);color:var(--txt1);font-weight:700;
+  box-shadow:inset 0 -2px 0 var(--blue)}
+.gtab .n{opacity:.6;font-size:11px;margin-left:5px}
+.tabadd{width:26px;height:26px;border-radius:8px;border:1px solid var(--line);cursor:pointer;
+  background:var(--bg2,#f4f7fb);color:var(--txt2);font-size:15px;line-height:1}
+.tabadd:hover{background:var(--blue-l);color:var(--blue)}
+.gsearch{margin-left:auto;flex:0 1 230px;min-width:150px;width:230px;padding:6px 11px;font-size:12.5px;border-radius:9px;
+  border:1px solid var(--line);background:var(--bg2,#fff);color:var(--txt1,#1e2633)}
+
+/* ───── 屏幕键盘（弹窗内）───── */
+.kb-mods{display:flex;gap:7px;margin-bottom:11px}
+.kb-mods .m{flex:1;padding:8px 0;text-align:center;font-size:13px;border-radius:10px;cursor:pointer;
+  border:1px solid var(--line);background:var(--bg2,#f4f7fb);color:var(--txt2);user-select:none}
+.kb-mods .m.on{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:700}
+.kb-main{display:flex;flex-direction:column;gap:5px;margin-bottom:11px}
+.kb-row{display:flex;gap:5px}
+.kb-key{
+  /* ★ 关键：flex:1 1 0 让每个键**等分**本行剩余宽度。
+     不写的话 flex 默认 0 1 auto，键宽由内容决定 —— Esc / Backspace / Enter 这类
+     文本长的键会把同行其它键挤变形（实测踩到：Esc 撑满整行、数字行被撕开）。 */
+  flex:1 1 0;min-width:0;
+  height:30px;border-radius:7px;border:1px solid var(--line);background:var(--bg2,#f7f9fc);
+  color:var(--txt1,#1e2633);font-size:11.5px;cursor:pointer;user-select:none;
+  display:flex;align-items:center;justify-content:center;overflow:hidden;
+  white-space:nowrap;text-overflow:ellipsis;padding:0 4px;
+}
+.kb-key:hover{background:var(--blue-l)}
+.kb-key.on{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:700}
+/* 宽度类：在等分基础上加权（1 个单位 = 一个普通字母键） */
+.kb-key.w15{flex:1.5 1 0}.kb-key.w2{flex:2 1 0}.kb-key.w25{flex:2.5 1 0}
+.kb-key.w3{flex:3 1 0}.kb-key.w5{flex:5 1 0}.kb-key.w7{flex:7 1 0}
+.kb-extra{display:flex;gap:6px;flex-wrap:wrap}
+/* 弹窗里的鼠标动作行：与 .kb-extra 同款排布，前面加一句说明 */
+.kb-mouse{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:9px;
+  padding-top:9px;border-top:1px dashed var(--line)}
+.kb-mouse .kb-cap{font-size:12px;color:var(--txt3);margin-right:2px}
+/* 「按键映射」页配置组那一行里的方块键选项：跟 .seg 同款，但更紧凑 + 带一个前缀说明 */
+.seg.seg-sq{align-items:center;font-size:12.5px;flex:0 0 auto;white-space:nowrap}
+.seg.seg-sq .seg-cap{padding:0 8px;color:var(--txt3);font-size:12px;
+  border-right:1px solid var(--line);align-self:stretch;display:flex;align-items:center}
+.seg.seg-sq label{padding:6px 10px}
+.kb-foot{display:flex;align-items:center;gap:8px;margin-top:13px;
+  border-top:1px solid var(--line);padding-top:11px;
+  /* ★ 2026-10-28：弹窗被限高后，屏幕键盘把「保存映射」推到滚动区底部 —— 得滚才能点。
+     主操作必须常驻：粘在滚动区底部，横跨整宽（负 margin 抵消 .modal-body 的左右内边距）。 */
+  position:sticky;bottom:0;z-index:2;
+  margin-left:-16px;margin-right:-16px;padding:11px 16px 10px;
+  background:var(--bg1,#fff);border-radius:0 0 15px 15px}
+.kb-foot .grow{flex:1}
+.kb-cur{font-size:12.5px;color:var(--txt2)}
+.kb-cur b{font-family:ui-monospace,Consolas,monospace;color:var(--blue);font-size:14px}
+
+/* ───── 弹窗三页签：按键 / 文本 / 宏（2026-10-30）─────
+   一个遥控器键只能是三者之一，所以用页签切换而不是把三套控件堆在一起
+   （弹窗已经限高，堆起来就得滚很久才找到「保存」）。 */
+.cm-tabs{display:flex;gap:4px;background:var(--bg3);padding:3px;border-radius:11px;margin-bottom:13px}
+.cm-tab{flex:1;padding:7px 0;text-align:center;font-size:13px;border:0;background:transparent;
+  color:var(--txt2);border-radius:9px;cursor:pointer;font-family:inherit}
+/* 未选中的页签原来完全没反馈，看着像三个静态标签 —— 实测有人打开弹窗后
+   找不到「按键」页签在哪。加 hover 让它明确"能点"。 */
+.cm-tab:hover{background:rgba(255,255,255,.55);color:var(--txt)}
+.cm-tab.on{background:var(--bg2);color:var(--txt);font-weight:700;box-shadow:0 1px 2px rgba(31,42,55,.08)}
+.cm-tab.on:hover{background:var(--bg2)}
+.cm-pane.hide{display:none}
+
+.cm-label{font-size:12.5px;color:var(--txt2);margin-bottom:7px;display:flex;align-items:baseline;gap:8px}
+.cm-hint{font-size:12px;color:var(--txt3)}
+.cm-slots{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:4px;margin-bottom:11px}
+.cm-slot{padding:6px 0;text-align:center;font-size:12.5px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--line);background:var(--bg2);color:var(--txt2)}
+.cm-slot.has{border-color:var(--blue);color:var(--blue)}
+.cm-slot.on{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:700}
+
+.cm-name{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:9px;
+  font-size:13px;font-family:inherit;margin-bottom:9px;background:var(--bg2);color:var(--txt)}
+.cm-text{width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;
+  font-size:13px;line-height:1.6;font-family:inherit;resize:vertical;min-height:120px;
+  margin-bottom:9px;background:var(--bg2);color:var(--txt);user-select:text}
+.cm-row{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+.cm-row .cm-name{margin-bottom:0;flex:1;width:auto}
+/* 按钮不许被输入框挤成两行（「试运一遍」曾经被压成「试运/一遍」） */
+.cm-row .btn{flex:0 0 auto;white-space:nowrap}
+.cm-lab{font-size:12.5px;color:var(--txt2);flex:0 0 auto}
+.cm-num{width:74px;flex:0 0 auto;padding:6px 8px;border:1px solid var(--line);border-radius:8px;
+  font-size:12.5px;font-family:inherit;background:var(--bg2);color:var(--txt);text-align:center}
+
+.cm-steps{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.cm-step{display:grid;grid-template-columns:18px 46px minmax(0,1fr) 22px 18px;
+  gap:6px;align-items:center;background:var(--bg3);border-radius:9px;padding:6px 8px;
+  /* 纯文字行（拖拽/移动）没有输入框，会比其他行矮 —— 定高保证一列视觉整齐 */
+  min-height:36px}
+.cm-step .idx{font-size:12px;color:var(--txt3)}
+.cm-step .ty{font-size:12px;color:var(--txt2)}
+/* 参数区：一行里可能放好几个控件（键码+按住时长 / 槽位+粘贴键），用 flex 排 */
+.cm-step .pm{display:flex;align-items:center;gap:4px;min-width:0}
+.cm-step .pm>*{min-width:0}
+.cm-step input,.cm-step select{padding:4px 6px;border:1px solid var(--line);border-radius:6px;
+  font-size:12px;font-family:inherit;background:var(--bg2);color:var(--txt);min-width:0}
+.cm-step input[data-f="vks"]{flex:1 1 60px}
+.cm-step .w56{width:56px;flex:0 0 56px;text-align:center}
+.cm-step .w72{width:72px;flex:0 0 72px;font-size:11px;padding:3px 2px}
+/* 按键录入按钮：小巧，不抢输入框的宽度 */
+.cm-step .kcap{flex:0 0 24px;width:24px;border:1px solid var(--line);background:var(--bg2);
+  color:var(--txt2);border-radius:6px;cursor:pointer;font-size:12px;padding:3px 0;
+  font-family:inherit;line-height:1}
+/* 键名显示（替代原来的 VK 码输入框）—— 用户按 ⌨ 录入后应该看到 `Ctrl+A` 而不是 `17,65` */
+.cm-step .vkname{flex:1;min-width:0;padding:4px 7px;border:1px solid var(--line);border-radius:7px;
+  background:var(--bg2);color:var(--txt);font-family:ui-monospace,Consolas,Menlo,monospace;
+  font-size:11.5px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cm-step .vkname:hover{border-color:var(--blue)}
+.cm-step .kcap:hover{border-color:var(--blue);color:var(--blue)}
+.cm-step .rd{font-size:11.5px;color:var(--txt3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 失败策略：点一下在「停 / 跳」之间切 */
+.cm-step .of{border:0;background:transparent;cursor:pointer;font-family:inherit;
+  font-size:11.5px;color:var(--txt3);padding:0;width:22px;text-align:center}
+.cm-step .of.skip{color:var(--amber);font-weight:700}
+.cm-step .del{border:0;background:transparent;color:var(--txt3);cursor:pointer;font-size:15px;
+  padding:0;line-height:1;font-family:inherit}
+.cm-step .del:hover{color:var(--red)}
+.cm-add{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.cm-add .btn{font-size:12.5px;padding:6px 11px}
+
+/* ── 全局按键（2026-10-30）：标记后跨配置组共用同一份映射 ── */
+.gbtn{border:1px solid var(--line);background:var(--bg2);color:var(--txt3);
+  border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;font-family:inherit;
+  margin-right:7px;flex:0 0 auto;white-space:nowrap}
+.gbtn:hover{border-color:var(--blue)}
+.gbtn.on{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:700}
+.gbadge{display:inline-block;margin-left:6px;padding:0 5px;border-radius:4px;
+  background:var(--blue-l);color:var(--blue-d);font-size:10.5px;font-weight:700;
+  vertical-align:1px;letter-spacing:.5px}
+
+/* 语音键：输入法预设 */
+.kb-preset{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px;
+  padding:8px 10px;border-radius:10px;background:var(--blue-l)}
+.kb-preset .pre-label{font-size:12px;color:var(--txt2)}
+.pre-btn{padding:4px 10px;font-size:12px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--blue);background:#fff;color:var(--blue)}
+.pre-btn:hover{background:var(--blue);color:#fff}
+
+/* ───── 鼠标模式页 ───── */
+
+/* 手感滑条：标签 / 滑条 / 数值 三列，数值用等宽数字避免跳动 */
+.sliders{display:flex;flex-direction:column;gap:9px;margin:2px 0 12px}
+.slider-row{display:grid;grid-template-columns:96px 1fr 88px;align-items:center;gap:10px}
+.slider-row>span{color:var(--txt2);font-size:12.5px}
+.slider-row>input[type=range]{width:100%;height:18px;accent-color:var(--blue);cursor:pointer}
+.slider-row>.val{color:var(--txt);font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums}
+
+/* 开关做成胶囊，省地方也一眼看出状态 */
+.switches{display:flex;flex-wrap:wrap;gap:8px}
+.switch{display:flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;
+  border:1px solid var(--line);background:rgba(255,255,255,.7);cursor:pointer;
+  font-size:12.5px;color:var(--txt2)}
+.switch input{width:15px;height:15px;accent-color:var(--blue);cursor:pointer}
+.switch i{font-style:normal;color:var(--txt3);font-size:11.5px}
+.switch.on{color:var(--txt);border-color:rgba(47,128,237,.45);background:var(--blue-l)}
+
+/* 实时校准区：按住遥控器方向键就能看到光点跟着走 —— 调滑条时手感即时可感 */
+.pad{position:relative;height:172px;border:1px dashed rgba(120,150,190,.42);border-radius:12px;
+  overflow:hidden;margin:2px 0 10px;
+  background:
+    repeating-linear-gradient(0deg,rgba(120,150,190,.07) 0 1px,transparent 1px 20px),
+    repeating-linear-gradient(90deg,rgba(120,150,190,.07) 0 1px,transparent 1px 20px),
+    rgba(255,255,255,.55)}
+.pad-hint{position:absolute;inset:0;display:grid;place-items:center;color:var(--txt3);
+  font-size:12.5px;text-align:center;padding:0 20px}
+.pad-dot{position:absolute;left:50%;top:50%;width:11px;height:11px;border-radius:50%;
+  background:var(--blue);box-shadow:0 0 0 5px rgba(47,128,237,.15);
+  transform:translate(-50%,-50%);opacity:0;transition:opacity .18s}
+.pad-dot.on{opacity:1}
+.pad-speed{position:absolute;right:10px;bottom:8px;font-size:12px;color:var(--txt2);
+  font-variant-numeric:tabular-nums}
+
+/* 互斥单选：两段式胶囊（方块键的作用 —— 切配置组 / 切键鼠模式，只能选一个） */
+.optrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:2px 0 6px}
+.optrow>span{color:var(--txt2);font-size:12.5px;min-width:96px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;
+  background:rgba(255,255,255,.7)}
+.seg label{display:flex;align-items:center;padding:7px 14px;font-size:12.5px;
+  color:var(--txt2);cursor:pointer;border-right:1px solid var(--line)}
+.seg label:last-child{border-right:0}
+.seg input{display:none}
+.seg label.on{background:var(--blue-l);color:var(--txt);font-weight:600}
+.hintline{color:var(--txt3);font-size:12px;line-height:1.55;margin:0 0 10px}
+
+/* ── A：按键页隐藏左栏的小遥控器图（2026-10-28）
+   按键页自己有一张大图（可点击、按哪个键就高亮），左栏再来一张 92px 的
+   纯属重复；两张并排还会让人误以为是"重影"。只隐藏**图片**，
+   「IPRC1000 / 已检测：…」文字保留。 */
+body[data-page="keys"] .rail .device .remote{display:none}
+
+/* ── ③ 第一次使用：四步清单（2026-10-28）── */
+.journey{margin:0 0 16px;border:1px solid var(--line);border-radius:14px;background:var(--card);overflow:hidden}
+.journey>summary{display:flex;align-items:center;gap:9px;padding:11px 15px;cursor:pointer;user-select:none;list-style:none}
+.journey>summary::-webkit-details-marker{display:none}
+.journey>summary::before{content:"▸";color:var(--txt3);font-size:11px;transition:.16s}
+.journey[open]>summary::before{transform:rotate(90deg)}
+.journey-h{font-size:14px;font-weight:600;color:var(--txt)}
+.journey-prog{margin-left:auto;font-size:12.5px;color:var(--txt3)}
+.journey-list{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 14px 14px}
+@media(max-width:1000px){.journey-list{grid-template-columns:1fr}}
+.jstep{display:flex;align-items:flex-start;gap:10px;text-align:left;padding:11px 12px;border:1px solid var(--line);
+       border-radius:11px;background:rgba(255,255,255,.62);cursor:pointer;font:inherit;color:inherit;transition:.16s}
+.jstep:hover{border-color:rgba(47,128,237,.38);background:var(--blue-l)}
+.jstep>b{flex:0 0 auto;width:22px;height:22px;border-radius:7px;background:var(--blue-l);color:var(--blue);
+         font-size:11.5px;font-weight:700;display:grid;place-items:center;margin-top:1px}
+.jstep>span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.jstep i{font-style:normal;font-size:13.4px;font-weight:600;color:var(--txt)}
+.jstep em{font-style:normal;font-size:12.2px;line-height:1.5;color:var(--txt3)}
+.jdot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;border:1.5px solid var(--line);margin:6px 0 0 auto}
+.jstep.done{border-color:rgba(34,197,94,.38);background:rgba(240,253,244,.72)}
+.jstep.done>b{background:#dcfce7;color:#15803d}
+.jstep.done .jdot{background:var(--green);border-color:var(--green)}
+.jstep.done i{color:#166534}
+
+/* 首页「第一次使用」里的语音输入法选择行（2026-10-29）
+   跨两列铺满；左侧标签、中间三档、右侧一句提示（窄屏时换行） */
+.ime-pick{grid-column:1/-1;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 12px;border:1px dashed var(--line);border-radius:10px;background:rgba(47,128,237,.03)}
+.ime-label{font-weight:600;color:var(--ink)}
+.ime-seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#fff}
+.ime-seg button{border:0;background:transparent;padding:5px 12px;font-size:12.5px;color:var(--muted);
+  cursor:pointer;font-family:inherit}
+.ime-seg button+button{border-left:1px solid var(--line)}
+.ime-seg button:hover{background:var(--blue-l);color:var(--ink)}
+.ime-seg button.on{background:var(--blue);color:#fff;font-weight:600}
+.ime-hint{font-style:normal;font-size:12px;color:var(--muted);flex:1 1 240px;min-width:0}
+/* 语音输入法 / 语音键 这组设置（2026-10-30 从「第一次使用」卡片里移出来，
+   这样向导 4/4 完成后卡片自动隐藏时它们仍然保留 ✓） */
+.ime-panel{display:flex;flex-direction:column;gap:8px;margin:0 14px 10px}
+/* 语音键行（2026-10-30）：触发方式 + 热键 + 改键 */
+.ime-voice .ime-hotkey{font-size:12.5px;color:var(--ink);font-weight:600;min-width:70px}
+.ime-voice .btn{padding:4px 12px;font-size:12px;white-space:nowrap}
+
+/* 首次设置向导条（2026-10-29）：贴着"第一次使用"清单顶部 */
+.wizard{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 14px 10px;
+  padding:10px 12px;border-radius:10px;background:rgba(47,128,237,.06);border:1px solid rgba(47,128,237,.18)}
+.wizard>b{color:var(--blue);white-space:nowrap}
+.wizard-hint{flex:1 1 300px;min-width:0;font-size:12.5px;color:var(--muted)}
+.wizard .btn{padding:5px 14px;font-size:12.5px;white-space:nowrap}
+.wizard .btn:disabled{opacity:.5;cursor:not-allowed}
+/* 非当前步骤淡化：让用户知道"现在该做这一步" */
+.jstep.pending{opacity:.5}
+
+/* 一键体检（2026-10-30）：每项一行，左色条表示级别 */
+.doctor-list{display:flex;flex-direction:column;gap:7px;margin:2px 14px 10px;max-height:52vh;overflow:auto}
+.doc-item{display:flex;align-items:flex-start;gap:9px;padding:8px 11px;border-radius:8px;
+  border:1px solid var(--line);background:#fff}
+.doc-item.bad{border-color:rgba(210,80,60,.4);background:rgba(210,80,60,.05)}
+.doc-item.warn{border-color:rgba(200,150,40,.45);background:rgba(200,150,40,.06)}
+.doc-mark{flex:0 0 auto;font-weight:700;font-size:12px;line-height:19px;width:44px;text-align:center;
+  border-radius:6px}
+.doc-item.ok .doc-mark{color:#1a7f43;background:rgba(26,127,67,.1)}
+.doc-item.warn .doc-mark{color:#9a6b00;background:rgba(200,150,40,.15)}
+.doc-item.bad .doc-mark{color:#b03a28;background:rgba(210,80,60,.12)}
+.doc-body{flex:1;min-width:0}
+.doc-body b{font-size:13px;color:var(--txt)}
+.doc-body .s{display:block;font-size:11.8px;color:var(--muted);margin-top:2px;line-height:1.5}
+.doc-act{flex:0 0 auto}
+
+/* ── 环境设置：按职责分组（2026-10-30）──
+   用 CSS order 重排，**不动 DOM** —— 这样所有 id / JS 引用零风险。
+   原来 9 个面板平铺（34 个按钮），现在压成 5 组，首屏只看到体检。 */
+/* 必须带 :not(.hidden)：ID 选择器的 display 会盖掉 .page.hidden 的 display:none，
+   否则该页在任何时候都显示（探针实测抓到"同时显示 2 页"） */
+#page-env:not(.hidden){display:flex;flex-direction:column}
+#page-env .page-head{order:1}
+.group-head{display:flex;align-items:baseline;gap:10px;margin:16px 2px 6px;
+  padding:0 2px 7px;border-bottom:1px solid var(--line)}
+.group-head:first-of-type{margin-top:6px}
+.group-head b{font-size:14.5px;color:var(--txt);letter-spacing:.2px}
+.group-head span{font-size:12px;color:var(--muted)}
+.group-head .btn{margin-left:auto;flex:0 0 auto;padding:2px 11px;font-size:12px}
+#page-env.hide-adv [data-adv]{display:none}
+/* 面板内部的"检查 / 开关"分区：同一面板里两类东西要看得见分界 */
+.btn-zone{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 2px}
+.btn-zone+.btn-zone{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)}
+.zone-label{width:100%;font-size:11.5px;color:var(--muted);margin:0 0 2px 1px}
+
+/* ── 合并卡（2026-10-30）：把两张卡视觉上合成一张 ──
+   声音通路 = 虚拟声卡 + 语音桥：原来两张独立卡，各占一屏，信息还被切开。
+   这里只合并**外观**（外圈圆角 + 中间虚线分隔），内容与 id 一行未动。 */
+.card-merge{display:flex;flex-direction:column}
+.card-merge>.panel{border-radius:0;margin:0}
+.card-merge>.panel:first-child{border-radius:12px 12px 0 0}
+.card-merge>.panel:last-child{border-radius:0 0 12px 12px;border-top:1px dashed var(--line)}
+
+/* ── 行内录键条（2026-10-30 重构）──────────────────────────────
+   取代原来的「插入按键」嵌套弹框（.key-box）：弹框叠在设置弹窗上
+   既挡说明文字、又把录键做成"再开一层窗口"，用户以为是另一个功能。 */
+.cm-rec{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px;
+  padding:10px 12px;border:1.5px solid rgba(74,125,255,.5);border-radius:11px;
+  background:rgba(74,125,255,.08)}
+.cm-rec.hide{display:none}
+.cm-rec-dot{width:9px;height:9px;border-radius:50%;background:#4A7DFF;flex:none;
+  animation:cmRecPulse 1.1s ease-in-out infinite}
+@keyframes cmRecPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.15)}}
+.cm-rec-main{display:flex;flex-direction:column;gap:2px;min-width:170px;flex:1}
+.cm-rec-main b{font-size:13px;color:var(--txt)}
+.cm-rec-main em{font-style:normal;font-size:11.5px;color:var(--txt3)}
+.cm-rec-mods{font-size:12px;color:#4A7DFF;font-weight:700;min-height:16px;white-space:nowrap}
+.cm-rec-pick{padding:5px 8px;border:1px solid var(--line,#DDE3EC);border-radius:7px;
+  background:var(--bg,#fff);color:var(--txt);font-family:inherit;font-size:12.5px}
+.cm-rec .btn{font-size:12.5px;padding:5px 10px}
