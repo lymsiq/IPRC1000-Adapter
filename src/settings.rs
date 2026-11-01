@@ -84,8 +84,55 @@ fn parse_map(v: &serde_json::Value) -> HashMap<String, String> {
     m
 }
 
+/// 安装器留下的种子配置（`<安装目录>\install-seed.json`）。
+///
+/// ★ 为什么要有它：程序读的是 `%APPDATA%\IPRC1000 Adapter\native.json`，
+///   而安装器原来写的是 `<安装目录>\native.json` —— **两个不同路径**，
+///   程序从来不读安装目录那份 ⇒ 客户在安装器里选的"微信输入法"被静默丢弃，
+///   装完仍按豆包工作，安装目录还多一个没人读的配置文件。
+///   现在改成：安装器只写种子，程序首次启动读一次并接管 —— 配置只有**一个**属主。
+fn seed_path() -> PathBuf {
+    let mut p = std::env::current_exe().unwrap_or_default();
+    p.pop();
+    p.join("install-seed.json")
+}
+
+/// 首次运行（`native.json` 还不存在）时，把安装器选的输入法应用进来。
+/// 用后改名 `.used`：避免二次启动又把用户后来的修改覆盖掉。
+fn apply_seed_if_first_run() {
+    if path().exists() {
+        // 已经有配置（升级/二次安装）：种子一律不应用，但把它标成 .used，
+        // 免得客户在安装目录里看到一个莫名其妙的 json 而以为是配置。
+        if seed_path().exists() {
+            let _ = std::fs::rename(seed_path(), seed_path().with_extension("used"));
+        }
+        return;
+    }
+    let Ok(txt) = std::fs::read_to_string(seed_path()) else { return };
+    // ★ 容忍 UTF-8 BOM：手工/脚本生成的文件常带 BOM，serde_json 会直接解析失败
+    //   （实测：种子里写 wechat，因为 BOM 解析失败而静默回落到默认 doubao）。
+    let txt = txt.trim_start_matches('\u{feff}');
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(txt) else {
+        eprintln!("[配置] 种子文件格式不对，已忽略");
+        return;
+    };
+    let mut d = match store().lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    if let Some(s) = v["ime"].as_str() {
+        if s == "doubao" || s == "wechat" {
+            d.ime = s.to_string();
+        }
+    }
+    save(&d);
+    eprintln!("[配置] 已应用安装器种子（输入法：{}）", d.ime);
+    let _ = std::fs::rename(seed_path(), seed_path().with_extension("used"));
+}
+
 /// 启动时读磁盘（兼容旧的"两个字段"格式）
 pub fn load() {
+    apply_seed_if_first_run();
     let Ok(txt) = std::fs::read_to_string(path()) else { return };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) else { return };
     // 配置格式版本（0 = 老文件，没有这个键）

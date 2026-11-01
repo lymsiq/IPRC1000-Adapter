@@ -199,18 +199,20 @@ fn extract(dir: &Path, mut say: impl FnMut(String)) -> Result<(), String> {
 }
 
 /// 写 native.json（含输入法选择）
+/// 写"种子配置"给程序首次启动读取。
+///
+/// ★ 不直接写 `native.json`：程序读的是 `%APPDATA%\IPRC1000 Adapter\native.json`，
+///   安装目录那份它从来不读 —— 客户在安装器里选的输入法会被**静默丢弃**。
+///   现在由程序首次启动读种子后接管，配置只有一个属主。
 fn write_settings(dir: &Path, ime: &str, autostart: bool) -> Result<(), String> {
-    let p = dir.join("native.json");
+    let p = dir.join("install-seed.json");
     let v = serde_json::json!({
         "ime": if ime.is_empty() { "doubao" } else { ime },
-        "trigger": "hold",
-        "preset": 0,
-        "logEnabled": true,
         "autoStart": autostart,
-        "_comment": "由安装程序生成；运行后程序会在此基础上补全 groups"
+        "_comment": "安装器生成的种子：程序首次启动读取后改名为 .used，之后配置由程序独占"
     });
     std::fs::write(&p, serde_json::to_string_pretty(&v).unwrap_or_default())
-        .map_err(|e| format!("写配置失败：{e}"))
+        .map_err(|e| format!("写种子配置失败：{e}"))
 }
 
 /// 创建桌面快捷方式（用 PowerShell 的 COM，避免自己拼 .lnk 二进制）
