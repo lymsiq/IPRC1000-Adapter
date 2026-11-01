@@ -125,6 +125,11 @@ pub static LOCK_WAIT_N: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 /// 等待超过 5 ms 的次数（>5ms 就意味着一批 ETW 事件可能已积压）
 pub static LOCK_WAIT_SLOW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+// ── 热路径（ETW 回调）自己的锁等待：决定"要不要无锁化"的那个数 ──
+pub static HOT_LOCK_WAIT_MAX_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static HOT_LOCK_SLOW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static HOT_LOCK_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 #[inline]
 fn idle_end_ms() -> u64 {
     IDLE_END_MS.load(Ordering::Relaxed)
@@ -2625,11 +2630,14 @@ pub fn run_backend() {
                     // 用同步 log（log_async 是入内存队列，靠另外的地方 drain；
                     // 实测在原生模式下没有周期性 drain，异步写会一直积压不落盘）
                     Some((rss, handles, threads)) => diag::log(&format!(
-                        "[资源] RSS {rss} MB · 句柄 {handles} · 线程 {threads} · 运行 {} 秒 · 锁等待max {} µs（>5ms {} 次 / 共 {} 次）",
+                        "[资源] RSS {rss} MB · 句柄 {handles} · 线程 {threads} · 运行 {} 秒 · 锁等待max {} µs（>5ms {} 次 / 共 {} 次）· 热路径等待max {} µs（>5ms {} 次 / 共 {} 次）",
                         n * 2,
                         LOCK_WAIT_MAX_US.load(Ordering::Relaxed),
                         LOCK_WAIT_SLOW.load(Ordering::Relaxed),
-                        LOCK_WAIT_N.load(Ordering::Relaxed)
+                        LOCK_WAIT_N.load(Ordering::Relaxed),
+                        HOT_LOCK_WAIT_MAX_US.load(Ordering::Relaxed),
+                        HOT_LOCK_SLOW.load(Ordering::Relaxed),
+                        HOT_LOCK_N.load(Ordering::Relaxed)
                     )),
                     // 打出来而不是静默：否则"统计没出现"分不清是代码没跑还是 API 失败
                     None => diag::log("[!] 资源统计不可用（self_stats 返回 None）"),
@@ -2897,7 +2905,23 @@ pub fn run_backend() {
                 let flag = ((u16::from_le_bytes([data[0], data[1]]) >> 12) & 0x3) as u8;
                 let acl = data[4..].to_vec();
                 {
+                    // ★★ 2026-11-01（#3 的关键指标）：这里测的是**热路径自己的锁等待**。
+                    //   统计线程那侧测出来恒为 0（它 2 秒才抢一次，不说明问题）；
+                    //   真正该问的是"ETW 回调有没有被 UI/统计/录制挡住"——
+                    //   一旦这里出现 >5 ms，就说明单锁确实在顶住事件流（丢事件的根源），
+                    //   无锁化才有依据；否则这项重构不值得它的风险。
+                    let hot_t0 = Instant::now();
                     let mut g = bridge_cb.lock().unwrap_or_else(|e| e.into_inner());
+                    {
+                        let w = hot_t0.elapsed().as_micros() as u64;
+                        if w > HOT_LOCK_WAIT_MAX_US.load(Ordering::Relaxed) {
+                            HOT_LOCK_WAIT_MAX_US.store(w, Ordering::Relaxed);
+                        }
+                        if w >= 5_000 {
+                            HOT_LOCK_SLOW.store(HOT_LOCK_SLOW.load(Ordering::Relaxed) + 1, Ordering::Relaxed);
+                        }
+                        HOT_LOCK_N.store(HOT_LOCK_N.load(Ordering::Relaxed) + 1, Ordering::Relaxed);
+                    }
                     g.last_ts = record.raw_timestamp() as u64;
                     g.handle_fragment(flag, dlen, &acl);
                     drop(g);
