@@ -67,19 +67,25 @@ def clear_fingerprint():
 
 def build(what="主程序"):
     """cargo build --release，遇到文件锁自动清一次重试。"""
-    for attempt in (1, 2):
+    # 实测：杀软扫描可能持续几次重试的时间，所以按 1s/3s/8s 递增等待，最多 4 次。
+    # 只清指纹目录通常不够——被占的往往是 target/release 下的产物本身，只能等它扫完。
+    delays = [1, 3, 8]
+    for attempt in range(1, len(delays) + 2):
         print(f"  编译{what}（第 {attempt} 次）…")
         r = subprocess.run(["cargo", "build", "--release"], cwd=ROOT,
                            capture_output=True, text=True, encoding="utf-8", errors="replace")
         if r.returncode == 0:
             return
-        if attempt == 1 and ("os error 5" in r.stderr or "拒绝访问" in r.stderr):
-            print("  ⚠ 构建产物被占用（杀软扫描），清理指纹目录后重试")
+        locked = ("os error 5" in r.stderr) or ("拒绝访问" in r.stderr)
+        if locked and attempt <= len(delays):
+            wait = delays[attempt - 1]
+            print(f"  ⚠ 构建产物被占用（杀软扫描中），清理指纹后等 {wait}s 重试")
             clear_fingerprint()
-            time.sleep(1)
+            time.sleep(wait)
             continue
         print(r.stderr[-1500:])
-        raise SystemExit(f"编译{what}失败")
+        hint = "（反复被占用：建议把 target 目录加入杀软排除项）" if locked else ""
+        raise SystemExit(f"编译{what}失败{hint}")
 
 
 def make_payload():
