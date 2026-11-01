@@ -25,6 +25,7 @@ mod mouse_act;
 mod mouse_move;
 mod recorder;
 mod settings;
+mod step;
 mod text_slot;
 mod winuhid;
 mod ui_edit;
@@ -296,20 +297,24 @@ fn main() {
     if std::env::args().any(|a| a == "--install") {
         eprintln!("IPRC1000 一键安装 —— 声卡 / 键盘驱动 / 遥控器改造 / 默认麦克风");
         eprintln!("（每一步装完都会立刻复检真实状态，不会只看退出码）");
-        let r = commands::repair_all();
-        let v: serde_json::Value = serde_json::from_str(&r).unwrap_or_default();
-        let ok = v["ok"].as_bool().unwrap_or(false);
-        let msg = v["message"].as_str().unwrap_or("").to_string();
-        eprintln!("{}", msg);
-        if msg.contains("重启") {
-            eprintln!("\n★ Windows 说需要重启才生效，请重启一次（不用再装）");
-            use std::io::Write as _;
-            let _ = std::io::stderr().flush();
-            std::process::exit(2);
+        // ★ 结果类型化：退出码由结构化报告决定，**不再**靠 `msg.contains("重启")` 猜。
+        //   那是同一类假绿灯（文案里出现"重启"两字就判需重启，与真实状态无关）。
+        let rep = commands::repair_report();
+        eprintln!("{}", rep.summary());
+        if !rep.manual().is_empty() {
+            eprintln!("\n★ 有组件需要你手动处理一步，请按上面给出的动作做完再运行一次");
         }
         use std::io::Write as _;
         let _ = std::io::stderr().flush();
-        std::process::exit(if ok { 0 } else { 3 });
+        if !rep.manual().is_empty() {
+            std::process::exit(3);
+        }
+        if rep.any_reboot() {
+            eprintln!("\n★ Windows 说需要重启才生效，请重启一次（不用再装）");
+            let _ = std::io::stderr().flush();
+            std::process::exit(2);
+        }
+        std::process::exit(0);
     }
 
     // 创建桌面快捷方式：`IPRC1000-Native.exe --make-shortcut`

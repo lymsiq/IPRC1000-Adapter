@@ -9,6 +9,7 @@
 //!   2. **异步动作要等它结束**（安装程序是独立进程，必须 WaitForExit）；
 //!   3. **静默跳过要留痕** —— 找不到包/没权限，都明确返回原因，不假装成功。
 
+use crate::step::StepResult;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -37,29 +38,33 @@ fn asset(name: &str) -> Option<PathBuf> {
 ///      ⇒ 一键修复跳过 ⇒ 用户必须手动。现在看 `ROOT\MEDIA\*` 的 `Problem` 值。
 ///   3. `Stdio::null()` 把安装程序输出丢掉，失败时看不到原因 ⇒ 改成捕获。
 ///   4. 固定 sleep 4 秒不可靠 ⇒ 改成轮询真实状态最多 15 秒。
-pub fn install_cable() -> String {
+pub fn install_cable() -> StepResult {
     // ★ 先检测：已装就不再跑安装包。
     //   为什么重要：VB-CABLE 的 Setup 在已装状态下重跑会覆盖驱动、弹 UAC，
     //   有把本来正常的声卡装坏的风险（实测过一次 Problem 10）。
     //   "一键修复"只应该补**缺的**。
     match cable_health() {
-        Ok(()) => return String::from("虚拟声卡已安装且健康，无需重复安装"),
+        Ok(()) => return StepResult::AlreadyOk(String::from("已安装且健康，无需重复安装")),
         Err(e) if e.contains("黄叹号") => {
             // 设备在但坏：**不能靠重跑安装包解决**，重跑还会把好的装坏。
-            return format!("{e}（重装前请先卸载该设备）");
+            return StepResult::Manual(format!(
+                "{e} → 请先在设备管理器卸载「VB-Audio Virtual Cable」（勾选删除驱动），再点一次安装"
+            ));
         }
         Err(_) => {} // 未安装 ⇒ 继续装
     }
     let Some(zip_path) = asset("VBCABLE_Driver_Pack45.zip") else {
-        return String::from("找不到 VBCABLE_Driver_Pack45.zip —— 请把它放到程序目录的 assets 下");
+        return StepResult::Failed(String::from(
+            "找不到 VBCABLE_Driver_Pack45.zip —— 请把它放到程序目录的 assets 下",
+        ));
     };
     let tmp = std::env::temp_dir().join("iprc-vbcable");
     let _ = std::fs::remove_dir_all(&tmp);
     if std::fs::create_dir_all(&tmp).is_err() {
-        return format!("无法创建临时目录：{}", tmp.display());
+        return StepResult::Failed(format!("无法创建临时目录：{}", tmp.display()));
     }
     if let Err(e) = unzip(&zip_path, &tmp) {
-        return format!("解压失败：{e}");
+        return StepResult::Failed(format!("解压失败：{e}"));
     }
     // x64 优先，退回通用版
     let setup = ["VBCABLE_Setup_x64.exe", "VBCABLE_Setup.exe"]
@@ -67,7 +72,7 @@ pub fn install_cable() -> String {
         .map(|n| tmp.join(n))
         .find(|p| p.exists());
     let Some(setup) = setup else {
-        return String::from("压缩包里没找到 VBCABLE_Setup*.exe");
+        return StepResult::Failed(String::from("压缩包里没找到 VBCABLE_Setup*.exe"));
     };
 
     // `-i` 安装、`-h` 隐藏界面（VB-CABLE 官方支持的静默参数）。
@@ -83,22 +88,24 @@ pub fn install_cable() -> String {
                 + &String::from_utf8_lossy(&o.stderr);
             (o.status.code(), txt.trim().chars().take(200).collect::<String>())
         }
-        Err(e) => return format!("无法启动安装程序：{e}（需要管理员权限）"),
+        Err(e) => return StepResult::Failed(format!("无法启动安装程序：{e}（需要管理员权限）")),
     };
 
     // ★ Windows 安装程序约定：**3010 = 安装成功但需要重启**。这不是失败！
     match code {
         Some(0) => {}
         Some(3010) => {
-            return String::from("VB-CABLE 驱动已安装，但需要重启电脑才生效（Windows 返回码 3010）—— 重启后无需再装");
+            return StepResult::NeedsReboot(String::from(
+                "驱动已安装，需要重启电脑才生效（Windows 返回码 3010）—— 重启后无需再装",
+            ));
         }
         Some(c) => {
-            return format!(
+            return StepResult::Failed(format!(
                 "安装程序退出码 {c} —— {}",
-                if tail.is_empty() { "没有输出。多半是权限不足：请右键程序「以管理员身份运行」后重试".to_string() } else { tail }
-            );
+                if tail.is_empty() { "没有输出。多半是权限不足：请以管理员身份重新运行安装程序" } else { tail.as_str() }
+            ));
         }
-        None => return format!("安装程序被强制结束 —— {tail}"),
+        None => return StepResult::Failed(format!("安装程序被强制结束 —— {tail}")),
     }
 
     // ★ 装完**轮询真实状态**，而不是固定睡 4 秒。
@@ -107,16 +114,17 @@ pub fn install_cable() -> String {
         std::thread::sleep(std::time::Duration::from_secs(1));
         match cable_health() {
             Ok(()) => {
-                return format!(
-                    "VB-CABLE 安装完成（{} 秒后端点已出现）",
-                    i + 1
-                );
+                return StepResult::Done(format!("安装完成（{} 秒后端点已出现）", i + 1));
             }
-            Err(e) if e.contains("黄叹号") => return format!("装完但设备有问题：{e}"),
+            Err(e) if e.contains("黄叹号") => {
+                return StepResult::Manual(format!("装完但设备有问题：{e}"))
+            }
             Err(_) => {}
         }
     }
-    String::from("VB-CABLE 安装程序已执行，但 15 秒内端点仍未出现 —— 请重启电脑（多为驱动未完成枚举）")
+    StepResult::Manual(String::from(
+        "安装程序已执行，但 15 秒内端点仍未出现 —— 请重启电脑（多为驱动未完成枚举）",
+    ))
 }
 
 /// 供「一键修复 / 环境检查」用的公开入口：Ok = 端点在且健康。
@@ -155,13 +163,15 @@ fn cable_health() -> Result<(), String> {
 /// （自签名驱动不导证书会被系统直接拒绝，这是我原来只调 pnputil 会失败的原因）。
 /// 只有在脚本缺失时才退回 `pnputil /add-driver`，并且会**递归**找 inf
 /// （实际布局是 `winuhid/driver/WinUHidDriver.inf`，不在顶层）。
-pub fn install_winuhid() -> String {
+pub fn install_winuhid() -> StepResult {
     // 同理：驱动已就绪就跳过，避免重复 pnputil 覆盖已工作的驱动
     if crate::is_inject_ready() {
-        return String::from("虚拟键盘驱动已就绪，无需重复安装");
+        return StepResult::AlreadyOk(String::from("驱动已就绪，无需重复安装"));
     }
     let Some(dir) = asset("winuhid") else {
-        return String::from("找不到 winuhid 目录 —— 请把驱动放到程序目录的 assets/winuhid 下");
+        return StepResult::Failed(String::from(
+            "找不到 winuhid 目录 —— 请把驱动放到程序目录的 assets/winuhid 下",
+        ));
     };
 
     // ① 官方安装脚本（推荐路径）
@@ -178,21 +188,23 @@ pub fn install_winuhid() -> String {
             return match out {
                 Ok(o) if o.status.success() => {
                     std::thread::sleep(std::time::Duration::from_secs(2));
-                    String::from("WinUHid 驱动已安装（若首次安装，建议重启一次）")
+                    StepResult::Done(String::from("驱动已安装（若首次安装，建议重启一次）"))
                 }
                 // ★ 同声卡：3010 = 成功但要重启，不是失败
                 Ok(o) if o.status.code() == Some(3010) => {
-                    String::from("WinUHid 驱动已安装，但需要重启电脑才生效（Windows 返回码 3010）")
+                    StepResult::NeedsReboot(String::from(
+                        "驱动已安装，但需要重启电脑才生效（Windows 返回码 3010）",
+                    ))
                 }
                 Ok(o) => {
                     let msg = String::from_utf8_lossy(&o.stdout).to_string()
                         + &String::from_utf8_lossy(&o.stderr);
-                    format!(
+                    StepResult::Failed(format!(
                         "安装脚本返回失败：{}",
                         msg.trim().chars().take(200).collect::<String>()
-                    )
+                    ))
                 }
-                Err(e) => format!("无法运行安装脚本：{e}（需要管理员权限）"),
+                Err(e) => StepResult::Failed(format!("无法运行安装脚本：{e}（需要管理员权限）")),
             };
         }
     }
@@ -200,19 +212,22 @@ pub fn install_winuhid() -> String {
     // ② 退化路径：递归找 inf 再 pnputil
     let inf = find_inf(&dir, 0);
     let Some(inf) = inf else {
-        return format!("{} 下没找到 .inf 也没找到安装脚本", dir.display());
+        return StepResult::Failed(format!("{} 下没找到 .inf 也没找到安装脚本", dir.display()));
     };
     let out = Command::new("pnputil.exe")
         .args(["/add-driver", &inf.to_string_lossy(), "/install"])
         .output();
     match out {
-        Ok(o) if o.status.success() => String::from("WinUHid 驱动已安装（pnputil）"),
+        Ok(o) if o.status.success() => StepResult::Done(String::from("驱动已安装（pnputil）")),
         Ok(o) => {
             let msg = String::from_utf8_lossy(&o.stdout).to_string()
                 + &String::from_utf8_lossy(&o.stderr);
-            format!("pnputil 失败：{}", msg.trim().chars().take(200).collect::<String>())
+            StepResult::Failed(format!(
+                "pnputil 失败：{}",
+                msg.trim().chars().take(200).collect::<String>()
+            ))
         }
-        Err(e) => format!("无法运行 pnputil：{e}"),
+        Err(e) => StepResult::Failed(format!("无法运行 pnputil：{e}")),
     }
 }
 

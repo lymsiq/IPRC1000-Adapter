@@ -286,11 +286,11 @@ pub fn invalidate_probes() {
 ///
 /// 与"一键完成全部"（run_setup）的区别：那个只做能安全自动做的、其余给指引；
 /// 这个**真的去装**（装声卡、装驱动、设默认麦克风），是给"换机器/装坏了"用的。
-fn repair_driver() -> String {
+fn repair_driver() -> crate::step::StepResult {
     crate::installer::install_winuhid()
 }
 
-fn install_cable() -> String {
+fn install_cable() -> crate::step::StepResult {
     crate::installer::install_cable()
 }
 
@@ -299,87 +299,118 @@ fn install_cable() -> String {
 /// 做完之后系统的输入栈不再消费它的键 ⇒ **按键不会打出字母**；
 /// 而蓝牙 ACL 链路照常建立（音频也走它）⇒ 我们的 ETW 仍读得到原始报文。
 /// 这是"换机器 / 换遥控器后按键出字母"的根治办法（不是吞键）。
-pub fn convert_remote_hid() -> String {
+pub fn convert_remote() -> crate::step::StepResult {
+    use crate::step::StepResult;
     let r = crate::device_probe::convert_to_hid_compliant();
     invalidate_probes();
     match r {
-        Ok(msg) => serde_json::json!({ "ok": true, "message": msg }).to_string(),
-        Err(e) => serde_json::json!({ "ok": false, "message": e }).to_string(),
+        Ok(msg) if msg.contains("无需改造") => StepResult::AlreadyOk(msg),
+        Ok(msg) => StepResult::Done(msg),
+        Err(e) => StepResult::Failed(e),
     }
 }
 
-pub fn repair_all() -> String {
-    let p = probes();
-    let mut done: Vec<String> = Vec::new();
-    let mut fail: Vec<String> = Vec::new();
+/// 旧的 JSON 入口（界面/脚本还在用），内部换成类型化结果。
+pub fn convert_remote_hid() -> String {
+    let r = convert_remote();
+    serde_json::json!({ "ok": r.is_ok(), "message": r.message() }).to_string()
+}
 
-    // ① 虚拟声卡
-    //   ★ 判据是「端点在 **且** 设备健康」，不是"端点在"：
-    //     端点在但驱动坏掉（设备管理器黄叹号）时，老判据会判"已装"跳过 ⇒ 用户只能手动。
+/// 一键修复：逐项做完并**逐项复检**，返回结构化报告。
+///
+/// ★ 2026-11-01（结果类型化）：这段原来靠 `r.contains("完成") || r.contains("已安装")`
+///   判断成败，一共 6 处 —— 这正是"假绿灯"的来源。真实误判过一次：
+///   `contains("已改造")` 把"已经是 HID-compliant，无需改造"判成了"改造成功"，
+///   界面全绿、实际什么都没做，而客户看到绿灯就不会再排查。
+///   现在成败由 `StepResult` 决定，中文只用于显示。
+pub fn repair_report() -> crate::step::Report {
+    use crate::step::{Report, StepResult};
+    let p = probes();
+    let mut rep = Report::default();
+
+    // ① 虚拟声卡：判据是「端点在 **且** 设备健康」，不是"端点在"
     match crate::installer::cable_status() {
-        Ok(()) => done.push(String::from("虚拟声卡已安装且健康")),
-        Err(e) if e.contains("黄叹号") => fail.push(format!(
-            "虚拟声卡：{e} —— 请到设备管理器卸载「VB-Audio Virtual Cable」（勾选删除驱动）后重新点安装"
-        )),
-        Err(_) => {
-            let r = install_cable();
-            if r.contains("完成") || r.contains("已安装") || r.contains("重启") {
-                done.push(r);
-            } else {
-                fail.push(format!("虚拟声卡：{r}"));
-            }
-        }
+        Ok(()) => rep.push("虚拟声卡", StepResult::AlreadyOk(String::from("已安装且健康"))),
+        Err(e) if e.contains("黄叹号") => rep.push(
+            "虚拟声卡",
+            StepResult::Manual(format!(
+                "{e} → 请到设备管理器卸载「VB-Audio Virtual Cable」（勾选删除驱动），再点一次安装"
+            )),
+        ),
+        Err(_) => rep.push("虚拟声卡", install_cable()),
     }
 
-    // ② 默认麦克风
-    let p2 = probes();
-    if p2.mic_is_cable {
-        done.push(String::from("默认麦克风已指向 CABLE Output"));
+    // ② 默认麦克风：**改用真实状态复检**，不再解析返回的文案
+    if crate::commands::probes().mic_is_cable {
+        rep.push("默认麦克风", StepResult::AlreadyOk(String::from("已指向 CABLE Output")));
     } else {
-        let r = set_default_mic();
-        if r.contains("已设") {
-            done.push(String::from("默认麦克风已设为 CABLE Output"));
+        let _ = set_default_mic();
+        // 设完再看设备状态 —— 这才是"成没成"的唯一证据
+        if probes().mic_is_cable {
+            rep.push("默认麦克风", StepResult::Done(String::from("已设为 CABLE Output")));
         } else {
-            fail.push(String::from("默认麦克风改不动，请在系统设置里手动选 CABLE Output"));
+            rep.push(
+                "默认麦克风",
+                StepResult::Manual(String::from(
+                    "设不动 → 请到 声音设置 → 输入，手动把默认设备选成 CABLE Output",
+                )),
+            );
         }
     }
 
     // ③ 虚拟键盘驱动
-    if !crate::is_inject_ready() {
-        let r = repair_driver();
-        if r.contains("完成") || r.contains("已安装") || r.contains("就绪") {
-            done.push(String::from("虚拟键盘驱动已安装"));
-        } else {
-            fail.push(format!("驱动：{r}"));
-        }
+    //   ★ 三种情况必须分开：已就绪 / 装了但槽位被占（本机另一个实例在跑）/ 真没装。
+    //     原来只有两分法 ⇒ "程序在跑时点一键安装"会白跑一遍驱动安装脚本，
+    //     还显示"已安装（若首次建议重启）"，看起来像刚装好。
+    if crate::is_inject_ready() {
+        rep.push("虚拟键盘驱动", StepResult::AlreadyOk(String::from("已就绪")));
+    } else if crate::device_probe::winuhid_driver_installed() {
+        rep.push(
+            "虚拟键盘驱动",
+            StepResult::AlreadyOk(String::from(
+                "驱动已安装，但设备槽位被占用（多半是本机已有一个程序在运行）→ 关掉重复的实例即可",
+            )),
+        );
     } else {
-        done.push(String::from("虚拟键盘驱动已就绪"));
+        rep.push("虚拟键盘驱动", repair_driver());
     }
 
     // ④ 遥控器改造（换机器 / 换遥控器后最常见的一项）
-    //    还被当键盘 ⇒ 按键会漏出字母。改成 HID-compliant device 后系统不再消费它的键。
     match p.remote_is_keyboard {
-        Some(true) => {
-            let r = convert_remote_hid();
-            // r = {"ok":bool,"message":str}
-            let v: serde_json::Value = serde_json::from_str(&r).unwrap_or_default();
-            let ok = v["ok"].as_bool().unwrap_or(false);
-            let m = v["message"].as_str().unwrap_or("（无结果）").to_string();
-            if ok {
-                done.push(m);
-            } else {
-                fail.push(format!("遥控器改造：{m}"));
-            }
-        }
-        Some(false) => done.push(String::from("遥控器已不是键盘（不会打出字母）")),
-        None => done.push(String::from("遥控器未连接（跳过键盘改造检查）")),
+        Some(true) => rep.push("遥控器改造", convert_remote()),
+        Some(false) => rep.push(
+            "遥控器改造",
+            StepResult::AlreadyOk(String::from("已不是键盘（不会打出字母）")),
+        ),
+        None => rep.push(
+            "遥控器改造",
+            StepResult::AlreadyOk(String::from("未连接（连上后再检查）")),
+        ),
     }
 
     invalidate_probes();
-    let msg = if fail.is_empty() {
-        format!("全部就绪：{}", done.join("；"))
-    } else {
-        format!("已完成 {} 项；{} 项需要手动处理：{}", done.len(), fail.len(), fail.join("；"))
-    };
-    serde_json::json!({ "ok": fail.is_empty(), "message": msg }).to_string()
+    rep
+}
+
+/// 「一键修复」的 JSON 入口（界面/脚本用）。
+pub fn repair_all() -> String {
+    let rep = repair_report();
+    let items: Vec<serde_json::Value> = rep
+        .items
+        .iter()
+        .map(|(n, r)| {
+            serde_json::json!({
+                "name": n,
+                "state": r.tag(),
+                "message": r.message(),
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "ok": rep.all_ok(),
+        "needsReboot": rep.any_reboot(),
+        "message": rep.summary(),
+        "items": items,
+    })
+    .to_string()
 }

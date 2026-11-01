@@ -462,3 +462,18 @@ pub fn audio_endpoint_present(kind: &str) -> bool {
     }
     false
 }
+
+/// WinUHid 驱动**是否已安装**（与"此刻能不能创建设备"是两件事）。
+///
+/// 为什么必须分开：`is_inject_ready()` 判的是"能创建虚拟键盘设备"，
+/// 而**主程序自己正占着设备槽位时它必然返回 false**。于是"程序在跑的时候点一键安装"
+/// 会被判成"驱动缺失"，白跑一遍安装脚本，并显示"驱动已安装（若首次安装建议重启）"
+/// —— 用户看到的是莫名的一次驱动安装。
+///
+/// 判据与声卡同源：`ROOT\WINUHID_VIRTUAL_HID_ENUMERATOR` 这个设备节点存在 = 装了。
+pub fn winuhid_driver_installed() -> bool {
+    let root = r"SYSTEM\CurrentControlSet\Enum\ROOT\WINUHID_VIRTUAL_HID_ENUMERATOR";
+    let Some(k) = open_key(root) else { return false };
+    // 至少有一个实例（0000/0001…）
+    !subkeys(k).is_empty()
+}
