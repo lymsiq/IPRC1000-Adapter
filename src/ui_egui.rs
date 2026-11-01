@@ -389,20 +389,41 @@ impl App {
         ui.add_space(10.0);
 
         ui.label(RichText::new("怎么触发").strong());
+        // ★ 2026-11-01：点按模式的语义改成"松手自动结束"（松手后补一次点击让豆包收尾），
+        //   所以文案必须跟着改 —— 原来写"再按一次结束"与实际行为不符。
+        //   另外两个方向切换都要清掉待办的补点击，之前只清了切回按住那一侧。
+        let reset_pending = || {
+            if let Some(sh) = backend::shared() {
+                if let Ok(mut b) = sh.lock() {
+                    b.reset_tap_latch();
+                }
+            }
+        };
         ui.horizontal(|ui| {
             let cur = settings::trigger();
-            if ui.selectable_label(cur == "hold", "按住说话（松开结束）").clicked() && cur != "hold" {
+            if ui
+                .selectable_label(cur == "hold", "按住说话（松开结束）")
+                .on_hover_text("按下开始说话，松手结束。适合豆包旧版（按住才弹框）。")
+                .clicked()
+                && cur != "hold"
+            {
                 settings::set_trigger("hold");
-                if let Some(sh) = backend::shared() {
-                    if let Ok(mut b) = sh.lock() {
-                        b.reset_tap_latch();
-                    }
-                }
-                self.say("已改为按住说话");
+                reset_pending();
+                self.say("已改为「按住说话」：按下开始，松手结束");
             }
-            if ui.selectable_label(cur == "tap", "点按一次（再按一次结束）").clicked() && cur != "tap" {
+            if ui
+                .selectable_label(cur == "tap", "点按一次（松手自动结束）")
+                .on_hover_text(
+                    "按下开始说话、松手结束；松手后程序会自动补一次点击，让豆包收起对话。
+                     适合豆包新版（点一下才弹框）。
+                     ⚠ 遥控器只在按住时传声音，所以说话期间仍然要按住。",
+                )
+                .clicked()
+                && cur != "tap"
+            {
                 settings::set_trigger("tap");
-                self.say("已改为点按一次");
+                reset_pending();
+                self.say("已改为「点按一次」：松手后自动补一次点击，豆包会结束对话");
             }
         });
         ui.add_space(10.0);

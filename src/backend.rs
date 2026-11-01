@@ -836,7 +836,7 @@ pub struct Bridge {
     voice_had_audio: bool,
     /// 点按模式的锁存状态：true = 语音键"已按下并保持"，等下一次按下时释放。
     /// 只在 `trigger == tap` 时有意义（2026-10-31）。
-    tap_latched: bool,
+    tap_followup: iprc1000_native::voice::TapFollowUp,
     /// 每个键**按下的时刻**（看门狗用）。UP 丢了时靠它兜底释放，
     /// 否则那个键会永久留在"按下"状态（遥控器按住期间不上报，没人能纠正）。
     /// 每个键**最迟放手时刻**（毫秒时间戳；0 = 没按住）。
@@ -917,7 +917,7 @@ impl Bridge {
             audio_reopen_rx: None,
             voice_missing_since: None,
             voice_had_audio: false,
-            tap_latched: false,
+            tap_followup: iprc1000_native::voice::TapFollowUp::None,
             last_ts: 0,
             stats,
             wav,
@@ -1385,10 +1385,8 @@ impl Bridge {
                 //   由 StuckGuard 兜底。**宁可晚放，也不能乱放。**
                 const VOICE_USAGE: usize = 0x10;
                 if u == VOICE_USAGE {
-                    // ★ 点按模式锁存中：遥控器松手**不代表结束**（要再按一下才结束）。
-                    if self.tap_latched && crate::settings::TRIGGER_IDX.load(Ordering::Relaxed) == 1 {
-                        continue;
-                    }
+                    // ★ 2026-11-01：点按模式不再锁存，所以这里没有"锁着就不放"的特例了。
+                    //   （语义改成方案 A：松手就结束，只是事后补一次点击。）
                     // ★★ 租约模型（2026-10-31 结构替换）：这里**不再判断"是否松手"**，
                     //   只提供一个"提前收口"的提示。判断松手是以前所有 bug 的来源：
                     //     · 按住期间遥控器零报文；
@@ -1401,6 +1399,14 @@ impl Bridge {
                     //     · 非空报文 ⇒ **完全不动租约**，让它按 T_PAUSE 自己到期
                     if iprc1000_native::report::is_empty(usages) {
                         self.voice_disarm("松手（空报文）");
+                        // 点按模式：松手后再补一次瞬发点击（= 豆包"再按一次"⇒ 结束对话）。
+                        // 时序由 tick 驱动，见 voice::TapFollowUp。
+                        if crate::settings::TRIGGER_IDX.load(Ordering::Relaxed) == 1 {
+                            self.tap_followup =
+                                iprc1000_native::voice::TapFollowUp::on_release(diag::now_ms());
+                            eprintln!("[点按] 松手 ⇒ 排一次补点击（{} ms 后）",
+                                iprc1000_native::voice::TAP_GAP_MS);
+                        }
                     }
                     continue;   // held[0x10] 只能由 reconcile_voice 改
                 }
@@ -1551,18 +1557,16 @@ impl Bridge {
                 }
                 if u == 0x10 {
                     // ★★ 租约模型：语音键的所有语义都在这里，且只写租约、不写 held。
-                    let tap_mode = crate::settings::TRIGGER_IDX.load(Ordering::Relaxed) == 1;
-                    if tap_mode && self.tap_latched {
-                        // 第二次按下 ⇒ 结束这一段
-                        eprintln!("[点按] 第二次按下 ⇒ 结束这一段");
-                        self.tap_latched = false;
-                        self.voice_disarm("点按第二次按下");
-                    } else if tap_mode {
-                        // 第一次按下 ⇒ 锁存：租约设成"很久以后"，等第二次按下才收口
-                        self.tap_latched = true;
-                        eprintln!("[点按] 第一次按下 ⇒ 锁存（等下一次按下才放）");
-                        self.voice_arm(u64::MAX / 4);
-                    } else if self.held[0x10] {
+                    // ★★ 2026-11-01（点按模式定案：方案 A —— 松手自动结束）：
+                    //   原来这里是"第一次按下锁存、第二次按下才放"，租约设成
+                    //   `u64::MAX/4` 相当于永不到期 ⇒ **用户按一下就松手，右 Alt 永久按住**
+                    //   （`release_all_held_with` 里还专门保留它，等于没有兜底）。
+                    //
+                    //   现在：按下与按住模式**完全一样**（arm T_NOVOICE）；
+                    //   区别只在"松手"时——点按模式会补一次瞬发点击，让豆包结束对话。
+                    //   用户感知：按住 → 说 → 松手就结束，不用按第二下。
+                    self.tap_followup = iprc1000_native::voice::TapFollowUp::None;
+                    if self.held[0x10] {
                         // 按住期间又收到 0x10 —— 物理上只可能是"松开又按下"：
                         // 按住期间遥控器零报文；而固件 30 秒自动收工那次松手**不发**报文，
                         // 所以我们漏掉了那次松开。这里只续租、不重发报告（避免
@@ -1572,10 +1576,14 @@ impl Bridge {
                     } else {
                         // 无条件记录：以后出问题能直接看出"有没有走到这个分支"
                         eprintln!(
-                            "[语音 {}] DOWN 按下（in_session={} tap_latched={}）",
+                            "[语音 {}] DOWN 按下（in_session={} 模式={}）",
                             hms_ms(),
                             self.in_session,
-                            self.tap_latched
+                            if crate::settings::TRIGGER_IDX.load(Ordering::Relaxed) == 1 {
+                                "点按"
+                            } else {
+                                "按住"
+                            }
                         );
                         self.voice_arm(T_NOVOICE_MS);
                     }
@@ -1674,7 +1682,6 @@ impl Bridge {
         } else {
             self.voice_missing = 0;
             self.voice_missing_since = None;
-            self.tap_latched = false;
             // ★ 启动基线里"早已按着"的语音键：我们从没发过它的 DOWN，
             //   这里就不能发 UP（否则面板出现"松开比按下多"——项目里踩过）。
             if self.seeded_held[0x10] {
@@ -1736,8 +1743,9 @@ impl Bridge {
 
     /// 切换「按住 / 点按」时清掉锁存 —— 否则上一次还锁着，切回按住模式的第一次按会没反应。
     pub fn reset_tap_latch(&mut self) {
-        if self.tap_latched {
-            self.tap_latched = false;
+        // 切换触发方式时清掉待办的补点击（否则切到按住模式还会莫名多一下）
+        if self.tap_followup.is_pending() {
+            self.tap_followup = iprc1000_native::voice::TapFollowUp::None;
             self.voice_disarm("切换触发方式");
         }
     }
@@ -1938,9 +1946,9 @@ impl Bridge {
     fn release_all_held_with(&mut self, keep_voice: bool) {
         // 点按模式锁存中的语音键**不清**：它代表"用户按了一下、还没按第二下结束"，
         // 中途的会话结束（静音超时）不代表用户想结束。
-        let keep_latched =
-            self.tap_latched && crate::settings::TRIGGER_IDX.load(Ordering::Relaxed) == 1;
-        let keep_voice = keep_voice || keep_latched;
+        // ★ 2026-11-01：点按模式不再"锁存语音键"，所以这里也不保留它了。
+        //   （原来保它是为了让用户按第二下，代价是松手后右 Alt 一直按着。）
+        let keep_voice = keep_voice;
         if !keep_voice {
             // ★ 语音键走租约：收口即放（reconcile 会负责发报告与记账）。
             //   放在循环之前，循环里就不会再碰到 held[0x10]。
@@ -2236,6 +2244,39 @@ impl Bridge {
         // ★★ 语音键由**租约**驱动（2026-10-31 结构替换）：
         //   没有事件也会到期 —— 这是"事件驱动"做不到的部分，必须由这个 50 ms 的节拍兜住。
         //   原来这里放的是判据②（音频停 3 s），现在它只是"续租的副作用"，不再单独判断。
+        // ★★ 点按模式的"补一次点击"：由这个 50 ms 的节拍驱动三段时序
+        //   （松手等待 → 按下 → 放开）。放在 reconcile 之前，保证同一拍里
+        //   "先做补点击的动作、再统一对账"，避免出现两帧相反的指令。
+        {
+            let now = diag::now_ms();
+            use iprc1000_native::voice::{TapAction, TapFollowUp};
+            match self.tap_followup.tick(now) {
+                Some(TapAction::Press) => {
+                    eprintln!("[点按] 补点击 ⇒ 按下（{} ms）", iprc1000_native::voice::TAP_HOLD_MS);
+                    self.voice_arm(iprc1000_native::voice::TAP_HOLD_MS);
+                }
+                Some(TapAction::Release) => {
+                    eprintln!("[点按] 补点击 ⇒ 放开");
+                    self.voice_disarm("点按补点击结束");
+                }
+                None => {}
+            }
+            let _ = TapFollowUp::None;   // 保持 use 不产生告警
+        }
+
+        // ★★ 30 秒无音频强制收口（用户已定：要）。
+        //   为什么必须有：遥控器按住期间**一条报文都不发**，如果松手那条 UP 在 ETW 里丢了
+        //   （缓冲溢出/链路抖动/设备刚好重连），我们就会一直认为"还按着"。
+        //   判据：按住超过 30 秒，且这一整段**一帧音频都没收到**。
+        //   —— 真人说话不可能 30 秒不出一点声音；不出声只可能是断链或松手丢了。
+        if self.held[0x10] && !self.voice_had_audio && self.voice_pressed_at_ms != 0 {
+            let held = diag::now_ms().saturating_sub(self.voice_pressed_at_ms);
+            if held > 30_000 {
+                eprintln!("[语音 {}] 按住 {held} ms 且全程无音频 ⇒ 判定松手丢失，强制收口", hms_ms());
+                self.voice_disarm("30 秒无音频");
+            }
+        }
+
         self.reconcile_voice("tick");
         self.check_audio_health();
         self.poll_ralt_check();

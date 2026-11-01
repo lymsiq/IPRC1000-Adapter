@@ -161,3 +161,108 @@ mod tests {
         assert!(should_hold(5_100, lease), "（对照：不 disarm 的话本来还该按着）");
     }
 }
+
+// ───────────────── 点按模式：松手后补一次"点击" ─────────────────
+//
+// 为什么需要它（2026-11-01 定案，方案 A）：
+//   遥控器**只在按住时出音频**，所以"点一下开始、松手继续录"物理上做不到。
+//   而豆包新版要求"点一下弹框"、结束要"再点一下"。
+//   可行的折中：用户仍然按住说话，**松手时我们补一次瞬发点击** ——
+//   豆包那边看到的就是"又按了一下"，于是结束对话。用户感知是"按一下、说、松手就结束"。
+//
+// 为什么不能用一次 `arm` 了事：补点击需要**先放开、隔一小段、再按下、再放开**。
+//   同一个 tick 里 disarm+arm，两帧报告之间没有间隔，豆包会把它看成"一直按着"，
+//   而不是"又按了一下"。所以用状态机把它拉成三段，由 50 ms 的 tick 驱动。
+
+/// 补点击的两个阶段。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TapFollowUp {
+    /// 没有待办
+    None,
+    /// 松手后等待 `ms` 再按下（留出"松手"的间隔，否则会被看成连按）
+    Wait(u64),
+    /// 已按下，到 `ms` 时放开
+    Holding(u64),
+}
+
+/// 补点击的动作（由调用方转成真正的 arm/disarm）
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TapAction {
+    /// 该按下（开始补的这一下）
+    Press,
+    /// 该放开
+    Release,
+}
+
+/// 松手后到"补按下"之间的间隔。
+///
+/// 太短（<30 ms）会被当成长按的一部分，太长（>150 ms）用户会听到"两段"。
+pub const TAP_GAP_MS: u64 = 50;
+/// 补的这一下按住多久。
+pub const TAP_HOLD_MS: u64 = 60;
+
+impl TapFollowUp {
+    /// 用户松手时调用：排一次补点击。
+    pub fn on_release(now_ms: u64) -> Self {
+        TapFollowUp::Wait(now_ms.saturating_add(TAP_GAP_MS))
+    }
+
+    /// tick 驱动：到点了就返回该做的动作。
+    pub fn tick(&mut self, now_ms: u64) -> Option<TapAction> {
+        match *self {
+            TapFollowUp::None => None,
+            TapFollowUp::Wait(at) if now_ms >= at => {
+                *self = TapFollowUp::Holding(now_ms.saturating_add(TAP_HOLD_MS));
+                Some(TapAction::Press)
+            }
+            TapFollowUp::Holding(at) if now_ms >= at => {
+                *self = TapFollowUp::None;
+                Some(TapAction::Release)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn is_pending(self) -> bool {
+        !matches!(self, TapFollowUp::None)
+    }
+}
+
+#[cfg(test)]
+mod tap_tests {
+    use super::*;
+
+    /// 补点击必须"放开 → 等一会儿 → 按下 → 再放开"，不能在同一次里连续做
+    #[test]
+    fn followup_tap_is_three_phases() {
+        let mut f = TapFollowUp::on_release(1_000);
+        assert!(f.is_pending());
+        // 还没到点：什么都不做
+        assert_eq!(f.tick(1_010), None);
+        // 到点：按下
+        assert_eq!(f.tick(1_050), Some(TapAction::Press));
+        // 按住期间不重复按
+        assert_eq!(f.tick(1_060), None);
+        // 到点：放开
+        assert_eq!(f.tick(1_110), Some(TapAction::Release));
+        assert!(!f.is_pending());
+        // 之后不再有任何动作
+        assert_eq!(f.tick(9_999), None);
+    }
+
+    /// 用户松手后立刻又按下：补点击应被取消（否则一次操作会发两次点击）
+    #[test]
+    fn new_press_cancels_pending_followup() {
+        let mut f = TapFollowUp::on_release(1_000);
+        // 用户在 20 ms 内又按下了（真实连按）
+        f = TapFollowUp::None; // 由调用方置 None 表示"新的一段开始"
+        assert_eq!(f.tick(1_050), None, "取消后不能再补点击");
+    }
+
+    /// 间隔与按住时长都在合理范围（不连按、也不像长按）
+    #[test]
+    fn timing_is_sane() {
+        assert!((20..=150).contains(&TAP_GAP_MS));
+        assert!((30..=200).contains(&TAP_HOLD_MS));
+    }
+}
