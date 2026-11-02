@@ -19,7 +19,8 @@
 | `IPRC1000.exe` | 主程序 |
 | `WinUHid.dll` | 按键注入；缺了按键完全不生效（日志会报「未找到 WinUHid.dll」） |
 | `icon.ico` | 窗口/托盘图标从同目录取，缺了会退回 exe 内嵌资源 |
-| `assets/VBCABLE_Driver_Pack45.zip` | 语音要虚拟声卡，客户机没装时用这个装 |
+| `assets/`（整目录） | **「一键修复」要用**：`configure-xiaomi-audio.ps1`（设默认麦克风）、`winuhid/`（装虚拟键盘驱动）、`VBCABLE_Driver_Pack45.zip`（装虚拟声卡）。少一个，修复就有项目做不了 |
+| `一键安装.cmd` | 首次安装入口（提权 + 调 `--install`） |
 | `使用说明.txt` | 客户向说明 |
 
 用法：
@@ -104,13 +105,16 @@ def readme(ver: str) -> str:
 3. 若按键无效：管理员身份运行一次，程序会把遥控器从「键盘」改成「HID 设备」
    （不改会打出字母）。界面顶部「一键修复」也会做这件事。
 4. 若语音没声音：确认已安装 VB-CABLE 虚拟声卡（assets 目录里有安装包）。
+5. 界面上的「一键修复」会依次检查：虚拟声卡 → 默认麦克风 → 虚拟键盘驱动 → 遥控器改造，
+   缺什么补什么（可能弹 UAC 提权框，请允许）。
 
 本目录文件说明
 --------------
 IPRC1000.exe          主程序
 WinUHid.dll           虚拟键盘驱动接口，**删了按键就不生效**
 icon.ico              窗口/托盘图标
-assets/               虚拟声卡安装包
+assets/               修复用资源（声卡安装包、驱动安装脚本、麦克风配置脚本）
+一键安装.cmd          首次安装入口（右键"以管理员身份运行"亦可）
 native.json           首次运行的配置种子
 
 常见问题
@@ -144,9 +148,38 @@ def zip_it(ver: str, exe: str) -> str:
         src = os.path.join(ROOT, name)
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(stage, name))
-    vbc = os.path.join(ROOT, "assets", "VBCABLE_Driver_Pack45.zip")
-    if os.path.exists(vbc):
-        shutil.copy2(vbc, os.path.join(stage, "assets", "VBCABLE_Driver_Pack45.zip"))
+
+    # ★ 整个 assets 目录都要带：「一键修复」靠它装声卡/驱动、改默认麦克风。
+    #   之前只拷了 VBCABLE 的 zip，结果修复里"设默认麦克风"和"装虚拟键盘驱动"
+    #   两项都因为找不到文件而做不到（用户一眼就看出来了）。
+    src_assets = os.path.join(ROOT, "assets")
+    if not os.path.isdir(src_assets):
+        raise SystemExit("缺 assets 目录 —— 「一键修复」会缺项，不能这样发")
+    for base, _dirs, files in os.walk(src_assets):
+        rel = os.path.relpath(base, src_assets)
+        dst_dir = os.path.join(stage, "assets") if rel == "." else os.path.join(stage, "assets", rel)
+        os.makedirs(dst_dir, exist_ok=True)
+        for fn in files:
+            shutil.copy2(os.path.join(base, fn), os.path.join(dst_dir, fn))
+
+    cmd = os.path.join(ROOT, "一键安装.cmd")
+    if os.path.exists(cmd):
+        shutil.copy2(cmd, os.path.join(stage, "一键安装.cmd"))
+    else:
+        print("  ⚠ 源码目录没有 一键安装.cmd，包里将不带它")
+
+    # 交付前自检：这三样是「一键修复」的硬依赖，缺任何一个都别发
+    need = [
+        os.path.join(stage, "assets", "configure-xiaomi-audio.ps1"),
+        os.path.join(stage, "assets", "winuhid", "WinUHid.dll"),
+        os.path.join(stage, "assets", "VBCABLE_Driver_Pack45.zip"),
+        os.path.join(stage, "WinUHid.dll"),
+        os.path.join(stage, "IPRC1000.exe"),
+    ]
+    missing = [n for n in need if not os.path.exists(n)]
+    if missing:
+        raise SystemExit("✗ 包里缺关键文件，发了也修不了：" + "、".join(os.path.relpath(m, stage) for m in missing))
+    print(f"  ✓ 关键资源齐全（含 assets/winuhid 驱动 {len(os.listdir(os.path.join(stage, 'assets', 'winuhid')))} 个文件）")
 
     with open(os.path.join(stage, "使用说明.txt"), "w", encoding="utf-8-sig") as f:
         f.write(readme(ver))

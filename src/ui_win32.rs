@@ -352,6 +352,30 @@ unsafe fn refresh_status() {
     }
 }
 
+/// 修复完成后，把**需要人工处理**的项列出来（只列这些，不列成功的）。
+unsafe fn show_repair_detail(bad: &[String]) {
+    if std::env::var("IPRC_NO_MSGBOX").is_ok()
+        || std::env::temp_dir().join("iprc-no-msgbox").exists()
+    {
+        return;
+    }
+    let text = format!(
+        "以下项目需要你处理：\n\n{}\n\n处理完可再点一次「一键修复」复查。",
+        bad.join("\n")
+    );
+    let t: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    let c: Vec<u16> = "IPRC1000 · 一键修复"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    MessageBoxW(
+        None,
+        PCWSTR(t.as_ptr()),
+        PCWSTR(c.as_ptr()),
+        MB_OK | MB_ICONWARNING,
+    );
+}
+
 unsafe fn load_app_icon() -> HICON {
     use std::os::windows::ffi::OsStrExt;
     if let Ok(exe) = std::env::current_exe() {
@@ -515,10 +539,19 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 ID_FIX => {
                     set_hint("正在逐项检查并修复，请稍候…", C_HINT);
                     std::thread::spawn(move || {
+                        // ★ 必须先初始化 COM（MTA）：修复里要枚举音频设备、走 WASAPI。
+                        //   `probes()` 自己会 CoInitializeEx，但它有 5 秒缓存 ——
+                        //   刚打开界面就点「一键修复」时缓存是热的，那一步会被跳过，
+                        //   本线程就没有 COM，设备枚举**静默失败**，
+                        //   表现为"虚拟声卡未安装"其实装得好好的（老坑，commands.rs 里记过）。
+                        unsafe {
+                            let _ = windows::Win32::System::Com::CoInitializeEx(
+                                None,
+                                windows::Win32::System::Com::COINIT_MULTITHREADED,
+                            );
+                        }
                         let r = crate::commands::repair_all();
-                        let v: serde_json::Value = serde_json::from_str(&r).unwrap_or_default();
-                        let msg = v["message"].as_str().unwrap_or("修复完成").to_string();
-                        unsafe { REPAIR_MSG = Some(msg); }
+                        unsafe { REPAIR_MSG = Some(r); }
                         let h = FindWindowW(None, PCWSTR(wide("IPRC1000").as_ptr()));
                         if h.0 != 0 {
                             let _ = PostMessageW(h, WM_REPAIR_DONE, WPARAM(0), LPARAM(0));
@@ -609,12 +642,46 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             LRESULT(0)
         }
         WM_REPAIR_DONE => {
-            let msg = unsafe { REPAIR_MSG.take() }.unwrap_or_else(|| String::from("修复完成"));
+            let raw = unsafe { REPAIR_MSG.take() }.unwrap_or_default();
+            let v: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
             refresh_status();
             rebuild_list();
-            set_hint(&msg, C_OK);
+
+            let items = v["items"].as_array().cloned().unwrap_or_default();
+            let total = items.len();
+            let mut bad: Vec<String> = Vec::new();
+            for it in &items {
+                let name = it["name"].as_str().unwrap_or("?");
+                let state = it["state"].as_str().unwrap_or("");
+                let msg = it["message"].as_str().unwrap_or("");
+                if matches!(state, "manual" | "failed" | "needs_reboot") {
+                    bad.push(format!("· {name}：{msg}"));
+                }
+            }
+            let ok_n = total.saturating_sub(bad.len());
+            // 提示条只有一行高（22 px）：多行报告会被裁掉，实测客户只能看到第一行。
+            // 所以这里压成摘要，明细交给弹窗。
+            if bad.is_empty() {
+                set_hint(&format!("一键修复完成：{ok_n}/{total} 项到位，无需处理"), C_OK);
+            } else {
+                set_hint(
+                    &format!(
+                        "一键修复完成：{ok_n}/{total} 项到位，{} 项需你处理（已弹出说明）",
+                        bad.len()
+                    ),
+                    C_HINT,
+                );
+                show_repair_detail(&bad);
+            }
             LRESULT(0)
         }
+        // 最小化（点标题栏「—」）→ 收进托盘，而不是缩到任务栏。
+        // 托盘应用缩在任务栏没有意义；返回 0 = 本消息已处理，系统不再执行默认最小化。
+        WM_SYSCOMMAND if (wp.0 & 0xFFF0) as u32 == SC_MINIMIZE => {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+            LRESULT(0)
+        }
+        // 点 X 不退出，收进托盘（与完整界面行为一致）
         WM_CLOSE => {
             let _ = ShowWindow(hwnd, SW_HIDE);
             LRESULT(0)
