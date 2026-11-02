@@ -523,6 +523,14 @@ fn main() {
     //   系统主题切换等），如果直接往下走，main 结束 → 进程退出 → 托盘也没了。
     //   循环重建后，无论界面因为什么原因消失，程序都还在，托盘随时能唤回。
     let mut round = 0u32;
+    // ★★ 2026-11-02（客户装机场景）：界面创建失败必须**有尽头、有说法**。
+    //   原来无论什么原因失败都"2 秒后重建"，永不放弃 —— 在没有 OpenGL 的机器上
+    //   （微软基本显示适配器 / 远程桌面 / 老集显）表现就是：
+    //     托盘图标在、按键和语音都正常、**界面永远打不开**，日志里只有一行行"界面循环结束"。
+    //   客户看到的是"这软件坏了"，而实际上核心功能是好的。
+    //   现在：连续失败到阈值就切"仅托盘模式"，并弹一次说明清楚原因和办法。
+    let mut gui_fail: u32 = 0;
+    let mut gui_error_shown = false;
     // ★ 自测钩子（不影响正常使用）：设了 `IPRC_TEST_WAKE_MS` 就在 N 毫秒后自动置
     //   SHOW_REQ，用来验证"收进托盘后能否重建界面"——这条路径只有点托盘才会走到，
     //   自动化测试里没法点托盘。与 `--tab`（自测截图用）同性质。
@@ -549,15 +557,29 @@ fn main() {
             ..Default::default()
         };
         let _ = &opts;
-        let r = eframe::run_native(
-            "IPRC1000 原生内核",
-            opts2,
-            Box::new(|cc| Ok(Box::new(ui_egui::App::new(cc)))),
-        );
+        // 自测钩子：让本次界面创建必然失败，用来验证"失败封顶 + 仅托盘模式"这条路径
+        // （真机上很难凑出无 OpenGL 的环境）。
+        // ⚠ 用**哨兵文件**而不只用环境变量：经 explorer 代启时环境变量传不进来
+        //   （这也是"部署后程序行为不对"的常见坑）。
+        let force_fail = std::env::var("IPRC_FORCE_GUI_FAIL").is_ok()
+            || std::env::temp_dir().join("iprc-force-gui-fail").exists();
+        let r: Result<(), String> = if force_fail {
+            Err(String::from("模拟失败：OpenGL 上下文创建失败（IPRC_FORCE_GUI_FAIL）"))
+        } else {
+            eframe::run_native(
+                "IPRC1000 原生内核",
+                opts2,
+                Box::new(|cc| Ok(Box::new(ui_egui::App::new(cc)))),
+            )
+            .map_err(|e| format!("{e}"))
+        };
         // ★★ 2026-11-01：区分"用户主动收进托盘"与"意外结束"。
         //   主动隐藏 ⇒ **等**唤回信号，绝不立刻重建（否则等于没隐藏，
         //   内存也白释放——这正是改之前"缩成 1×1"的老问题）。
         //   托盘线程独立存活，左键/菜单「打开界面」会把 SHOW_REQ 置位。
+        if r.is_ok() {
+            gui_fail = 0;   // 成功显示过一次，失败计数归零
+        }
         if HIDE_REQUESTED.swap(false, Ordering::SeqCst) {
             eprintln!("[i] 界面已收进托盘（UI 线程结束，GL 上下文与框架内存已交还系统）");
             // ★★ 2026-11-01（真机：点关闭按钮"无反应"）：
@@ -576,7 +598,25 @@ fn main() {
             eprintln!("[i] 收到唤回信号 ⇒ 重建界面");
             continue;
         }
-        eprintln!("[i] 界面循环结束（第 {round} 轮）：{r:?} —— 2 秒后重建窗口");
+        let err_txt = format!("{r:?}");
+        eprintln!("[i] 界面循环结束（第 {round} 轮）：{err_txt}");
+        gui_fail += 1;
+
+        // 连续失败到阈值 ⇒ 判定"本机无法创建 OpenGL 界面"，转仅托盘模式。
+        // 为什么保留进程：按键注入、语音、音频都不依赖 GL，关掉等于把能用的功能也停了。
+        if gui_fail >= 2 {
+            eprintln!(
+                "[!] 连续 {gui_fail} 次无法创建界面 ⇒ 切换为**仅托盘模式**（按键/语音仍可用）"
+            );
+            if !gui_error_shown {
+                gui_error_shown = true;
+                show_gui_error(&err_txt);
+            }
+            // 仅托盘模式：不再尝试重建，但保持进程存活（托盘/热键/音频线程都在）。
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+            }
+        }
         std::thread::sleep(std::time::Duration::from_secs(2));
     }
 }
@@ -584,6 +624,48 @@ fn main() {
 /// 托盘请求"显示窗口"（UI 线程每帧检查；不能从托盘线程直接动 egui 的窗口）
 pub use hotkey::HIDE_REQUESTED;
 pub use hotkey::SHOW_REQ;
+
+/// 界面无法创建时的**一次性**说明（只在彻底失败时弹，不用于偶发失败）。
+///
+/// 为什么值得弹：客户机器上"托盘在、按键能用、界面打不开"是极难受的体验，
+/// 而原因几乎只有三种（没装驱动 / 远程桌面 / 老集显），能一次说清就不必再打电话。
+fn show_gui_error(detail: &str) {
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONWARNING, MB_OK};
+
+    // 自测时不想被人点掉：设了 IPRC_NO_MSGBOX 就只写日志
+    if std::env::var("IPRC_NO_MSGBOX").is_ok()
+        || std::env::temp_dir().join("iprc-no-msgbox").exists()
+    {
+        eprintln!("[i] 已跳过错误弹窗（no-msgbox 标记存在）");
+        return;
+    }
+
+    let text = format!(
+        "界面无法显示，程序已切换到「仅托盘模式」——按键、语音、音频仍然可用。\n\n\
+         原因：本机无法创建 OpenGL 图形界面，常见于：\n\
+         · 显卡驱动未安装（设备管理器里显示「Microsoft 基本显示适配器」）\n\
+         · 远程桌面 / 虚拟机会话\n\
+         · 较老的集成显卡\n\n\
+         解决办法（任选其一）：\n\
+         1. 安装显卡驱动（推荐，装完重启本程序）\n\
+         2. 把 Mesa3D 的 opengl32.dll 放到程序目录（软件渲染，无需驱动）\n\n\
+         技术细节：{detail}"
+    );
+    let t: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    let c: Vec<u16> = "IPRC1000 原生内核"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        MessageBoxW(
+            None,
+            PCWSTR(t.as_ptr()),
+            PCWSTR(c.as_ptr()),
+            MB_OK | MB_ICONWARNING,
+        );
+    }
+}
 
 fn chrono_like_now() -> String {
     let d = std::time::SystemTime::now()
