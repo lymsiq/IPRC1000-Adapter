@@ -1,6 +1,6 @@
 [package]
 name = "iprc1000_native"
-version = "0.4.25"
+version = "0.4.26"
 edition = "2021"
 
 [dependencies]
@@ -29,6 +29,7 @@ windows = { version = "0.57", features = [
     "Win32_System_Com_StructuredStorage",
     "Win32_UI_Shell_PropertiesSystem",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Controls",   # 精简面板原型（Win32 降级界面）用 ListView
     "Win32_UI_Shell",
     "Win32_Graphics_Gdi",
     "Win32_System_LibraryLoader",

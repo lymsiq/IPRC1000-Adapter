@@ -316,6 +316,24 @@ pub fn bindings_of(group: u8) -> HashMap<String, String> {
 }
 
 /// 往**当前组**写一个绑定并落盘
+/// 读当前配置组里某个按键的绑定值（空串 = 未设置）。
+///
+/// 为什么需要：Win32 界面要显示"文本槽 1 / 宏 2 / 鼠标动作"这类**非键位**绑定，
+/// 而 `keymap::vks_of()` 只返回键序列（动作类绑定在它那里是空）。
+/// 用 `apply_binding` 的同一套字符串语义读回来，两个界面才不会各说各话。
+pub fn binding_in_group(id: &str) -> String {
+    store()
+        .lock()
+        .ok()
+        .map(|d| {
+            d.groups
+                .get(d.active_group as usize)
+                .and_then(|g| g.bindings.get(id).cloned())
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+}
+
 pub fn set_binding_in_group(id: &str, value: &str) {
     if let Ok(mut d) = store().lock() {
         let idx = d.active_group as usize;

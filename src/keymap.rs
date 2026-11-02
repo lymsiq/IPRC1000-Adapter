@@ -296,6 +296,15 @@ pub fn vk_name(vk: u16) -> String {
         0x09 => "Tab".to_string(),
         0x20 => "Space".to_string(),
         0x5D => "Menu".to_string(),
+        // 媒体键（HID 消费者页对应的 VK）：不写名字界面会显示 0xAF 这种，
+        // 客户看不出是"音量+"。两个界面都用这个函数，所以在这里补齐。
+        0xAD => "静音".to_string(),
+        0xAE => "音量−".to_string(),
+        0xAF => "音量+".to_string(),
+        0xB0 => "下一曲".to_string(),
+        0xB1 => "上一曲".to_string(),
+        0xB2 => "停止".to_string(),
+        0xB3 => "播放/暂停".to_string(),
         0x25 => "←".to_string(),
         0x26 => "↑".to_string(),
         0x27 => "→".to_string(),
@@ -351,5 +360,29 @@ pub fn usage_of_id(id: &str) -> Option<u8> {
             return Some(u);
         }
     }
-    None
+    // ★ 2026-11-02：用户自定义的按键（遥控器上有、但内置表里没有的 usage）。
+    //   统一编码成 "hidXX"（十六进制），这样它能和内置键一样被持久化到
+    //   `set_binding_in_group(id, value)` —— 否则"新增按键"只能活在内存里，重启就丢。
+    let hex = id.strip_prefix("hid")?;
+    u8::from_str_radix(hex, 16).ok()
+}
+
+/// usage 的稳定 id：内置键用 `usage_label` 的 id，其余统一 `hidXX`
+pub fn id_of(u: u8) -> String {
+    let (id, _) = usage_label(u);
+    if id == "unknown" {
+        format!("hid{:02X}", u)
+    } else {
+        id.to_string()
+    }
+}
+
+/// 给 Win32 界面用的：某个 usage 的显示名（未知键显示 `HID xx`）
+pub fn name_of(u: u8) -> String {
+    let (id, name) = usage_label(u);
+    if id == "unknown" {
+        format!("HID {:02X}", u)
+    } else {
+        name.to_string()
+    }
 }

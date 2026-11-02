@@ -25,6 +25,7 @@ mod mouse_act;
 mod mouse_move;
 mod recorder;
 mod settings;
+mod ui_win32;
 mod step;
 mod text_slot;
 mod winuhid;
@@ -561,8 +562,16 @@ fn main() {
         // （真机上很难凑出无 OpenGL 的环境）。
         // ⚠ 用**哨兵文件**而不只用环境变量：经 explorer 代启时环境变量传不进来
         //   （这也是"部署后程序行为不对"的常见坑）。
-        let force_fail = std::env::var("IPRC_FORCE_GUI_FAIL").is_ok()
-            || std::env::temp_dir().join("iprc-force-gui-fail").exists();
+        // ★ 哨兵文件**自动过期**（5 分钟）：这个钩子原本是"文件存在就必失败"，
+        //   结果测试完忘了删，用户第二天启动发现界面打不开 —— 一个测试开关
+        //   不该有能力永久把正常界面挡在门外。现在只在标记新鲜时才生效。
+        let force_fail = std::env::var("IPRC_FORCE_GUI_FAIL").is_ok() || {
+            let p = std::env::temp_dir().join("iprc-force-gui-fail");
+            match std::fs::metadata(&p).and_then(|m| m.modified()) {
+                Ok(t) => t.elapsed().map(|d| d < std::time::Duration::from_secs(300)).unwrap_or(false),
+                Err(_) => false,
+            }
+        };
         let r: Result<(), String> = if force_fail {
             Err(String::from("模拟失败：OpenGL 上下文创建失败（IPRC_FORCE_GUI_FAIL）"))
         } else {
@@ -605,17 +614,14 @@ fn main() {
         // 连续失败到阈值 ⇒ 判定"本机无法创建 OpenGL 界面"，转仅托盘模式。
         // 为什么保留进程：按键注入、语音、音频都不依赖 GL，关掉等于把能用的功能也停了。
         if gui_fail >= 2 {
+            // ★ 2026-11-02：不再"仅托盘"（那样客户看不见任何东西、也改不了设置）。
+            //   改用 Win32 原生界面：纯 GDI、零显卡依赖，能改键位/切换输入法/一键修复。
             eprintln!(
-                "[!] 连续 {gui_fail} 次无法创建界面 ⇒ 切换为**仅托盘模式**（按键/语音仍可用）"
+                "[!] 连续 {gui_fail} 次无法创建图形界面（{err_txt}）⇒ 改用 Win32 原生界面"
             );
-            if !gui_error_shown {
-                gui_error_shown = true;
-                show_gui_error(&err_txt);
-            }
-            // 仅托盘模式：不再尝试重建，但保持进程存活（托盘/热键/音频线程都在）。
-            loop {
-                std::thread::sleep(std::time::Duration::from_secs(30));
-            }
+            ui_win32::run();
+            eprintln!("[i] Win32 界面已关闭 ⇒ 进程退出");
+            std::process::exit(0);
         }
         std::thread::sleep(std::time::Duration::from_secs(2));
     }
