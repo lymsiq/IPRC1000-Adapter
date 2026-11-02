@@ -1,17 +1,25 @@
 [package]
 name = "iprc1000_native"
-version = "0.4.26"
+version = "0.4.27"
 edition = "2021"
+
+[features]
+# 默认构建：完整界面（egui + OpenGL）
+default = ["gui"]
+gui = ["dep:eframe", "dep:egui"]
+# 单独发行的 Win32 版：完全不链接 eframe/egui/OpenGL，
+# 用 `--no-default-features --features win32_only` 构建。
+win32_only = []
 
 [dependencies]
 # ── UI：egui（纯 Rust 即时渲染，无 WebView2）──
 # 为什么换掉 Tauri：IPC 序列化 + 渲染进程生命周期 + 后台节流，
 # 三样轮流出问题（界面卡死/数据不更新/显示假数据），而这些在 egui 里根本不存在。
-eframe = { version = "0.29", default-features = false, features = [
+eframe = { version = "0.29", optional = true, default-features = false, features = [
     "glow",            # OpenGL 后端，兼容性最好（不需要 wgpu/DX12）
     "default_fonts",   # 拉丁字体；中文另加载系统 msyh.ttc
 ] }
-egui = "0.29"
+egui = { version = "0.29", optional = true }
 # 托盘图标（egui 本身不做托盘）
 tray-icon = { version = "0.19", features = ["common-controls-v6"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }

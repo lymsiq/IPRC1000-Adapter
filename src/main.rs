@@ -29,10 +29,14 @@ mod ui_win32;
 mod step;
 mod text_slot;
 mod winuhid;
+#[cfg(feature = "gui")]
 mod ui_edit;
+#[cfg(feature = "gui")]
 mod ui_egui;
+#[cfg(feature = "gui")]
 mod ui_insert;
 mod uninstall;
+#[cfg(feature = "gui")]
 mod ui_pages;
 
 use std::sync::atomic::Ordering;
@@ -500,13 +504,26 @@ fn main() {
         .spawn(backend::run_backend)
         .ok();
 
-    // ④ 托盘线程
-    std::thread::Builder::new()
-        .name("iprc-tray".into())
-        .spawn(tray_thread)
-        .ok();
+    // ④ 托盘线程（Win32 版由 ui_win32 自己建托盘，这里不再建，否则两个图标）
+    #[cfg(feature = "gui")]
+    {
+        std::thread::Builder::new()
+            .name("iprc-tray".into())
+            .spawn(tray_thread)
+            .ok();
+    }
 
-    // ⑤ egui 主线程
+    // ⑤ 界面
+    #[cfg(feature = "win32_only")]
+    {
+        eprintln!("[i] Win32 版：不创建 OpenGL 上下文，直接使用原生界面");
+        ui_win32::run();
+        eprintln!("[i] 界面已关闭 ⇒ 进程退出");
+        std::process::exit(0);
+    }
+
+    #[cfg(feature = "gui")]
+    {
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([900.0, 780.0])
@@ -625,6 +642,7 @@ fn main() {
         }
         std::thread::sleep(std::time::Duration::from_secs(2));
     }
+    }
 }
 
 /// 托盘请求"显示窗口"（UI 线程每帧检查；不能从托盘线程直接动 egui 的窗口）
@@ -635,6 +653,7 @@ pub use hotkey::SHOW_REQ;
 ///
 /// 为什么值得弹：客户机器上"托盘在、按键能用、界面打不开"是极难受的体验，
 /// 而原因几乎只有三种（没装驱动 / 远程桌面 / 老集显），能一次说清就不必再打电话。
+#[cfg(feature = "gui")]
 fn show_gui_error(detail: &str) {
     use windows::core::PCWSTR;
     use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONWARNING, MB_OK};
