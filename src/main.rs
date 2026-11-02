@@ -1154,11 +1154,18 @@ fn destroy_leftover_window() {
             LPARAM(&mut victims as *mut Vec<HWND> as isize),
         );
         for v in &victims {
-            let _ = PostMessageW(*v, WM_CLOSE, WPARAM(0), LPARAM(0));
-            let _ = DestroyWindow(*v);
+            // ★★ 关键修正（2026-11-02 实测）：这里**只能隐藏，不能销毁**。
+            //   winit 把 "Thread Event Target" 窗口**按线程缓存**（thread-local），一个线程只建一次。
+            //   销毁它之后，下一轮事件循环以为它还在、不会重建 ⇒ 新界面缺少事件目标窗口，
+            //   跨线程唤醒（托盘/热键触发的重绘）会往已销毁的句柄发消息，静默失效。
+            //   实测对比：全新启动 10 个窗口（含事件目标）；销毁后重建只剩 9 个（缺事件目标）。
+            //
+            //   隐藏即可消除视觉问题：不可见的窗口不会被画出"未响应"幽灵方块，
+            //   而句柄仍然有效，winit 复用它，事件循环照常工作。
+            let _ = ShowWindow(*v, SW_HIDE);
         }
         if !victims.is_empty() {
-            eprintln!("[i] 已清理 {} 个可见遗留窗口（winit 事件目标）", victims.len());
+            eprintln!("[i] 已隐藏 {} 个遗留辅助窗口（winit 事件目标）", victims.len());
         }
     }
 }
