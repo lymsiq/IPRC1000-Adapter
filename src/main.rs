@@ -1101,9 +1101,41 @@ fn clean_stale_trace() {
 /// 看得见、点关闭没反应（没有消息循环在跑），还会挡住下面的窗口。
 /// 补一刀：先 WM_CLOSE 让窗口走正常销毁流程，再 DestroyWindow 兜底。
 fn destroy_leftover_window() {
-    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::*;
+    use windows::Win32::System::Threading::GetCurrentProcessId;
+
+    // 枚举本进程遗留的"辅助窗口"（回调里收集句柄）。
+    unsafe extern "system" fn collect(h: HWND, lp: LPARAM) -> BOOL {
+        let out = &mut *(lp.0 as *mut Vec<HWND>);
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(h, Some(&mut pid));
+        if pid == GetCurrentProcessId() && IsWindowVisible(h).as_bool() {
+            // ★ 两个过滤条件缺一不可：
+            //   · 只收**可见**的：真正造成"左上角小方块"的是可见窗口；
+            //     不可见的那些是 winit 内部对象，跨线程 DestroyWindow 必然失败（Win32 限制），
+            //     去碰它们只会刷出无意义的失败日志。
+            //   · 只收"小窗口"：主窗口是几百像素，不会误伤。
+            let mut rc = RECT::default();
+            let _ = GetWindowRect(h, &mut rc);
+            let small = (rc.right - rc.left) <= 40 && (rc.bottom - rc.top) <= 40;
+            if small {
+                let mut cls = [0u16; 128];
+                let n = GetClassNameW(h, &mut cls);
+                let name = String::from_utf16_lossy(&cls[..n.max(0) as usize]);
+                // winit 的事件循环会建一个 "Thread Event Target" 窗口；
+                // 事件循环一结束，它就没有消息循环了 ⇒ Windows 标"未响应"，
+                // 表现为**屏幕左上角一个十几像素的小方块**（真机 2026-11-02 确认）。
+                if name.contains("Thread Event Target") || rc.right - rc.left == 0 {
+                    out.push(h);
+                }
+            }
+        }
+        BOOL(1)
+    }
+
     unsafe {
+        // ① 按标题找主窗口（原来就有的那条）
         let title: Vec<u16> = "IPRC1000 原生内核"
             .encode_utf16()
             .chain(std::iter::once(0))
@@ -1111,9 +1143,22 @@ fn destroy_leftover_window() {
         let h = FindWindowW(None, windows::core::PCWSTR(title.as_ptr()));
         if h.0 != 0 {
             let _ = PostMessageW(h, WM_CLOSE, WPARAM(0), LPARAM(0));
-            if DestroyWindow(h).is_err() {
-                eprintln!("[i] 残留窗口 DestroyWindow 失败（可能已被系统收回）");
-            }
+            let _ = DestroyWindow(h);
+        }
+
+        // ② 扫本进程留下的辅助窗口并销毁。
+        //    这是"左上角 10 像素未响应方块"的根因：它没有标题，按标题永远找不到。
+        let mut victims: Vec<HWND> = Vec::new();
+        let _ = EnumWindows(
+            Some(collect),
+            LPARAM(&mut victims as *mut Vec<HWND> as isize),
+        );
+        for v in &victims {
+            let _ = PostMessageW(*v, WM_CLOSE, WPARAM(0), LPARAM(0));
+            let _ = DestroyWindow(*v);
+        }
+        if !victims.is_empty() {
+            eprintln!("[i] 已清理 {} 个可见遗留窗口（winit 事件目标）", victims.len());
         }
     }
 }
