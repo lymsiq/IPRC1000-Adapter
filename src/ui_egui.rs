@@ -224,29 +224,18 @@ impl eframe::App for App {
                             ui.label(RichText::new(txt).color(color));
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let (txt, color) = match backend::last_key() {
-                                Some((u, age)) => {
+                            // 只显示"哪个键 → 触发了什么"，不带计时：
+                            // 计时要么静止（无信息量），要么得每帧重绘（白耗资源）。
+                            let txt = match backend::last_key() {
+                                Some(u) => {
                                     let name = keymap::name_of(u);
                                     let bid = keymap::id_of(u);
                                     let what = binding_label(&bid, u, false);
-                                    let ago = if age < 1000 {
-                                        String::from("刚刚")
-                                    } else {
-                                        format!("{:.1} 秒前", age as f32 / 1000.0)
-                                    };
-                                    let c = if age < 1500 {
-                                        Color32::from_rgb(80, 200, 120)
-                                    } else {
-                                        Color32::from_gray(140)
-                                    };
-                                    (format!("最近按键：{name} → {what}（{ago}）"), c)
+                                    format!("最近按键：{name} → {what}")
                                 }
-                                None => (
-                                    String::from("最近按键：—（按一下遥控器试试）"),
-                                    Color32::from_gray(140),
-                                ),
+                                None => String::from("最近按键：—（按一下遥控器试试）"),
                             };
-                            ui.label(RichText::new(txt).small().color(color));
+                            ui.label(RichText::new(txt).small().color(Color32::from_gray(150)));
                         });
                     });
                 });
