@@ -50,6 +50,23 @@ static SHARED: std::sync::OnceLock<Arc<Mutex<Bridge>>> = std::sync::OnceLock::ne
 pub static PRESET: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
 
 /// 供 Tauri 命令取业务句柄；业务线程还没起来时返回 None。
+/// 最近一次遥控器按键：(usage, 距今毫秒)。
+///
+/// 界面用它做"按键反应"回显 —— 客户最想确认的就是"我按了，机器到底收没收到"。
+/// 没有按下过时返回 None（与"很久以前按过"区分开）。
+pub fn last_key() -> Option<(u8, u64)> {
+    let sh = shared()?;
+    let b = sh.lock().ok()?;
+    let st = b.stats.lock().ok()?;
+    if st.last_key_ms == 0 {
+        None
+    } else {
+        // 直接算好"多久以前"返回：`diag` 是私有模块，界面侧不该为算个时间差去碰它
+        let age = diag::now_ms().saturating_sub(st.last_key_ms);
+        Some((st.last_key_usage, age))
+    }
+}
+
 pub fn shared() -> Option<&'static Arc<Mutex<Bridge>>> {
     SHARED.get()
 }

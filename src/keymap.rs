@@ -341,7 +341,10 @@ pub fn load_group(map: &std::collections::HashMap<String, String>) {
         let Some(u) = usage_of_id(id) else { continue };
         let v = val.trim();
         if let Ok(act) = v.parse::<i32>() {
-            if (-6..=-1).contains(&act) {
+            // 负数值一律是"动作"：鼠标(-1..-6) 与「打开程序」(-2001..-2999)。
+            // 原来只认 -6..-1，导致重启后"打开程序"绑定静默失效
+            // （界面照样显示"打开 XX"，按键却没反应）。
+            if (-6..=-1).contains(&act) || (-2999..=-2001).contains(&act) {
                 set_action(u, Some(act));
             }
             continue;

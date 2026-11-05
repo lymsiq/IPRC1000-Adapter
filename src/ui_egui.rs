@@ -212,12 +212,43 @@ impl eframe::App for App {
                 ui.label(RichText::new("IPRC1000").heading().strong());
                 ui.label(RichText::new("原生内核").small().weak());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (txt, color) = if crate::is_online() {
-                        ("● 遥控器在线", Color32::from_rgb(80, 200, 120))
-                    } else {
-                        ("○ 遥控器休眠（按任意键唤醒）", Color32::from_rgb(200, 170, 80))
-                    };
-                    ui.label(RichText::new(txt).color(color));
+                    // 在线状态 + 下面一行"按键反应"：
+                    // 客户最想确认的是"我按了，机器到底收没收到、触发了什么"。
+                    ui.vertical(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let (txt, color) = if crate::is_online() {
+                                ("● 遥控器在线", Color32::from_rgb(80, 200, 120))
+                            } else {
+                                ("○ 遥控器休眠（按任意键唤醒）", Color32::from_rgb(200, 170, 80))
+                            };
+                            ui.label(RichText::new(txt).color(color));
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let (txt, color) = match backend::last_key() {
+                                Some((u, age)) => {
+                                    let name = keymap::name_of(u);
+                                    let bid = keymap::id_of(u);
+                                    let what = binding_label(&bid, u, false);
+                                    let ago = if age < 1000 {
+                                        String::from("刚刚")
+                                    } else {
+                                        format!("{:.1} 秒前", age as f32 / 1000.0)
+                                    };
+                                    let c = if age < 1500 {
+                                        Color32::from_rgb(80, 200, 120)
+                                    } else {
+                                        Color32::from_gray(140)
+                                    };
+                                    (format!("最近按键：{name} → {what}（{ago}）"), c)
+                                }
+                                None => (
+                                    String::from("最近按键：—（按一下遥控器试试）"),
+                                    Color32::from_gray(140),
+                                ),
+                            };
+                            ui.label(RichText::new(txt).small().color(color));
+                        });
+                    });
                 });
             });
             ui.add_space(4.0);

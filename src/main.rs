@@ -95,7 +95,9 @@ pub fn apply_binding(id: &str, value: &str) -> String {
         if (-2999..=-2001).contains(&act) {
             let num = (-2000 - act) as u32;
             settings::set_binding_in_group(id, v);
-            keymap::set_action(usage, None);
+            // ★ 必须写 Some(act)：后端的"打开程序"分派读的就是 action_of()。
+            //   写成 None 会让绑定在界面上显示正常、实际按下去毫无反应（踩过）。
+            keymap::set_action(usage, Some(act as i32));
             keymap::set_override(usage, Vec::new());
             return format!("{id} → {}", shortcut_store::label(num));
         }
@@ -335,6 +337,8 @@ fn main() {
             || a == "--diag"
             || a == "--audio"
             || a == "--launch-shortcut"
+            || a == "--check-key"
+            || a == "--bind-program"
     });
     if !is_cli_tool {
         redirect_stderr_to_file();
@@ -376,6 +380,47 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+
+    // 诊断：`--check-key 08` 打印某个 usage 的绑定串 / action / vks，
+    // 用来判断"界面显示有绑定、按下去却没反应"到底断在哪一层。
+    if let Some(i) = std::env::args().position(|a| a == "--check-key") {
+        settings::load();
+        keymap::load_group(&settings::bindings_of(settings::active_group()));
+        let raw = std::env::args().nth(i + 1).unwrap_or_default();
+        let u = u8::from_str_radix(raw.trim().trim_start_matches("0x"), 16).unwrap_or(0xFF);
+        let id = keymap::id_of(u);
+        let act = keymap::action_of(u);
+        println!("usage   = 0x{u:02X}");
+        println!("id      = {id}   name = {}", keymap::name_of(u));
+        println!("绑定串  = {:?}", settings::binding_in_group(&id));
+        println!("action  = {act:?}   （后端「打开程序」读的就是这个）");
+        println!("vks     = {:?}", keymap::vks_of(u));
+        match act.and_then(|a| shortcut_store::num_of_action(a as i64)) {
+            Some(n) => println!("=> 按下会执行：{}", shortcut_store::label(n)),
+            None => println!("=> 不是「打开程序」动作"),
+        }
+        std::process::exit(0);
+    }
+
+    // 现场装配：`--bind-program favorite "D://...//WeChat.exe"`（等价于点「程序」按钮）
+    if let Some(i) = std::env::args().position(|a| a == "--bind-program") {
+        settings::load();
+        keymap::load_group(&settings::bindings_of(settings::active_group()));
+        let id = std::env::args().nth(i + 1).unwrap_or_default();
+        let path = std::env::args().nth(i + 2).unwrap_or_default();
+        let name = std::path::Path::new(&path)
+            .file_stem()
+            .map(|x| x.to_string_lossy().to_string())
+            .unwrap_or_else(|| String::from("程序"));
+        match shortcut_store::save(0, &name, &path, "") {
+            Ok(num) => {
+                let val = shortcut_store::action_of_num(num).to_string();
+                println!("{}", apply_binding(&id, &val));
+            }
+            Err(e) => println!("失败：{e}"),
+        }
+        std::process::exit(0);
     }
 
     if std::env::args().any(|a| a == "--diag") {
