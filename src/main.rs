@@ -25,6 +25,7 @@ mod mouse_act;
 mod mouse_move;
 mod recorder;
 mod settings;
+mod shortcut_store;
 mod ui_win32;
 mod step;
 mod text_slot;
@@ -89,6 +90,14 @@ pub fn apply_binding(id: &str, value: &str) -> String {
             } else {
                 format!("{id} → 文本槽 {slot}（{n} 字）")
             };
+        }
+        // 「打开程序」：-2001..-2999 → 快捷方式编号 1..999
+        if (-2999..=-2001).contains(&act) {
+            let num = (-2000 - act) as u32;
+            settings::set_binding_in_group(id, v);
+            keymap::set_action(usage, None);
+            keymap::set_override(usage, Vec::new());
+            return format!("{id} → {}", shortcut_store::label(num));
         }
         if (-1999..=-1101).contains(&act) {
             // 基准 -1100：宏 1 存成 -1101（与界面生成值一致）
@@ -321,7 +330,11 @@ fn main() {
     //   它们是给安装器/脚本/人看的，stdout+stderr 必须留在控制台（否则父进程拿到空输出）。
     //   只有正常启动（GUI 常驻）才把输出重定向进 native.log。
     let is_cli_tool = std::env::args().any(|a| {
-        a == "--install" || a == "--repair" || a == "--diag" || a == "--audio"
+        a == "--install"
+            || a == "--repair"
+            || a == "--diag"
+            || a == "--audio"
+            || a == "--launch-shortcut"
     });
     if !is_cli_tool {
         redirect_stderr_to_file();
@@ -347,6 +360,24 @@ fn main() {
     }));
 
     // 资源诊断：`IPRC1000-Native.exe --diag`（无界面，打印模块/线程/内存后退出）
+    // 诊断/自测：直接触发某个「打开程序」快捷方式（客户现场验证绑定是否有效）
+    if let Some(i) = std::env::args().position(|a| a == "--launch-shortcut") {
+        let num: u32 = std::env::args()
+            .nth(i + 1)
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0);
+        match shortcut_store::launch(num) {
+            Ok(()) => {
+                println!("已启动快捷方式 #{num}");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("失败：{e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     if std::env::args().any(|a| a == "--diag") {
         eprintln!("{}", diag_report());
         use std::io::Write as _;

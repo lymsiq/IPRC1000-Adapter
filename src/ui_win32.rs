@@ -69,6 +69,7 @@ static mut REPAIR_MSG: Option<String> = None;
 const ID_FIX: usize = 101;
 const ID_ADD: usize = 403;
 const ID_DEL: usize = 404;
+const ID_BIND: usize = 405;
 const ID_REMAP: usize = 401;
 const ID_DEFAULT: usize = 402;
 const ID_HOLD: usize = 501;
@@ -106,20 +107,30 @@ fn color_of(h: HWND) -> Option<u32> {
     unsafe { TEXT_COLORS.iter().find(|(k, _)| *k == h.0).map(|(_, c)| *c) }
 }
 
-/// 该行能不能在本界面改
+/// 该行能不能在本界面改。
+///
+/// 只有语音键不行：它是**全局**的，由「唤醒」里的输入法决定（keymap 在用户覆盖之前
+/// 就按 IME 分流了）。其余全部可改 —— 包括「账户」（小人键），
+/// 用户可以把它从"文本槽"改成"打开微信"。
 fn editable(u: u8) -> bool {
-    u != VOICE && u != ACCOUNT
+    u != VOICE
 }
 
-/// 说明列（只对不可改的行给出原因）
-fn note_of(u: u8) -> &'static str {
+/// 说明列。账户是唯一需要"看状态说话"的：它出厂绑文本槽，
+/// 但用户可能已经把它改成打开程序 —— 这时再写"文本输入"就是自相矛盾。
+fn note_of(u: u8) -> String {
     if u == VOICE {
-        "由上方「唤醒」决定，全局不可单独改"
-    } else if u == ACCOUNT {
-        "文本输入，此界面不支持修改"
-    } else {
-        ""
+        return String::from("由上方「唤醒」决定，全局不可单独改");
     }
+    if u == ACCOUNT {
+        let b = crate::settings::binding_in_group(&crate::keymap::id_of(u));
+        if let Ok(v) = b.trim().parse::<i64>() {
+            if (-1010..=-1001).contains(&v) {
+                return String::from("当前是文本输入（改成按键/程序后文本功能失效）");
+            }
+        }
+    }
+    String::new()
 }
 
 /// 当前映射的可读文本（动作 / 键序列 / 未设置）
@@ -141,6 +152,7 @@ fn map_text(u: u8) -> String {
             if v < 0 {
                 return match v {
                     -6..=-1 => String::from("鼠标动作"),
+                    -2999..=-2001 => crate::shortcut_store::label((-2000 - v) as u32),
                     -1010..=-1001 => format!("文本槽 {}", -1000 - v),
                     -1999..=-1101 => format!("宏 {}", -1100 - v),
                     _ => format!("动作 {v}"),
@@ -314,7 +326,7 @@ unsafe fn rebuild_list() {
         insert_row(LIST, i, &crate::keymap::name_of(u));
         set_cell(LIST, i, 1, &format!("HID {:02X}", u));
         set_cell(LIST, i, 2, &map_text(u));
-        set_cell(LIST, i, 3, note_of(u));
+        set_cell(LIST, i, 3, &note_of(u));
     }
 }
 
@@ -349,6 +361,34 @@ unsafe fn refresh_status() {
             TEXT_COLORS.retain(|(k, _)| *k != h.0);
             set_color(*h, if *ok { C_OK } else { C_WARN });
         }
+    }
+}
+
+/// 选一个程序（.exe / .lnk / 文件夹都能选到：这里只给 exe 过滤，但允许"所有文件"）
+unsafe fn pick_program(hwnd: HWND) -> Option<String> {
+    use windows::Win32::UI::Controls::Dialogs::{
+        GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST, OPENFILENAMEW,
+    };
+    let mut buf = [0u16; 1024];
+    let filter: Vec<u16> = "程序 (*.exe)\0*.exe\0快捷方式 (*.lnk)\0*.lnk\0所有文件 (*.*)\0*.*\0\0"
+        .encode_utf16()
+        .collect();
+    let title = wide("选择按下该键时要打开的程序");
+    let mut ofn = OPENFILENAMEW {
+        lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
+        hwndOwner: hwnd,
+        lpstrFilter: PCWSTR(filter.as_ptr()),
+        lpstrFile: windows::core::PWSTR(buf.as_mut_ptr()),
+        nMaxFile: buf.len() as u32,
+        lpstrTitle: PCWSTR(title.as_ptr()),
+        Flags: OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR,
+        ..Default::default()
+    };
+    if GetOpenFileNameW(&mut ofn).as_bool() {
+        let end = buf.iter().position(|&c| c == 0).unwrap_or(0);
+        Some(String::from_utf16_lossy(&buf[..end]))
+    } else {
+        None
     }
 }
 
@@ -459,10 +499,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
 
             // 工具栏
             label(hwnd, "按键映射 · 单模式", 24, 62, 300, 24, C_TEXT, true);
-            push_button(hwnd, "+ 添加按键", ID_ADD, 424, 58, 112, 30);
-            push_button(hwnd, "删除", ID_DEL, 542, 58, 76, 30);
-            push_button(hwnd, "改映射", ID_REMAP, 624, 58, 92, 30);
-            push_button(hwnd, "恢复默认", ID_DEFAULT, 722, 58, 90, 30);
+            push_button(hwnd, "+ 添加按键", ID_ADD, 420, 58, 104, 30);
+            push_button(hwnd, "绑定程序", ID_BIND, 528, 58, 104, 30);
+            push_button(hwnd, "改映射", ID_REMAP, 636, 58, 86, 30);
+            push_button(hwnd, "删除", ID_DEL, 726, 58, 74, 30);
 
             LIST = make_list(hwnd, 24, 98, 788, 590);
             rebuild_list();
@@ -494,6 +534,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             // 底部
             push_button(hwnd, "打开日志目录", ID_LOGDIR, 24, 816, 132, 32);
             push_button(hwnd, "导出配置", ID_EXPORT, 168, 816, 112, 32);
+            push_button(hwnd, "恢复默认", ID_DEFAULT, 292, 816, 112, 32);
             push_button(hwnd, "收进托盘", ID_TRAY, 680, 816, 132, 32);
 
             // 图标 + 托盘
@@ -575,6 +616,30 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         rebuild_list();
                         set_hint("已删除该自定义按键", C_OK);
                     }
+                },
+                ID_BIND => match selected_usage() {
+                    None => set_hint("请先在表格里选中一行，再点「绑定程序」", C_HINT),
+                    Some(u) if !editable(u) => set_hint(
+                        "这一项由「唤醒」或完整界面决定，此处不支持绑定程序", C_HINT),
+                    Some(u) => match pick_program(hwnd) {
+                        None => {}
+                        Some(path) => {
+                            let name = std::path::Path::new(&path)
+                                .file_stem()
+                                .map(|x| x.to_string_lossy().to_string())
+                                .unwrap_or_else(|| String::from("程序"));
+                            match crate::shortcut_store::save(0, &name, &path, "") {
+                                Ok(num) => {
+                                    let id = crate::keymap::id_of(u);
+                                    let val = crate::shortcut_store::action_of_num(num).to_string();
+                                    let r = crate::apply_binding(&id, &val);
+                                    rebuild_list();
+                                    set_hint(&format!("{r}（按该键即可启动）"), C_OK);
+                                }
+                                Err(e) => set_hint(&format!("保存失败：{e}"), C_WARN),
+                            }
+                        }
+                    },
                 },
                 ID_REMAP => match selected_usage() {
                     None => set_hint("请先在表格里选中一行，再点「改映射」", C_HINT),

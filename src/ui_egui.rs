@@ -806,6 +806,11 @@ fn binding_label(id: &str, usage: u8, mouse_group: bool) -> String {
                 if (-6..=-1).contains(&n) {
                     return format!("{}（动作）", mouse_act::action_name(n as i32));
                 }
+                // 「打开程序」：-2001..-2999。不认这一段的话这里会掉到 vks_of（空）
+                // 显示成"未设置"，用户以为绑定丢了。
+                if (-2999..=-2001).contains(&n) {
+                    return crate::shortcut_store::label((-2000 - n) as u32);
+                }
                 if (-1010..=-1001).contains(&n) {
                     let slot = (-1000 - n) as u32;
                     let chars = text_slot::get(slot).map(|t| t.text.chars().count()).unwrap_or(0);

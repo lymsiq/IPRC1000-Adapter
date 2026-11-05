@@ -1567,6 +1567,25 @@ impl Bridge {
                         self.arm_deadline(u);
                         continue;
                     }
+                    // 「打开程序」：单独一段动作值，启动放子线程（ShellExecute 会阻塞）
+                    if let Some(num) = crate::shortcut_store::num_of_action(act as i64) {
+                        std::thread::spawn(move || {
+                            if let Err(e) = crate::shortcut_store::launch(num) {
+                                eprintln!("[打开] {e}");
+                            }
+                        });
+                        self.held[u] = true;
+                        self.arm_deadline(u);
+                        {
+                            let mut st = self.stats.lock().unwrap_or_else(|e| e.into_inner());
+                            st.last_key_usage = u as u8;
+                            st.last_key_ms = diag::now_ms();
+                        }
+                        if !diag::QUIET.load(Ordering::Relaxed) {
+                            eprintln!("[ACT] usage=0x{u:02X} 打开程序 #{num}");
+                        }
+                        continue;
+                    }
                     crate::mouse_act::fire(act, true);
                     self.held[u] = true;
                     self.arm_deadline(u);
