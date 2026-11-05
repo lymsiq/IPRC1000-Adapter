@@ -22,6 +22,32 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+
+/// 进程内缓存。
+///
+/// 为什么需要：界面上有 23 行，**每次重建都要问"这一行绑的是什么"**，
+/// 没缓存就是 23 次读盘 + 23 次 JSON 解析（Win32 面板每次改绑定都重建）。
+/// 自己写盘后主动失效；外部手改文件需要重启才看得到（可接受，且少一层监视开销）。
+static CACHE: OnceLock<Mutex<Option<Vec<Shortcut>>>> = OnceLock::new();
+
+fn cache() -> &'static Mutex<Option<Vec<Shortcut>>> {
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn invalidate() {
+    if let Ok(mut g) = cache().lock() {
+        *g = None;
+    }
+}
+
+/// 保证已加载，返回内部切片
+fn ensure<'a>(slot: &'a mut Option<Vec<Shortcut>>) -> &'a [Shortcut] {
+    if slot.is_none() {
+        *slot = Some(read_file());
+    }
+    slot.as_deref().unwrap_or(&[])
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Shortcut {
@@ -40,13 +66,20 @@ fn file() -> PathBuf {
         .join("shortcuts.json")
 }
 
-/// 全部条目（下标 0 = 编号 1）
-pub fn list() -> Vec<Shortcut> {
+fn read_file() -> Vec<Shortcut> {
     let p = file();
     let Ok(txt) = std::fs::read_to_string(&p) else {
         return Vec::new();
     };
     serde_json::from_str::<Vec<Shortcut>>(&txt).unwrap_or_default()
+}
+
+/// 全部条目（下标 0 = 编号 1）
+pub fn list() -> Vec<Shortcut> {
+    match cache().lock() {
+        Ok(mut g) => ensure(&mut g).to_vec(),
+        Err(_) => read_file(),
+    }
 }
 
 fn write(all: &[Shortcut]) -> Result<(), String> {
@@ -55,7 +88,9 @@ fn write(all: &[Shortcut]) -> Result<(), String> {
         let _ = std::fs::create_dir_all(d);
     }
     let txt = serde_json::to_string_pretty(all).map_err(|e| e.to_string())?;
-    std::fs::write(&p, txt).map_err(|e| e.to_string())
+    std::fs::write(&p, txt).map_err(|e| e.to_string())?;
+    invalidate();
+    Ok(())
 }
 
 /// 编号（1 起）取条目
@@ -63,7 +98,10 @@ pub fn get(num: u32) -> Option<Shortcut> {
     if num == 0 {
         return None;
     }
-    list().get((num - 1) as usize).cloned()
+    match cache().lock() {
+        Ok(mut g) => ensure(&mut g).get((num - 1) as usize).cloned(),
+        Err(_) => None,
+    }
 }
 
 /// 存一条：`num == 0` 表示新增，返回实际编号
@@ -89,6 +127,7 @@ pub fn save(num: u32, name: &str, path: &str, args: &str) -> Result<u32, String>
     }
 }
 
+#[allow(dead_code)] // 目前界面用不到（"删除按键"删的是键位，不是快捷方式条目），留给 CLI/后续
 pub fn delete(num: u32) -> Result<(), String> {
     let mut all = list();
     if num == 0 || num as usize > all.len() {

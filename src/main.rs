@@ -11,6 +11,10 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+// Win32 版（feature = win32_only）不编译 egui/托盘那一套，因此有一批函数"没有调用者"。
+// 逐个加 cfg 门控收益不大、还容易把完整版编坏，所以只在这一类构建下统一放开。
+#![cfg_attr(feature = "win32_only", allow(dead_code))]
+
 mod autostart;
 mod backend;
 mod cable_out;
@@ -624,7 +628,6 @@ fn main() {
     //   客户看到的是"这软件坏了"，而实际上核心功能是好的。
     //   现在：连续失败到阈值就切"仅托盘模式"，并弹一次说明清楚原因和办法。
     let mut gui_fail: u32 = 0;
-    let mut gui_error_shown = false;
     // ★ 自测钩子（不影响正常使用）：设了 `IPRC_TEST_WAKE_MS` 就在 N 毫秒后自动置
     //   SHOW_REQ，用来验证"收进托盘后能否重建界面"——这条路径只有点托盘才会走到，
     //   自动化测试里没法点托盘。与 `--tab`（自测截图用）同性质。
@@ -725,48 +728,6 @@ fn main() {
 pub use hotkey::HIDE_REQUESTED;
 pub use hotkey::SHOW_REQ;
 
-/// 界面无法创建时的**一次性**说明（只在彻底失败时弹，不用于偶发失败）。
-///
-/// 为什么值得弹：客户机器上"托盘在、按键能用、界面打不开"是极难受的体验，
-/// 而原因几乎只有三种（没装驱动 / 远程桌面 / 老集显），能一次说清就不必再打电话。
-#[cfg(feature = "gui")]
-fn show_gui_error(detail: &str) {
-    use windows::core::PCWSTR;
-    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONWARNING, MB_OK};
-
-    // 自测时不想被人点掉：设了 IPRC_NO_MSGBOX 就只写日志
-    if std::env::var("IPRC_NO_MSGBOX").is_ok()
-        || std::env::temp_dir().join("iprc-no-msgbox").exists()
-    {
-        eprintln!("[i] 已跳过错误弹窗（no-msgbox 标记存在）");
-        return;
-    }
-
-    let text = format!(
-        "界面无法显示，程序已切换到「仅托盘模式」——按键、语音、音频仍然可用。\n\n\
-         原因：本机无法创建 OpenGL 图形界面，常见于：\n\
-         · 显卡驱动未安装（设备管理器里显示「Microsoft 基本显示适配器」）\n\
-         · 远程桌面 / 虚拟机会话\n\
-         · 较老的集成显卡\n\n\
-         解决办法（任选其一）：\n\
-         1. 安装显卡驱动（推荐，装完重启本程序）\n\
-         2. 把 Mesa3D 的 opengl32.dll 放到程序目录（软件渲染，无需驱动）\n\n\
-         技术细节：{detail}"
-    );
-    let t: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
-    let c: Vec<u16> = "IPRC1000 原生内核"
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-    unsafe {
-        MessageBoxW(
-            None,
-            PCWSTR(t.as_ptr()),
-            PCWSTR(c.as_ptr()),
-            MB_OK | MB_ICONWARNING,
-        );
-    }
-}
 
 fn chrono_like_now() -> String {
     let d = std::time::SystemTime::now()

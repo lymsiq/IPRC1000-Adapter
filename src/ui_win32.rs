@@ -21,6 +21,15 @@
 //! · 设置：`settings::set_ime / set_trigger / set_log_enabled`
 //! · 状态：`commands::probes()` / `device_probe::winuhid_driver_installed()`
 
+// 界面状态用 `static mut` 保存（GDI 控件句柄、字体、颜色表…）。
+//
+// 安全性依据：**这些只有消息循环线程会碰**。唯一的跨线程数据是修复结果，
+// 它用的是 `Mutex`（REPAIR_MSG），不是 static mut。
+// Win32 控件本身也不是线程安全的 —— 从别的线程改控件才是真 bug，
+// 而这里没有那种调用。Cargo 2024 会把 static mut 引用变成硬错误，
+// 真到那天再整体换 OnceLock（届时是一次机械改写，不影响行为）。
+#![allow(static_mut_refs)]
+
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
@@ -63,8 +72,11 @@ static mut ROWS: Vec<u8> = Vec::new();
 /// 捕获状态：0=空闲 1=等遥控器键（新增）2=等目标键
 static mut CAP: u8 = 0;
 static mut CAP_USAGE: u8 = 0;
-/// 修复线程的回报（None=未在跑）
-static mut REPAIR_MSG: Option<String> = None;
+/// 修复线程的回报。**必须用 Mutex**：写者是修复子线程、读者是 UI 线程，
+/// 原来用 `static mut Option<String>` 是实打实的数据竞争（只是碰巧没炸）。
+static REPAIR_MSG: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// 修复是否在跑：防止连点「一键修复」并发跑两遍安装脚本（装驱动两次会打架）
+static REPAIRING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 const ID_FIX: usize = 101;
 const ID_ADD: usize = 403;
@@ -293,7 +305,7 @@ unsafe fn set_cell(hw: HWND, row: usize, sub: i32, text: &str) {
 unsafe fn set_hint(text: &str, color: u32) {
     let h = HINT;
     let t = wide(text);
-    SetWindowTextW(h, PCWSTR(t.as_ptr()));
+    let _ = SetWindowTextW(h, PCWSTR(t.as_ptr()));
     TEXT_COLORS.retain(|(k, _)| *k != h.0);
     set_color(h, color);
     let _ = InvalidateRect(h, None, true);
@@ -357,7 +369,7 @@ unsafe fn refresh_status() {
         if let Some(h) = STATUS_LABELS.get(i) {
             let txt = format!("{} {}", name, if *ok { "✓" } else { "⚠" });
             let t = wide(&txt);
-            SetWindowTextW(*h, PCWSTR(t.as_ptr()));
+            let _ = SetWindowTextW(*h, PCWSTR(t.as_ptr()));
             TEXT_COLORS.retain(|(k, _)| *k != h.0);
             set_color(*h, if *ok { C_OK } else { C_WARN });
         }
@@ -578,6 +590,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             let id = (wp.0 & 0xffff) as usize;
             match id {
                 ID_FIX => {
+                    use std::sync::atomic::Ordering as O;
+                    if REPAIRING.swap(true, O::SeqCst) {
+                        set_hint("修复正在进行中，请等它跑完", C_HINT);
+                        return LRESULT(0);
+                    }
                     set_hint("正在逐项检查并修复，请稍候…", C_HINT);
                     std::thread::spawn(move || {
                         // ★ 必须先初始化 COM（MTA）：修复里要枚举音频设备、走 WASAPI。
@@ -592,7 +609,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                             );
                         }
                         let r = crate::commands::repair_all();
-                        unsafe { REPAIR_MSG = Some(r); }
+                        if let Ok(mut g) = REPAIR_MSG.lock() {
+                            *g = Some(r);
+                        }
                         let h = FindWindowW(None, PCWSTR(wide("IPRC1000").as_ptr()));
                         if h.0 != 0 {
                             let _ = PostMessageW(h, WM_REPAIR_DONE, WPARAM(0), LPARAM(0));
@@ -707,7 +726,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             LRESULT(0)
         }
         WM_REPAIR_DONE => {
-            let raw = unsafe { REPAIR_MSG.take() }.unwrap_or_default();
+            REPAIRING.store(false, std::sync::atomic::Ordering::SeqCst);
+            let raw = REPAIR_MSG
+                .lock()
+                .ok()
+                .and_then(|mut g| g.take())
+                .unwrap_or_default();
             let v: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
             refresh_status();
             rebuild_list();
