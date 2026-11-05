@@ -360,6 +360,16 @@ impl App {
                             if ui.button("改键").clicked() {
                                 self.edit = Some(crate::ui_edit::EditState::new(id, label));
                             }
+                            if ui
+                                .button("程序")
+                                .on_hover_text("按下该键直接打开一个程序（微信 / WorkBuddy / 任意 exe）")
+                                .clicked()
+                            {
+                                // 复用 Win32 的 GetOpenFileNameW：不引入 rfd 这类新依赖。
+                                // 在 UI 线程上做模态是安全的（与 Win32 版同一个函数）。
+                                let msg = choose_program_for(id);
+                                self.say(msg);
+                            }
                             if ui.button("清除").clicked() {
                                 let msg = crate::apply_binding(id, "");
                                 self.say(msg);
@@ -790,6 +800,30 @@ fn parse_msg(json: &str) -> String {
 }
 
 /// 某个键当前绑定的可读文案（含四类：VK / 鼠标动作 / 文本槽 / 宏）
+/// 选一个程序并绑到某个按键上（egui 侧入口）。
+///
+/// 复用 `ui_win32::pick_program`：同一个 GetOpenFileNameW，不引入 rfd 这类新依赖。
+/// `GetActiveWindow()` 在点击按钮的这一刻就是本窗口，用它做对话框的 owner。
+fn choose_program_for(id: &str) -> String {
+    // 用 GetForegroundWindow：点击按钮的这一刻本窗口就是前台窗口，
+    // 拿它做对话框的 owner（这个版本的 windows crate 没有导出 GetActiveWindow）。
+    let hwnd = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+    let Some(path) = (unsafe { crate::ui_win32::pick_program(hwnd) }) else {
+        return String::from("已取消");
+    };
+    let name = std::path::Path::new(&path)
+        .file_stem()
+        .map(|x| x.to_string_lossy().to_string())
+        .unwrap_or_else(|| String::from("程序"));
+    match crate::shortcut_store::save(0, &name, &path, "") {
+        Ok(num) => {
+            let val = crate::shortcut_store::action_of_num(num).to_string();
+            crate::apply_binding(id, &val)
+        }
+        Err(e) => format!("保存失败：{e}"),
+    }
+}
+
 fn binding_label(id: &str, usage: u8, mouse_group: bool) -> String {
     // 鼠标模式下的方向键：不绑也有固定语义
     if mouse_group && matches!(usage, 0x52 | 0x51 | 0x50 | 0x4F) {

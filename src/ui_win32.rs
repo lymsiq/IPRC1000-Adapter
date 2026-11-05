@@ -365,7 +365,7 @@ unsafe fn refresh_status() {
 }
 
 /// 选一个程序（.exe / .lnk / 文件夹都能选到：这里只给 exe 过滤，但允许"所有文件"）
-unsafe fn pick_program(hwnd: HWND) -> Option<String> {
+pub unsafe fn pick_program(hwnd: HWND) -> Option<String> {
     use windows::Win32::UI::Controls::Dialogs::{
         GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST, OPENFILENAMEW,
     };
