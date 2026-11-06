@@ -589,11 +589,11 @@ impl App {
                     ui,
                     false,
                     "遥控器按键通道",
-                    "已改绑成 raw —— HID 接口不注册，按键收不到",
+                    "HID 服务节点在，但没绑定 HidBth —— 主机侧没有 PSM 0x0011 监听者",
                 );
                 let warn = Color32::from_rgb(255, 170, 80);
                 ui.label(
-                    RichText::new("⚠ 运行 IPRC1000-Native.exe --restore-keyboard，或点下面「④ 恢复键盘模式」；恢复后按一下遥控器唤醒。")
+                    RichText::new("⚠ 修法：设置 → 蓝牙和其他设备 → 删除 IPRC1000 → 遥控器进配对模式 → 重新添加设备。（--restore-keyboard 对这种情况无效）")
                         .small()
                         .color(warn),
                 );
@@ -603,14 +603,25 @@ impl App {
                 ui,
                 true,
                 "遥控器按键通道",
-                "键盘模式（正确）—— 按键可读；系统会同时打字母（已知边界）",
+                "HID 服务已绑定（Service=HidBth）—— 按键可读；系统会同时打字母（已知边界）",
             ),
-            None => check_row(
-                ui,
-                true,
-                "遥控器按键通道",
-                "未连接（连上后再检查）",
-            ),
+            // ★ 无节点不是"未连接"那么轻：SDP 没跑通就没有 PSM 0x0011 监听者，
+            //   遥控器连上来必然 REFUSED_PSM。这里以前显示绿色"未连接"，是假绿灯。
+            None => {
+                check_row(
+                    ui,
+                    false,
+                    "遥控器按键通道",
+                    "没有 HID 服务节点（SDP 未成功 / 未配对）—— 遥控器会被 REFUSED_PSM",
+                );
+                let warn = Color32::from_rgb(255, 170, 80);
+                ui.label(
+                    RichText::new("⚠ 修法：删除设备后重新配对；配对时确保遥控器指示灯快闪。此项不修，按键永远收不到。")
+                        .small()
+                        .color(warn),
+                );
+                ui.add_space(4.0);
+            }
         }
 
         ui.add_space(12.0);

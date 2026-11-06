@@ -360,15 +360,21 @@ pub fn start() {
             eprintln!("[HID] ⚠ 诊断模式 IPRC1000_RAWINPUT_ANY=1：不按设备名过滤，物理键盘也会触发动作");
         }
 
-        match crate::device_probe::remote_still_keyboard() {
+        // 判据 = Enum\BTHENUM\{00001124-...} 的 Service 是否为 HidBth（客户机 S2 实测）。
+        // 读 Enum\HID 残留节点会得到假绿灯：HardwareID 里永远有 HID_DEVICE_SYSTEM_KEYBOARD。
+        match crate::device_probe::bt_hid_bound() {
             Some(true) => eprintln!(
-                "[HID] 遥控器 HID 节点是「键盘」模式（正确）。★ 不要改造。\
-                 注意：这只说明注册表节点在，**不代表 Raw Input 列表里认得到它**。"
+                "[HID] 蓝牙 HID 服务已绑定（Service=HidBth），按键通道正常。★ 不要改造遥控器。"
             ),
             Some(false) => eprintln!(
-                "[HID] ⚠ 遥控器已被改绑成 raw：HID 接口不再注册、中断通道不建立，按键与音频会全断。请运行 --restore-keyboard 恢复键盘模式。"
+                "[HID] ⚠ HID 服务节点在但没有绑定 HidBth ⇒ 主机侧没有 PSM 0x0011 监听者，\
+                 遥控器连接会被 REFUSED_PSM、一个 HID 报告都收不到。\
+                 修法：删除 IPRC1000 后重新配对（--restore-keyboard 对这种情况无效）。"
             ),
-            None => eprintln!("[HID] 未检测到遥控器 HID 节点（未连接 / 休眠）"),
+            None => eprintln!(
+                "[HID] ⚠ 没有 Enum\\BTHENUM\\{{00001124-...}} 节点 ⇒ SDP 未成功 / 未配对，\
+                 主机侧不会建 HID 通道。修法：删除设备重新配对（--restore-keyboard 无效）。"
+            ),
         }
 
         // ★ 启动时就把 Raw Input 的**真实设备名**打出来。客户机日志里长期是

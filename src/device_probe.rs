@@ -297,17 +297,72 @@ pub fn remote_hid_instances() -> Vec<HidInst> {
     out
 }
 
-/// 遥控器是否仍被当成键盘。
-///   Some(true)  = 还是键盘 ⇒ **正确状态**（Raw Input 读得到按键；副作用：系统打字母）
-///   Some(false) = 已改绑成 raw ⇒ **故障**（HID 接口不注册，按键与音频全断）
-///   None        = 找不到 HID 节点（没连接 / 没配对）
-pub fn remote_still_keyboard() -> Option<bool> {
-    let v = remote_hid_instances();
-    if v.is_empty() {
+/// 蓝牙 HID 服务是否真的绑定了遥控器 —— **按键通道是否存在的唯一可靠判据**。
+///
+/// 2026-11-06 客户机 S2 实测链条：
+/// ```text
+/// SDP 从未成功（缓存服务记录 0 条）
+///   → Enum\BTHENUM\{00001124-...}_VID&00020a5c_PID&8502 节点不存在
+///   → HidBth 未绑定
+///   → 主机 L2CAP 没有 PSM 0x0011 的监听者
+///   → 遥控器主动开 HID-Control 被 REFUSED_PSM（先 PENDING 15 秒）
+///   → 无 HID-Interrupt、无 HID 报告 → 按键全无（hidReports=0 / Raw Input 列表为空）
+/// ```
+///
+/// 所以判据必须读 **`Enum\BTHENUM\{00001124-...}_VID&00020a5c_PID&8502\<inst>` 的 `Service`**，
+/// 必须是 `HidBth`。
+///
+/// ⚠ **不能读 `Enum\HID` 下的节点**：那是设备被改造/换驱动后留下的空壳，
+/// 它的 `HardwareID` 里永远有 `HID_DEVICE_SYSTEM_KEYBOARD`（枚举时缓存，不会被改写），
+/// 会让界面报「键盘模式正确」的**假绿灯**——客户机就是这么被误导的。
+///
+/// 返回：
+///   `Some(true)`  = Service=HidBth，主机侧有监听者，正常
+///   `Some(false)` = 有 {00001124} 节点但 Service 为空 / 被禁用 ⇒ 故障
+///   `None`        = 连 {00001124} 节点都没有 ⇒ SDP 没跑通 / 未配对
+pub fn bt_hid_bound() -> Option<bool> {
+    let Some(root) = open_key(r"SYSTEM\CurrentControlSet\Enum\BTHENUM") else {
+        return None;
+    };
+    let mut any = false;
+    let mut bound = false;
+    for vidpid in subkeys(root) {
+        let up = vidpid.to_uppercase();
+        if !up.contains("00001124") {
+            continue;
+        }
+        let ours = up.contains("VID&00020A5C")
+            || up.contains("VID_00020A5C")
+            || up.contains("PID&8502")
+            || up.contains("PID_8502");
+        if !ours {
+            continue;
+        }
+        let path = format!(r"SYSTEM\CurrentControlSet\Enum\BTHENUM\{vidpid}");
+        let Some(k) = open_key(&path) else { continue };
+        for inst in subkeys(k) {
+            any = true;
+            let ipath = format!(r"{path}\{inst}");
+            let Some(ik) = open_key(&ipath) else { continue };
+            let svc = value_string(ik, "Service").unwrap_or_default();
+            if svc.eq_ignore_ascii_case("HidBth") {
+                bound = true;
+            }
+        }
+    }
+    if !any {
         None
     } else {
-        Some(v.iter().any(|x| x.is_keyboard))
+        Some(bound)
     }
+}
+
+/// HID 服务是否已绑定（保留旧函数名，调用点很多）。
+///   Some(true)  = Service=HidBth ⇒ **正确状态**（Raw Input 读得到按键；副作用：系统打字母）
+///   Some(false) = 有节点但没绑定 ⇒ **故障**：删除设备重新配对（`--restore-keyboard` 无效）
+///   None        = 没有 {00001124} 节点 ⇒ SDP 没跑通，同样只能重新配对
+pub fn remote_still_keyboard() -> Option<bool> {
+    bt_hid_bound()
 }
 
 /// ⛔ **已彻底禁用**（2026-11-06 客户机真机结论，交接文档 §4）。

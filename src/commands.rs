@@ -381,30 +381,35 @@ pub fn repair_report() -> crate::step::Report {
         rep.push("虚拟键盘驱动", repair_driver());
     }
 
-    // ④ 遥控器按键通道（2026-11-06 真机结论：改造 = 收不到按键，停止引导）
-    //   raw 绑定不注册 HID 设备接口 ⇒ hid_reader 枚举恒 0、Windows 不建 HID 中断通道
-    //   ⇒ 按键与音频同时全断。所以「仍是键盘」才是正确状态，「已改造」是故障态。
+    // ④ 遥控器按键通道（2026-11-06 客户机 S2 实测：判据必须读 BTHENUM 的 Service）
+    //   链条：SDP 未成功 → 无 Enum\BTHENUM\{00001124-...} 节点 → HidBth 未绑定
+    //        → 主机侧 PSM 0x0011 无监听者 → 遥控器主动连 HID-Control 被 REFUSED_PSM
+    //        → 无 HID-Interrupt、无 HID 报告 → 按键全无。
+    //   ⚠ 不能读 Enum\HID 残留节点：HardwareID 永远含 HID_DEVICE_SYSTEM_KEYBOARD ⇒ 假绿灯。
     //   ★ 绝不要在这里接回任何「改造设备」动作：那会把一台能用的机器直接改坏
     //     （命令层的改造入口已整体删除，见本文件 ④ 上方说明）。
     match p.remote_is_keyboard {
         Some(true) => rep.push(
             "遥控器按键通道",
             StepResult::AlreadyOk(String::from(
-                "键盘模式（正确）—— 程序能读到按键；系统同时会打出字母，属已知边界",
+                "HID 服务已绑定（Service=HidBth）—— 程序能读到按键；系统同时会打出字母，属已知边界",
             )),
         ),
         Some(false) => rep.push(
             "遥控器按键通道",
             StepResult::Manual(String::from(
-                "已改绑成 raw，HID 接口不再暴露 ⇒ 按键全收不到。请运行 IPRC1000-Native.exe --restore-keyboard（或点界面「④ 恢复键盘模式」）恢复键盘模式，再按一下遥控器唤醒",
+                "有 HID 服务节点但没有绑定 HidBth ⇒ 主机侧没有 PSM 0x0011 监听者，遥控器会被 REFUSED_PSM。\
+                 修法：设置 → 蓝牙和其他设备 → 删除 IPRC1000 → 遥控器进配对模式 → 重新添加设备。\
+                 （--restore-keyboard 对这种情况无效）",
             )),
         ),
-        // 未连接 = 判不了状态，不能报 AlreadyOk（历史假绿灯：客户装完看到成功，
-        // 实际遥控器还是键盘/未连，按一下往文档里打字母）。
+        // 无 {00001124} 节点 = SDP 没跑通，判不了状态，不能报 AlreadyOk
+        // （历史假绿灯：客户装完看到成功，实际一个 HID 报告都收不到）。
         None => rep.push(
             "遥控器按键通道",
             StepResult::Manual(String::from(
-                "没检测到遥控器的 HID 节点 —— 先按一下遥控器把它唤醒（或重新配对），再点一次「一键修复」",
+                "没有 Enum\\BTHENUM\\{00001124-...} 节点 ⇒ SDP 从未成功，主机侧不会建 HID 通道。\
+                 修法：删除设备后重新配对（--restore-keyboard 对这种情况无效）",
             )),
         ),
     }

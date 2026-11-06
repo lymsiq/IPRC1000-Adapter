@@ -369,8 +369,21 @@ unsafe fn refresh_status() {
         ("按键", crate::is_key_online()),
     ];
     // 改造状态改为一次性提示：仍是键盘 = 会双触发，必须说
-    if p.remote_is_keyboard == Some(true) {
-        set_hint("遥控器是「键盘」模式（正确）：按键可读，系统会同时打字母。★ 不要改造，改造会让按键全断", C_WARN);
+    // 判据已改为 Enum\BTHENUM\{00001124-...} 的 Service（客户机 S2 实测）：
+    //   Some(true)=已绑定 HidBth / Some(false)=有节点没绑定 / None=无节点（SDP 未成功）。
+    match p.remote_is_keyboard {
+        Some(true) => set_hint(
+            "HID 服务已绑定（Service=HidBth）：按键可读，系统会同时打字母。★ 不要改造",
+            C_WARN,
+        ),
+        Some(false) => set_hint(
+            "HID 服务未绑定 HidBth：主机没有 PSM 0x0011 监听者，按键收不到。修法：删除 IPRC1000 后重新配对",
+            C_WARN,
+        ),
+        None => set_hint(
+            "没有 HID 服务节点（SDP 未成功）：遥控器会被 REFUSED_PSM。修法：删除设备重新配对",
+            C_WARN,
+        ),
     }
     for (i, (name, ok)) in items.iter().enumerate() {
         if let Some(h) = STATUS_LABELS.get(i) {
