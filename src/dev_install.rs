@@ -217,8 +217,16 @@ pub fn install_hid_compliant(instance_id: &str, inf_path: &str) -> Result<(), St
             ));
         }
 
-        // ② 建 device info list（HIDClass 类）
-        let list = f_create(&class_guid, 0);
+        // ② 建 device info list
+        //
+        // ★ 必须传 NULL（"所有类"），**不能**用 input.inf 的 HIDClass：
+        //   遥控器当前属于 Keyboard 类，用 HIDClass 建 set 再 OpenDeviceInfo 会返回
+        //   CONFIGRET `0xE0000201`（跨类打不开）——客户机实测就是这个报错。
+        //   用 NULL 建 set → OpenDeviceInfo 成功 → BuildDriverInfoList(CLASSDRIVER)
+        //   会按**设备当前类**枚举驱动，其中同时含 `HID Keyboard Device` 和
+        //   `HID-compliant device`，我们要的就是后者（Python 原型实测：型号 2 个）。
+        let _ = class_guid; // 只用于验证 input.inf 可读，不参与建 set
+        let list = f_create(std::ptr::null(), 0);
         if list == -1 || list == 0 {
             return Err(format!(
                 "SetupDiCreateDeviceInfoList 失败（err={}）—— 需要管理员权限",
