@@ -599,12 +599,32 @@ impl App {
                 );
                 ui.add_space(4.0);
             }
-            Some(true) => check_row(
-                ui,
-                true,
-                "遥控器按键通道",
-                "HID 服务已绑定（Service=HidBth）—— 按键可读；系统会同时打字母（已知边界）",
-            ),
+            // ★ 服务绑定 ≠ 不打字母：还要看 HID 子节点绑的是不是键盘驱动。
+            //   只判前者会出现「点了改绑、这行字也不变」的假象（用户实测反馈）。
+            Some(true) => {
+                if p.is_keyboard_driver {
+                    check_row(
+                        ui,
+                        true,
+                        "遥控器按键通道",
+                        "HID 服务已绑定 —— 按键可读；设备仍绑键盘驱动，会往窗口打字母",
+                    );
+                    let warn = Color32::from_rgb(255, 170, 80);
+                    ui.label(
+                        RichText::new("⚠ 想不打字母：点下面「④ 禁止打字母」，一次改绑永久生效。")
+                            .small()
+                            .color(warn),
+                    );
+                    ui.add_space(4.0);
+                } else {
+                    check_row(
+                        ui,
+                        true,
+                        "遥控器按键通道",
+                        "HID 服务已绑定，且已改绑 HID-compliant device —— 按键可读、不打字母",
+                    );
+                }
+            }
             // ★ 无节点不是"未连接"那么轻：SDP 没跑通就没有 PSM 0x0011 监听者，
             //   遥控器连上来必然 REFUSED_PSM。这里以前显示绿色"未连接"，是假绿灯。
             None => {
@@ -703,24 +723,60 @@ impl App {
             }
         });
         ui.add_space(4.0);
-        // ④ 恢复键盘模式（2026-11-06）：**替换**原来的「改造遥控器」按钮。
-        //   改造已证实会切断按键通道（raw 绑定不注册 HID 接口）；这个按钮是它的解药，
-        //   给「按旧说明改造过、现在按键全无」的机器用。
+        // ④ 禁止打字母：把设备从 kbdhid 改绑到 mshidkmdf（HID-compliant device）。
+        //
+        //   为什么需要：遥控器必须保持「键盘」身份才有 HID 通道（改造回 raw 会全断），
+        //   代价就是系统把每次按键打成字母。改绑到 HID-compliant device 后：
+        //     · 不再绑键盘驱动 ⇒ 不打字母
+        //     · 仍是 HIDClass 设备、TLC 仍是 0x01/0x06 ⇒ HID 接口 / Raw Input 照常
+        //     · ETW 读 BthPort 的 ACL 包 ⇒ 照常有数据
+        //   需要管理员：主进程是 asInvoker，点按钮时用 runas 拉起 --convert-hid。
         if ui
-            .add_enabled(!self.installing, egui::Button::new("④ 恢复键盘模式（改造后按键全无时用）"))
+            .add_enabled(
+                !self.installing,
+                egui::Button::new("④ 禁止打字母（改绑 HID-compliant device）"),
+            )
             .on_hover_text(
-                "如果之前按旧说明把遥控器改造成了 HID-compliant / raw，\nHID 接口会不再注册 ⇒ 按键与音频全部收不到。\n这里删除旧节点，让 Windows 重新枚举时装回键盘驱动。\n已经是键盘模式的机器不需要点。",
+                "遥控器保持「键盘」身份时，系统会把每次按键打成一个字母。\n\
+                 这一步把它改绑成 HID-compliant device：\n\
+                 · 不再绑键盘驱动 ⇒ 不再打字母\n\
+                 · HID 接口与 Raw Input 照常 ⇒ 按键仍可读\n\
+                 需要管理员；设备会短暂断开几秒。\n\
+                 想还原点「⑤ 恢复键盘模式」。",
             )
             .clicked()
         {
-            if matches!(crate::device_probe::remote_still_keyboard(), Some(true)) {
-                self.say("已经是键盘模式（正确状态），无需恢复；按键能读到就别改造。");
-            } else {
-                self.say("正在恢复键盘模式…（完成后请按一下遥控器唤醒）");
-                let r = crate::commands::restore_keyboard_hid();
+            let still_kb = crate::device_probe::remote_hid_instances()
+                .iter()
+                .any(|x| x.is_keyboard);
+            if !still_kb {
+                self.say("已经是 HID-compliant device，不会打字母，无需再改。");
+            } else if crate::elevate::is_admin() {
+                self.say("正在改绑…（设备会短暂断开，几秒后自动回来）");
+                match crate::device_probe::convert_to_hid_compliant() {
+                    Ok(m) => self.say(&m),
+                    Err(e) => self.say(&format!("改绑失败：{e}")),
+                }
                 crate::commands::invalidate_probes();
-                self.say(parse_msg(&r));
+            } else {
+                self.say(&crate::commands::run_convert_hid_elevated());
             }
+        }
+        ui.add_space(4.0);
+
+        // ⑤ 恢复键盘模式：改绑后按键全无时的回退。
+        if ui
+            .add_enabled(!self.installing, egui::Button::new("⑤ 恢复键盘模式（改绑后按键全无时用）"))
+            .on_hover_text(
+                "删除 HID 节点，让 Windows 按硬件 ID 重新装回 keyboard.inf。\n\
+                 用于「④ 改绑后按键收不到」的情况；正常使用的机器不需要点。",
+            )
+            .clicked()
+        {
+            self.say("正在恢复键盘模式…（完成后请按一下遥控器唤醒）");
+            let r = crate::commands::restore_keyboard_hid();
+            crate::commands::invalidate_probes();
+            self.say(parse_msg(&r));
         }
         if self.installing {
             ui.add_space(6.0);

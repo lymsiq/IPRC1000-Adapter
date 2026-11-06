@@ -74,6 +74,22 @@ pub fn is_key_online() -> bool {
         .unwrap_or(false)
 }
 
+/// release 是 `windows_subsystem = "windows"`，**没有控制台**，`println!` 全部丢失。
+/// CLI 子命令的结果必须用 MessageBox 让人看见，否则点了按钮像是没反应
+/// （2026-11-06 实测：`--convert-hid` 提权进程一闪而过，用户以为失败）。
+fn msg_box(title: &str, text: &str, error: bool) {
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        MessageBoxW, MB_ICONERROR, MB_ICONINFORMATION, MB_OK,
+    };
+    let t: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+    let b: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    let icon = if error { MB_ICONERROR } else { MB_ICONINFORMATION };
+    unsafe {
+        MessageBoxW(None, PCWSTR(b.as_ptr()), PCWSTR(t.as_ptr()), MB_OK | icon);
+    }
+}
+
 /// 虚拟键盘是否就绪
 pub fn is_inject_ready() -> bool {
     backend::shared()
@@ -435,12 +451,23 @@ fn main() {
     // 需要管理员；回退用 `--restore-keyboard`。
     if std::env::args().any(|a| a == "--convert-hid") {
         if !elevate::is_admin() {
-            println!("失败：需要管理员权限（要改设备驱动绑定）。请以管理员身份重新运行本命令。");
+            eprintln!("失败：需要管理员权限（要改设备驱动绑定）。");
+            msg_box(
+                "禁止打字母",
+                "需要管理员权限。\n请在程序界面点「④ 禁止打字母」，它会自动提权。",
+                true,
+            );
             std::process::exit(4);
         }
         match device_probe::convert_to_hid_compliant() {
-            Ok(m) => println!("{m}"),
-            Err(e) => println!("失败：{e}"),
+            Ok(m) => {
+                eprintln!("{m}");
+                msg_box("禁止打字母", &m, false);
+            }
+            Err(e) => {
+                eprintln!("失败：{e}");
+                msg_box("禁止打字母 · 失败", &e, true);
+            }
         }
         std::process::exit(0);
     }

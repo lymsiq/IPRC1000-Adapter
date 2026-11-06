@@ -209,6 +209,15 @@ pub struct Probes {
     ///   Some(false) = 已改绑成 raw ⇒ **故障**：HID 接口不再暴露，按键全收不到
     ///   None        = 找不到遥控器的 HID 节点（未连接/未配对）
     pub remote_is_keyboard: Option<bool>,
+    /// 遥控器的 HID 实例是否仍绑在 `kbdhid`（键盘驱动）上 ⇒ 系统会往焦点窗口打字母。
+    ///
+    /// 与 `remote_is_keyboard` 是**两件事**，必须分开看：
+    ///   · `remote_is_keyboard` = `Enum\BTHENUM\{00001124}` 的 `Service == HidBth`
+    ///     （按键通道存不存在）
+    ///   · `is_keyboard_driver`  = `Enum\HID\...` 的实例还绑不绑 `kbdhid`
+    ///     （会不会打字母）
+    /// 只判前者会出现「显示了会打字母，改绑后这行也不变」的假象。
+    pub is_keyboard_driver: bool,
     /// VB-CABLE 主设备的问题码：Some(0)=健康；Some(n≠0)=**装了但坏了**（黄叹号）；
     /// None = 设备不存在。用来挡住"端点在但驱动坏 ⇒ 一键修复跳过 ⇒ 只能手动"。
     pub cable_problem: Option<u32>,
@@ -265,6 +274,9 @@ pub fn probes() -> Probes {
         play_is_cable,
         play_name,
         remote_is_keyboard: crate::device_probe::remote_still_keyboard(),
+        is_keyboard_driver: crate::device_probe::remote_hid_instances()
+            .iter()
+            .any(|x| x.is_keyboard),
         cable_problem: crate::device_probe::vbaudio_problem_code(),
         at: std::time::Instant::now(),
     };
@@ -308,6 +320,50 @@ fn install_cable() -> crate::step::StepResult {
 
 /// 把已被改造成 raw 的遥控器**恢复成键盘模式**（改造后按键全无的解药）。
 /// 删掉 devnode 让 PnP 重新枚举时按硬件 ID 装回 keyboard.inf/kbdhid。
+/// 以管理员身份重新启动自己执行 `--convert-hid`（界面按钮用）。
+///
+/// 主程序清单是 `asInvoker`（按键与 Raw Input 不需要管理员），但**改设备驱动绑定必须提权**，
+/// 所以这里用 `ShellExecuteW("runas")` 拉一个带 `--convert-hid` 的提权实例，
+/// 主进程不自杀、不重建，用户点完就能回来看结果。
+pub fn run_convert_hid_elevated() -> String {
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => return format!("取程序路径失败：{e}"),
+    };
+    let file: Vec<u16> = exe
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let verb: Vec<u16> = "runas\0".encode_utf16().collect();
+    let params: Vec<u16> = "--convert-hid\0".encode_utf16().collect();
+
+    let r = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(verb.as_ptr()),
+            PCWSTR(file.as_ptr()),
+            PCWSTR(params.as_ptr()),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if r.0 as isize > 32 {
+        String::from(
+            "已请求管理员权限执行改绑。请在弹窗点「是」，几秒后回来看这一页（会自动刷新）。",
+        )
+    } else {
+        format!(
+            "提权失败（返回 {}）—— 可能点了「否」。也可用管理员命令行：IPRC1000-Native.exe --convert-hid",
+            r.0 as isize
+        )
+    }
+}
+
 pub fn restore_keyboard_step() -> crate::step::StepResult {
     use crate::step::StepResult;
     match crate::device_probe::restore_keyboard() {
@@ -391,9 +447,14 @@ pub fn repair_report() -> crate::step::Report {
     match p.remote_is_keyboard {
         Some(true) => rep.push(
             "遥控器按键通道",
-            StepResult::AlreadyOk(String::from(
-                "HID 服务已绑定（Service=HidBth）—— 程序能读到按键；系统同时会打出字母，属已知边界",
-            )),
+            StepResult::AlreadyOk(if p.is_keyboard_driver {
+                String::from(
+                    "HID 服务已绑定，按键可读；但设备仍绑键盘驱动 ⇒ 会往窗口打字母。\
+                     点「④ 禁止打字母」可改绑成 HID-compliant device（不打字母、按键照读）",
+                )
+            } else {
+                String::from("HID 服务已绑定，且已改绑 HID-compliant device ⇒ 按键可读、不打字母")
+            }),
         ),
         Some(false) => rep.push(
             "遥控器按键通道",
