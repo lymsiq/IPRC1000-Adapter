@@ -111,7 +111,11 @@ impl Default for SpDevInstallParamsW {
     }
 }
 
-type FnGetInfClass = unsafe extern "system" fn(*const u16, *mut Guid, *mut u16, *mut u32) -> i32;
+// BOOL SetupDiGetINFClassW(PCWSTR InfName, LPGUID ClassGuid, PWSTR ClassName,
+//                          DWORD ClassNameSize, PDWORD RequiredSize);
+// ★ 五个参数，别漏 ClassNameSize —— 漏了会参数错位，返回 err=87 (INVALID_PARAMETER)。
+type FnGetInfClass =
+    unsafe extern "system" fn(*const u16, *mut Guid, *mut u16, u32, *mut u32) -> i32;
 type FnCreateList = unsafe extern "system" fn(*const Guid, isize) -> isize;
 type FnOpenDevInfo =
     unsafe extern "system" fn(isize, *const u16, isize, u32, *mut SpDevInfoData) -> i32;
@@ -199,10 +203,17 @@ pub fn install_hid_compliant(instance_id: &str, inf_path: &str) -> Result<(), St
         let mut class_guid = Guid::default();
         let mut class_name = [0u16; 256];
         let mut need = 0u32;
-        if f_inf_class(inf_w.as_ptr(), &mut class_guid, class_name.as_mut_ptr(), &mut need) == 0 {
+        if f_inf_class(
+            inf_w.as_ptr(),
+            &mut class_guid,
+            class_name.as_mut_ptr(),
+            class_name.len() as u32,
+            &mut need,
+        ) == 0
+        {
             let e = GetLastError();
             return Err(format!(
-                "SetupDiGetINFClassW 失败（err={e}）—— 需要管理员权限，并确认 {inf_path} 存在"
+                "SetupDiGetINFClassW 失败（err={e}）—— 检查 {inf_path} 是否存在、是否可读"
             ));
         }
 
