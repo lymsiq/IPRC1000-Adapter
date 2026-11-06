@@ -1,0 +1,42 @@
+﻿host=PC-20260728LQXO
+os=Microsoft Windows 11 专业版 build 22631
+admin=True
+bt_adapter_count=8
+bt_adapter[0]=Unknown | Microsoft 蓝牙枚举器 | BTH\MS_BTHBRB\6&12177B20&0&1
+bt_adapter[1]=Unknown | Bluetooth Device (RFCOMM Protocol TDI) | BTH\MS_RFCOMM\6&12177B20&0&0
+bt_adapter[2]=OK | Microsoft 蓝牙 LE 枚举器 | BTH\MS_BTHLE\6&35F32005&0&3
+bt_adapter[3]=Unknown | Generic Bluetooth Radio | USB\VID_0A12&PID_0001\5&2CDBCAF7&0&6
+bt_adapter[4]=OK | Microsoft 蓝牙枚举器 | BTH\MS_BTHBRB\6&35F32005&0&1
+bt_adapter[5]=OK | Bluetooth Device (RFCOMM Protocol TDI) | BTH\MS_RFCOMM\6&35F32005&0&0
+bt_adapter[6]=Unknown | Microsoft 蓝牙 LE 枚举器 | BTH\MS_BTHLE\6&12177B20&0&3
+bt_adapter[7]=OK | Realtek Bluetooth Adapter | USB\VID_0BDA&PID_C821\00E04C000001
+bt_driver=Microsoft Bluetooth LE Enumerator | ver=10.0.22621.5415 | inf=bthleenum.inf
+bt_driver=Bluetooth Device (Personal Area Network) | ver=10.0.22621.7219 | inf=bthpan.inf
+bt_driver=Bluetooth Device | ver=10.0.22621.7219 | inf=bth.inf
+bt_driver=Bluetooth HID Device | ver=10.0.22621.2506 | inf=hidbth.inf
+bt_driver=Microsoft Bluetooth Enumerator | ver=10.0.22621.7219 | inf=bth.inf
+bt_driver=Bluetooth Device (RFCOMM Protocol TDI) | ver=10.0.22621.6783 | inf=tdibth.inf
+bt_driver=Realtek Bluetooth Adapter | ver=16.4033.2312.2503 | inf=oem24.inf
+btpair[0].mac=20c047f313d6
+btpair[0].name=IPRC1000
+btpair[0].ids=vid=0xA5C pid=0x8502
+btpair[0].servicesForKeys=2
+btpair[0].sdpRecords=6
+btpair[0].hasHIDservice=yes
+btpair_count=1
+bthenum_hid_bound=yes
+bthenum_hid_service=HidBth
+enumhid_count=1
+enumhid_service=kbdhid
+enumhid_class=<empty>
+enumhid_classguid={4d36e96b-e325-11ce-bfc1-08002be10318}
+cable_present=yes
+cable_count=1
+cable[VB-Audio Virtual Cable]=OK
+winuhid_node=yes
+hidbth_event_count=5
+hidbth_event=11-06 15:23:41 id=2 蓝牙 HID 设备 超出范围或不响应。
+hidbth_event=11-06 15:23:36 id=2 蓝牙 HID 设备 超出范围或不响应。
+hidbth_event=11-06 15:18:56 id=2 蓝牙 HID 设备 超出范围或不响应。
+hidbth_event=11-06 15:18:51 id=2 蓝牙 HID 设备 超出范围或不响应。
+hidbth_event=11-06 15:18:47 id=2 蓝牙 HID 设备 超出范围或不响应。
