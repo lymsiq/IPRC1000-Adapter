@@ -20,6 +20,7 @@ mod backend;
 mod cable_out;
 mod commands;
 mod device_probe;
+mod hid_reader;
 mod hotkey;
 mod installer;
 mod keymap;
@@ -341,6 +342,7 @@ fn main() {
             || a == "--launch-shortcut"
             || a == "--check-key"
             || a == "--bind-program"
+            || a == "--hid-probe"
     });
     if !is_cli_tool {
         redirect_stderr_to_file();
@@ -382,6 +384,12 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+
+    // 诊断：`--hid-probe` 枚举遥控器 HID 接口并尝试打开（判断"有没有消费者入口"）
+    if std::env::args().any(|a| a == "--hid-probe") {
+        hid_reader::probe();
+        std::process::exit(0);
     }
 
     // 诊断：`--check-key 08` 打印某个 usage 的绑定串 / action / vks，
@@ -584,6 +592,14 @@ fn main() {
         .name("iprc-backend".into())
         .spawn(backend::run_backend)
         .ok();
+
+    // ③-2 HID 输入消费者（2026-11-06）
+    //   「改造遥控器」把手柄节点改绑成 raw 后，系统里**没有**任何 HID 客户端去读输入报告，
+    //   Windows 就不建立 HID 中断通道（PSM 0x0013）⇒ 遥控器没地方投递按键 ⇒ 4 秒超时重连，
+    //   无限循环，ETW 永远抓不到按键报文（真机抓包 diag-keys.txt 铁证）。
+    //   这里补上那个消费者：打开集合、持续 ReadFile，按键就有了来源。
+    //   语音音频仍走 ETW（那条通道本来就有数据）。
+    hid_reader::start();
 
     // ④ 托盘线程（Win32 版由 ui_win32 自己建托盘，这里不再建，否则两个图标）
     #[cfg(feature = "gui")]

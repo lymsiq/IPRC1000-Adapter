@@ -1,6 +1,6 @@
 [package]
 name = "iprc1000_native"
-version = "0.4.35"
+version = "0.4.36"
 edition = "2021"
 
 [features]
@@ -51,6 +51,8 @@ windows = { version = "0.57", features = [
     "Win32_Globalization",
     # 卸载：标记文件重启后删除
     "Win32_Storage_FileSystem",
+"Win32_Devices_DeviceAndDriverInstallation",
+"Win32_Devices_HumanInterfaceDevice",
     # 自测资源占用（内存/句柄/线程）
     "Win32_System_ProcessStatus",
     "Win32_System_Diagnostics_ToolHelp",
