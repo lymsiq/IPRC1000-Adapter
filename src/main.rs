@@ -19,6 +19,7 @@ mod autostart;
 mod backend;
 mod cable_out;
 mod capture;
+mod doctor;
 mod commands;
 mod device_probe;
 mod dev_install;
@@ -370,6 +371,7 @@ fn main() {
         a == "--install"
             || a == "--repair"
             || a == "--diag"
+            || a == "--doctor"
             || a == "--audio"
             || a == "--launch-shortcut"
             || a == "--check-key"
@@ -517,6 +519,38 @@ fn main() {
                 println!("{}", apply_binding(&id, &val));
             }
             Err(e) => println!("失败：{e}"),
+        }
+        std::process::exit(0);
+    }
+
+    // 环境体检（2026-11-06）：每一项给「实测值 / 判据 / 修法」三列。
+    // 为什么单独做：界面曾写「已改绑 ⇒ 按键可读」，实际收不到 —— 结论对不上依据时
+    // 人只能靠猜，一天就耗在这上面。`--doctor` 强制每行都能被复核。
+    // 用法：`--doctor`（写 logs\doctor.txt）或 `--doctor D:\out.txt`
+    if let Some(i) = std::env::args().position(|a| a == "--doctor") {
+        let out = std::env::args()
+            .nth(i + 1)
+            .filter(|s| !s.starts_with("--"))
+            .map(|s| s.to_string());
+        let (text, path) = doctor::run(out.as_deref());
+        eprintln!("{text}");
+        // 给了路径参数 = 脚本调用，不弹窗（否则自动化会卡住）
+        if out.is_none() {
+            let summary = text
+                .lines()
+                .find(|l| l.contains("汇总"))
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            msg_box(
+                "环境体检完成",
+                &format!(
+                    "报告已保存到：\n{}\n\n{}\n\n详情请打开上面这个文件。",
+                    path.display(),
+                    summary
+                ),
+                false,
+            );
         }
         std::process::exit(0);
     }
