@@ -144,6 +144,10 @@ fn open_sink(dir: &PathBuf, tag: &str, rate: u32) -> Option<Sink> {
         eprintln!("[录音] {tag} 写 WAV 头失败：{e}");
         return None;
     }
+    // ★ 立刻把 44 字节头刷到磁盘。
+    //   否则 BufWriter 会把头留在缓冲区，没数据时永远不 flush ⇒ 文件是 0 字节，
+    //   看起来像"录音没工作"（2026-11-06 客户机实测：两个 wav 都是 0 字节）。
+    let _ = s.f.flush();
     eprintln!("[录音] {tag} -> {}", s.path.display());
     Some(s)
 }

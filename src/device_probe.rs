@@ -413,7 +413,8 @@ pub fn convert_to_hid_compliant() -> Result<String, String> {
         Err(format!("改造失败：{}", errs.join("；")))
     } else if errs.is_empty() {
         Ok(format!(
-            "已改造 {done} 个节点 ⇒ 系统不再把遥控器当键盘（不打字母），按键仍可读。若出现异常，用 --restore-keyboard 回退。"
+            "已改造 {done} 个节点 ⇒ 不再打字母，但 Raw Input 里不再有这台设备，按键收不到。\
+             必须删除设备重新配对才能恢复（--restore-keyboard 只删节点，不够）。"
         ))
     } else {
         Ok(format!("部分成功：{done} 个已改造；问题：{}", errs.join("；")))

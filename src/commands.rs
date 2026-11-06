@@ -450,7 +450,9 @@ pub fn repair_report() -> crate::step::Report {
             StepResult::AlreadyOk(if p.is_keyboard_driver {
                 String::from(
                     "HID 服务已绑定，按键可读；但设备仍绑键盘驱动 ⇒ 会往窗口打字母。\
-                     点「④ 禁止打字母」可改绑成 HID-compliant device（不打字母、按键照读）",
+                     会往窗口打字母。这是保持键盘身份的固有代价；\
+                     ⚠ 不要点「④ 禁止打字母」—— 改绑后 Raw Input 里不再有这台设备，\
+                     按键收不到，必须删设备重配对才能恢复",
                 )
             } else {
                 String::from(
