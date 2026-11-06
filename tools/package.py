@@ -23,6 +23,7 @@ payload 里的 exe 与 target/release 的 exe 必须是同一个哈希，
 
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -31,12 +32,77 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST = os.path.dirname(ROOT)                       # F:\vibe
-DEPLOY = r"D:\IPRC1000-Native"                     # 图标等静态资源的来源
+# ★ 2026-11-06：静态资源的**唯一来源**必须是源码树，不能是开发机部署目录。
+#   原来指向 D:\IPRC1000-Native\assets：那台机器上的 configure-xiaomi-audio.ps1
+#   是旧名（17092 B），而源码 commands.rs 只找 configure-audio.ps1（17957 B），
+#   于是打出来的 Native zip / payload / Setup 全都装不上默认麦克风，且安装器仍报成功。
+#   ROOT/assets 已由 git 跟踪（见 .gitignore 白名单），换机构建结果一致。
+ASSETS = os.path.join(ROOT, "assets")
 TARGET = os.path.join(ROOT, "target", "release")
 PAYLOAD = os.path.join(ROOT, "src", "payload.zip")
 
 ICONS = ["icon-16.png", "icon-20.png", "icon-32.png", "icon-48.png",
          "icon-64.png", "icon.ico"]
+
+# 包内必须存在的文件（相对包根）。缺一个就不出包。
+REQUIRED = [
+    "IPRC1000-Native.exe",
+    "WinUHid.dll",
+    "使用说明.txt",
+    "一键安装.cmd",
+    "assets/configure-audio.ps1",
+    "assets/VBCABLE_Driver_Pack45.zip",
+    "assets/winuhid/WinUHid.dll",
+    "assets/winuhid/WinUHidPublisher.cer",
+    "assets/winuhid/driver/WinUHidDriver.inf",
+    "assets/winuhid/driver/WinUHidDriver.cat",
+    "assets/winuhid/driver/WinUHidDriver.dll",
+] + ICONS
+
+# 绝不能再混进发行件的历史文件名（与源码查找名不一致 = 客户机必失败）
+FORBIDDEN = ["assets/configure-xiaomi-audio.ps1"]
+
+
+def verify_stage(stg):
+    """打包前的内容断言：包里有什么，比包叫什么名字重要得多。"""
+    missing = [n for n in REQUIRED if not os.path.isfile(os.path.join(stg, n))]
+    if missing:
+        raise SystemExit(f"✗ 包内缺文件：{missing}\n  资源源 {ASSETS}（不要用开发机部署目录）")
+    stale = [n for n in FORBIDDEN if os.path.exists(os.path.join(stg, n))]
+    if stale:
+        raise SystemExit(f"✗ 包内混进了旧文件：{stale}\n  请清理 {ASSETS} 后重打")
+
+    # 脚本名必须与源码查找的名字一致 —— 单方面改任何一边都要在这里炸掉
+    with open(os.path.join(ROOT, "src", "commands.rs"), encoding="utf-8") as f:
+        cmd_src = f.read()
+    names = set(re.findall(r'"(configure-[\w-]+\.ps1)"', cmd_src))
+    if not names:
+        raise SystemExit("✗ commands.rs 里找不到 configure-*.ps1 名字，断言失效")
+    for n in names:
+        if not os.path.isfile(os.path.join(stg, "assets", n)):
+            raise SystemExit(f"✗ 源码要找 assets/{n}，包里却没有")
+
+    # 安装脚本引用的 exe 必须在包里（Win32 变体曾因复用这份 cmd 直接断链）
+    cmd_path = os.path.join(stg, "一键安装.cmd")
+    with open(cmd_path, "rb") as f:
+        raw = f.read()
+    text = raw.decode("gbk", errors="replace")
+    refs = set(re.findall(r'([\w-]+\.exe)\s+--install', text, re.I))
+    if not refs:
+        raise SystemExit("✗ 一键安装.cmd 里找不到 `--install` 调用，断言失效")
+    for exe in refs:
+        if not os.path.isfile(os.path.join(stg, exe)):
+            raise SystemExit(f"✗ 一键安装.cmd 调 {exe}，包里却没有这个文件")
+    print(f"  ✓ 内容断言通过（{len(REQUIRED)} 项必需 / 脚本 {sorted(names)} / 安装入口 {sorted(refs)}）")
+
+
+def verify_dist(zip_path):
+    """对已产出的 zip 做同样一套断言（--check 时验现有包，不重建）。"""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(tmp)
+        verify_stage(tmp)
 
 
 def sha(path):
@@ -159,10 +225,11 @@ def make_payload():
     shutil.copy2(os.path.join(TARGET, "iprc1000_native.exe"),
                  os.path.join(stg, "IPRC1000-Native.exe"))
     for n in ["WinUHid.dll"] + ICONS:
-        shutil.copy2(os.path.join(DEPLOY, n), os.path.join(stg, n))
+        shutil.copy2(os.path.join(ROOT, n), os.path.join(stg, n))
     shutil.copy2(os.path.join(ROOT, "使用说明.txt"), os.path.join(stg, "使用说明.txt"))
     shutil.copy2(os.path.join(ROOT, "一键安装.cmd"), os.path.join(stg, "一键安装.cmd"))
-    shutil.copytree(os.path.join(DEPLOY, "assets"), os.path.join(stg, "assets"))
+    shutil.copytree(ASSETS, os.path.join(stg, "assets"))
+    verify_stage(stg)
 
     if os.path.exists(PAYLOAD):
         os.remove(PAYLOAD)
@@ -197,10 +264,11 @@ def make_dist(v):
     shutil.copy2(os.path.join(TARGET, "iprc1000_native.exe"),
                  os.path.join(stg, "IPRC1000-Native.exe"))
     for n in ["WinUHid.dll"] + ICONS:
-        shutil.copy2(os.path.join(DEPLOY, n), os.path.join(stg, n))
+        shutil.copy2(os.path.join(ROOT, n), os.path.join(stg, n))
     shutil.copy2(os.path.join(ROOT, "使用说明.txt"), os.path.join(stg, "使用说明.txt"))
     shutil.copy2(os.path.join(ROOT, "一键安装.cmd"), os.path.join(stg, "一键安装.cmd"))
-    shutil.copytree(os.path.join(DEPLOY, "assets"), os.path.join(stg, "assets"))
+    shutil.copytree(ASSETS, os.path.join(stg, "assets"))
+    verify_stage(stg)
 
     zip_path = os.path.join(DIST, f"IPRC1000_Native_v{v}.zip")
     if os.path.exists(zip_path):
@@ -232,6 +300,12 @@ def main():
     if "--check" in sys.argv:
         h = verify_payload_matches_exe()
         print(f"  ✓ payload 与 exe 一致（{h[:16]}…）")
+        zp = os.path.join(DIST, f"IPRC1000_Native_v{v}.zip")
+        if os.path.isfile(zp):
+            print(f"  ✓ 校验现有发行包 {os.path.basename(zp)}")
+            verify_dist(zp)
+        else:
+            print("  · 尚无发行 zip（只校验了 payload）")
         return
 
     # ① 主程序
@@ -268,6 +342,7 @@ def main():
     print(f"zip     sha256 {sha(zip_path)}")
     print(f"setup   sha256 {sha(setup_path)}")
     print(f"\n版本 {v} 打包完成。别忘了：git tag -a v{v}")
+    print("本脚本只产 Native 版 zip + Setup；Win32 变体与其它版本暂停发包。")
 
 
 if __name__ == "__main__":

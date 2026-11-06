@@ -370,7 +370,7 @@ unsafe fn refresh_status() {
     ];
     // 改造状态改为一次性提示：仍是键盘 = 会双触发，必须说
     if p.remote_is_keyboard == Some(true) {
-        set_hint("遥控器还是「键盘」模式：按键会打出字母，建议点「一键修复」改造", C_WARN);
+        set_hint("遥控器是「键盘」模式（正确）：按键可读，系统会同时打字母。★ 不要改造，改造会让按键全断", C_WARN);
     }
     for (i, (name, ok)) in items.iter().enumerate() {
         if let Some(h) = STATUS_LABELS.get(i) {

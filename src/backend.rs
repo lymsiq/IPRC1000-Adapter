@@ -2740,6 +2740,9 @@ pub fn run_backend() {
             None => {
                 eprintln!("[!] 虚拟键盘重试 6 次仍失败：{last_err} —— 按键暂不注入。**设备槽位被上次异常退出的进程占着，必须重启电脑才能释放**\
 （重启前按遥控器不会注入，且可能残留某个键按住）");
+                crate::health::set_fatal(format!(
+                    "虚拟键盘 WinUHid 重试 6 次仍失败：{last_err} —— 按键注入不可用（多半是设备槽位被上次异常退出的进程占用，重启电脑可释放）"
+                ));
                 (None, key_sink)
             }
         }
@@ -3169,7 +3172,11 @@ pub fn run_backend() {
     {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("[!] 启动 ETW 会话失败: {e:?}（请以管理员运行）");
+            let msg = format!(
+                "启动 ETW 会话失败：{e:?} —— 语音不可用。请以管理员身份运行本程序；按键走 Raw Input，不受影响。"
+            );
+            eprintln!("[!] {msg}");
+            crate::health::set_fatal(msg);
             return;
         }
     };

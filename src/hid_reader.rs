@@ -1,164 +1,253 @@
-//! 遥控器 HID 输入「消费者」（2026-11-06）
+//! 遥控器输入「消费者」—— **Raw Input 版**（2026-11-06 客户机根因修复）
 //!
-//! ## 为什么必须要有这个东西
+//! ## 为什么不再用 CreateFile 打开 HID 接口
 //!
-//! 「④ 改造遥控器」把 HID 集合节点从键盘改绑成 raw（`input.inf / HID_Raw_Inst.NT`），
-//! 目的是让系统不再把按键当键盘（不打字母）。但真机抓包（`diag-keys.txt`）证明还有下半段后果：
-//!
+//! `enum_hid_paths()` 枚举到的是键盘顶层集合接口：
 //! ```text
-//! 10:05:39.564  TX SIG ConnReq  PSM=HID-Control(0x0011)   ← 控制通道建了
-//! 10:05:39.571  TX SIG CfgRsp                              ← 配置完成
-//!               ← 此后 3.6 秒，空口零业务数据 →
-//! 10:05:43.190  EVT DiscComplete reason=0x08               ← 监督超时踢掉
+//! \\?\hid#{00001124-...}_vid&00020a5c_pid&8502#...#{4d1e55b2-...}\kbd
 //! ```
+//! Windows 自 Vista 起给**键盘/鼠标 HID 顶层集合**加了保护性 ACL：只允许 SYSTEM 打开。
+//! 客户机实测 `CreateFileW` 恒定 `err=5`（ERROR_ACCESS_DENIED），累计 1044 次，
+//! **管理员身份也无效**——这是操作系统安全设计，提权、改共享模式都解决不了。
 //!
-//! 整个抓包里 **PSM 0x0013（HID Interrupt）一次都没被请求**。
-//! 原因是 Windows 蓝牙 HID 的主机侧是「按需建中断通道」：**没有客户端打开输入报告管道，
-//! 就不发这个连接请求**；遥控器没地方投递按键，固件干脆不发报文，4 秒后链路超时断开重连，
-//! 无限循环（`ConnectionCount=33`）。
+//! Raw Input 走窗口消息 `WM_INPUT`：由系统把报文投递到窗口所属桌面，
+//! **不打开设备句柄**，因此完全绕开 ACL，且不需要管理员权限、不需要改造设备。
+//! 交接文档 §3.3 的 Python 原型在客户机实测 20/20 按键全捕获、按下/抬起完整。
 //!
-//! 所以 raw 绑定本身没错，缺的是**消费者**。本模块就是那个消费者：
-//! 打开 HID 集合 → 持续 `ReadFile` → 把 8 字节键盘报告解成 usage 列表 → 交给后端状态机。
+//! ## 为什么仍不能「改造遥控器」
 //!
-//! ## 为什么不再依赖 ETW 抓按键
+//! 改绑成 `input.inf / HID_Raw_Inst.NT` 后 HID 接口不注册、PSM 0x0013 中断通道不建立，
+//! 空口连 HIDP 报文都没有 ⇒ 按键与音频一起全断（`device_probe.rs:481-500`）。
+//! 保持键盘模式，代价只是系统会同时打字母（已知边界）。
 //!
-//! ETW 只能看到**空口上真有的报文**。中断通道不建立时，空口上本来就没有按键报文，
-//! ETW 再准也抓不到（实测 `hidReports=0` 而 `otherEvents=1049`）。
-//! 现在按键走 HID 直读（有数据就一定读得到），ETW 继续只为**音频**服务（语音键的 ACL 音频帧）。
+//! ## 语义关键点（照交接文档 §5.3 逐条落实）
 //!
-//! ## 与 kbdhid 的关系
+//! 1. **按设备过滤** `is_remote_name()`：设备名含 `0A5C` + `8502`，否则物理键盘会被当遥控器。
+//! 2. **快照语义**：`report::diff()` 要的是"当前按住哪些 usage"，不是增量事件。
+//!    用 `HELD[256]` 维护，每次事件产出全量列表。
+//! 3. **全松开必须 dispatch 空列表**：语音键松手只认空报文（`report::is_empty`），
+//!    缺了这步长按语音永远不结束。
+//! 4. **`RIDEV_INPUTSINK`**：窗口隐藏且不在前台也要收。
+//! 5. **独立线程 + 独立隐藏窗口**，不与 egui / Win32 主循环耦合，窗口不 ShowWindow。
 //!
-//! · 已改造（raw）：系统没有客户端，只有我们读 → 不打字母、单触发。
-//! · 未改造（键盘）：kbdhid 也在读，HID 允许多个句柄共享打开（`FILE_SHARE_READ|WRITE`），
-//!   我们会**同时**收到按键 → 此时会出现"打字母 + 注入"双触发。
-//!   所以本模块启动时会检查设备是不是还挂在键盘类下，是的话只打一行提醒，不做额外动作
-//!   （改造与否仍由用户决定，和原来一样）。
+//! ## VKey → usage 反查表为什么能成立
+//!
+//! 遥控器发的是**自己的 usage 编号**（`keymap.rs` 开头有真机结论），但系统按标准
+//! 键盘页解释它们并给出 VKey。逐个反查可完整还原 23 键，例如：
+//! `power=0x17`('t')→VK 0x54、`voice=0x10`('m')→VK 0x4D、`back=0x09`('f')→VK 0x46、
+//! `rewind=0x36`(',')→VK_OEM_COMMA、`play_pause=0x31`('\\')→VK_OEM_5、
+//! 方向键 `0x4F/0x50/0x51/0x52`→VK Right/Left/Down/Up。见 `vk_to_usage()`。
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::ffi::c_void;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
-use windows::core::PCWSTR;
-use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, HANDLE};
-use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+use windows::core::w;
+use windows::Win32::Foundation::{GetLastError, HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::{
+    GetRawInputData, GetRawInputDeviceInfoW, GetRawInputDeviceList, RegisterRawInputDevices,
+    HRAWINPUT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTDEVICELIST, RAWINPUTHEADER, RIDEV_INPUTSINK,
+    RIDI_DEVICENAME, RID_INPUT, RIM_TYPEKEYBOARD,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, RegisterClassW,
+    TranslateMessage, MSG, WINDOW_EX_STYLE, WNDCLASSW, WS_OVERLAPPED,
 };
 
-// 直接用 kernel32 的 ReadFile：windows crate 里它的签名带 OVERLAPPED 参数，
-// 需要额外开 Win32_System_IO feature 才导出 —— 为一个阻塞读多开一个 feature 不值。
-#[link(name = "kernel32")]
-extern "system" {
-    fn ReadFile(
-        hfile: HANDLE,
-        lpbuffer: *mut core::ffi::c_void,
-        nbytestoread: u32,
-        lpnumberofbytesread: *mut u32,
-        lpoverlapped: *mut core::ffi::c_void,
-    ) -> i32;
+/// 已读到的按键事件总数（界面 / 统计可见）
+pub static REPORTS: AtomicU64 = AtomicU64::new(0);
+/// Raw Input 注册成功次数（原义"打开句柄次数"，语义对齐到新通道）
+pub static REOPENED: AtomicU64 = AtomicU64::new(0);
+/// 设备巡检里"没发现遥控器"的轮数（诊断：休眠 / 未配对 / 被改坏）
+pub static MISS: AtomicU64 = AtomicU64::new(0);
+/// 最近一次收到按键的时刻（Unix ms）。`is_key_online()` 靠它判三态。
+pub static LAST_REPORT_MS: AtomicU64 = AtomicU64::new(0);
+/// 解析失败 / 未映射 VKey 的累计次数
+pub static FAILED: AtomicU64 = AtomicU64::new(0);
+/// 当前系统 Raw Input 设备总数
+pub static TOTAL_SEEN: AtomicU64 = AtomicU64::new(0);
+/// 只含 0x0C 的快照数（交接文档 §6：需真机确认 0x0C 是心跳还是真实键）
+pub static GHOST_SNAPSHOTS: AtomicU64 = AtomicU64::new(0);
+/// WM_INPUT 已到达、但设备名没被认领而丢弃的次数（区分「系统没投递」与「过滤规则错」）
+pub static FILTERED: AtomicU64 = AtomicU64::new(0);
+/// RIDI_DEVICENAME 读取失败次数（名字读不出来 = 过滤必然全落空，必须留痕）
+pub static NAME_FAIL: AtomicU64 = AtomicU64::new(0);
+/// 诊断逃生舱：`IPRC1000_RAWINPUT_ANY=1` 时不按设备名过滤，用来确认 WM_INPUT 到底有没有到。
+static FORCE_ANY: AtomicBool = AtomicBool::new(false);
+/// 巡检里是否见过 VID/PID 精确匹配（见过就关掉蓝牙兜底，避免误认蓝牙物理键盘）。
+static EXACT_SEEN: AtomicBool = AtomicBool::new(false);
+/// 「已认领设备」只打一次日志，避免刷屏。
+static CLAIM_LOGGED: AtomicBool = AtomicBool::new(false);
+
+/// 当前按住的 usage 集合 —— 模拟 HID 报告的快照语义
+static HELD: Mutex<[bool; 256]> = Mutex::new([false; 256]);
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
-/// 已读到的报告总数（诊断用，界面/日志可看）
-pub static REPORTS: AtomicU64 = AtomicU64::new(0);
-/// 已成功打开过设备几次（掉线重连会 +1）
-pub static REOPENED: AtomicU64 = AtomicU64::new(0);
-/// 枚举不到接口的轮数（诊断：用来区分"遥控器休眠"和"改造后 phantom"）
-pub static MISS: AtomicU64 = AtomicU64::new(0);
-/// 最近一次读到 HID 报告的时刻（Unix ms）。界面/统计用它判断"按键通道是否真的在用"。
-pub static LAST_REPORT_MS: AtomicU64 = AtomicU64::new(0);
-/// 打开失败的累计次数（日志按次数节流）
-pub static FAILED: AtomicU64 = AtomicU64::new(0);
-/// 上一轮枚举看到的**全系统** HID 接口总数（不是匹配数）——排障用来区分
-/// "系统一个 HID 都没有" 和 "有 HID 但没有遥控器的"
-pub static TOTAL_SEEN: AtomicU64 = AtomicU64::new(0);
-/// ReadFile 失败次数（"打开成功但立刻掉线"的次数）
-pub static RDERR: AtomicU64 = AtomicU64::new(0);
-
-/// 距上次读到报告多少毫秒（u64::MAX = 从未读到过）
+/// 距上次收到按键多少毫秒（u64::MAX = 从未收到）
 pub fn report_age_ms() -> u64 {
     let t = LAST_REPORT_MS.load(Ordering::Relaxed);
     if t == 0 {
         return u64::MAX;
     }
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-    now.saturating_sub(t)
+    now_ms().saturating_sub(t)
 }
 
-fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
+/// 精确认领：VID/PID 或设备名带 IPRC。
+fn is_exact_remote(name: &str) -> bool {
+    let u = name.to_uppercase();
+    (u.contains("0A5C") && (u.contains("8502") || u.contains("IPRC"))) || u.contains("IPRC")
 }
 
-/// 枚举本机所有 HID 接口路径（SetupAPI）。
+/// 认领规则：返回 Some(原因) 表示这是遥控器，原因写进日志便于回溯。
 ///
-/// ★ 必须走「设备接口」而不是「设备实例」：CreateFile 打开 HID 集合要的是
-///   `\\?\HID#<硬件ID>#<实例>#{接口GUID}` 这种**接口路径**，
-///   用注册表 Enum\HID 的键名拼出来的是设备实例路径 —— 实测打不开（"找不到文件"）。
-fn enum_hid_paths() -> Vec<String> {
-    use windows::Win32::Devices::DeviceAndDriverInstallation::{
-        SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInterfaces, SetupDiGetClassDevsW,
-        SetupDiGetDeviceInterfaceDetailW, DIGCF_DEVICEINTERFACE, DIGCF_PRESENT,
-        SP_DEVICE_INTERFACE_DATA, SP_DEVICE_INTERFACE_DETAIL_DATA_W,
-    };
-    use windows::Win32::Devices::HumanInterfaceDevice::HidD_GetHidGuid;
-
-    let mut out = Vec::new();
-    unsafe {
-        let guid = HidD_GetHidGuid();
-        let set_res = SetupDiGetClassDevsW(
-            Some(&guid),
-            None,
-            None,
-            DIGCF_PRESENT | DIGCF_DEVICEINTERFACE,
-        );
-        let Ok(set) = set_res else {
-            eprintln!("[HID] SetupDiGetClassDevs 失败 err={}", windows::Win32::Foundation::GetLastError().0);
-            return out;
-        };
-        let mut idx = 0u32;
-        loop {
-            let mut did = SP_DEVICE_INTERFACE_DATA {
-                cbSize: std::mem::size_of::<SP_DEVICE_INTERFACE_DATA>() as u32,
-                ..Default::default()
-            };
-            if SetupDiEnumDeviceInterfaces(set, None, &guid, idx, &mut did).is_err() {
-                break;
-            }
-            idx += 1;
-            let mut need = 0u32;
-            let _ = SetupDiGetDeviceInterfaceDetailW(set, &did, None, 0, Some(&mut need), None);
-            if need == 0 {
-                continue;
-            }
-            let mut buf = vec![0u8; need as usize];
-            let det = buf.as_mut_ptr() as *mut SP_DEVICE_INTERFACE_DETAIL_DATA_W;
-            (*det).cbSize = std::mem::size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>() as u32;
-            if SetupDiGetDeviceInterfaceDetailW(set, &did, Some(det), need, None, None).is_err() {
-                continue;
-            }
-            // DevicePath 是 [u16;1] 的变长尾巴，从首地址读到 0 为止
-            let base = (*det).DevicePath.as_ptr();
-            let mut n = 0usize;
-            while *base.add(n) != 0 {
-                n += 1;
-            }
-            let path = String::from_utf16_lossy(std::slice::from_raw_parts(base, n));
-            TOTAL_SEEN.fetch_add(1, Ordering::Relaxed);
-            // ★ 匹配放宽到「含 0A5C 且含 8502」：
-            //   接口路径里 VID 的写法随蓝牙栈变化（`vid_00020a5c` / `vid_0a5c` / 带 `0002` 前缀），
-            //   锁死某一种写法会漏设备（真机已见两种）。两个独立字段都命中才算，误命中概率极低。
-            let u = path.to_uppercase();
-            if u.contains("0A5C") && u.contains("8502") {
-                out.push(path);
-            }
-        }
-        let _ = SetupDiDestroyDeviceInfoList(set);
+/// ★ 2026-11-06 客户机复盘：只认 `0A5C+8502` 太脆。hidbth 给蓝牙 HID 生成的
+///   `RIDI_DEVICENAME` 可能不带 VID/PID（BTHENUM 路径里只有服务 GUID + 实例号），
+///   硬编码会让 WM_INPUT 全部静默丢弃，而日志只显示「暂未发现设备」——
+///   分不清「设备不在」「名字读不出来」「过滤规则不对」三种完全不同的故障。
+fn remote_reason(name: &str) -> Option<&'static str> {
+    if FORCE_ANY.load(Ordering::Relaxed) {
+        return Some("强制放行(诊断模式)");
     }
-    out
+    if is_exact_remote(name) {
+        return Some("VID/PID 精确匹配");
+    }
+    // 兜底：蓝牙 HID 服务 GUID {00001124-0000-1000-8000-00805F9B34FB}。
+    // 仅当系统里从没出现过精确匹配时生效，避免误认蓝牙物理键盘；
+    // 实际按键另有 RIM_TYPEKEYBOARD 这道闸。
+    if !EXACT_SEEN.load(Ordering::Relaxed) {
+        let u = name.to_uppercase();
+        if u.contains("BTHENUM") && u.contains("00001124") {
+            return Some("蓝牙HID兜底(无精确匹配)");
+        }
+    }
+    None
 }
 
-/// 报文 → usage 列表。**解析逻辑在 `report::from_report_bytes`**，两条路径共用。
-fn decode(buf: &[u8]) -> Vec<u8> {
-    iprc1000_native::report::from_report_bytes(buf)
+fn is_remote_name(name: &str) -> bool {
+    remote_reason(name).is_some()
+}
+
+/// 读一个 Raw Input 设备的接口名（用于按设备过滤）。
+///
+/// ★ 2026-11-06 客户机复盘：原来「先问大小、再把同一个数值回填」的两段式调用有坑——
+///   `GetRawInputDeviceInfoW(RIDI_DEVICENAME)` 的 `pcbSize` 文档写**字节数**，
+///   实际对 Unicode 设备名常按**字符数**解释。回填值一旦被判成「缓冲区不足」就返回
+///   `u32::MAX`，`device_name()` 静默返回 None ⇒ 设备名过滤永远不命中 ⇒ WM_INPUT 全丢。
+///   改成一次性给足 512 WCHAR 的固定缓冲、按字节填 size、从第一个 NUL 截断：
+///   两种语义下都成立，且不再依赖返回值的解释。
+fn device_name(h: HANDLE) -> Option<String> {
+    let mut buf = vec![0u16; 512];
+    let mut size = (buf.len() * std::mem::size_of::<u16>()) as u32;
+    let ret = unsafe {
+        GetRawInputDeviceInfoW(
+            h,
+            RIDI_DEVICENAME,
+            Some(buf.as_mut_ptr() as *mut c_void),
+            &mut size,
+        )
+    };
+    if ret == u32::MAX {
+        return None;
+    }
+    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    if end == 0 {
+        return None;
+    }
+    Some(String::from_utf16_lossy(&buf[..end]))
+}
+
+/// 列出全部 Raw Input 设备名（不打开句柄，因此不受 ACL 限制）。
+fn list_devices() -> Vec<String> {
+    let sz = std::mem::size_of::<RAWINPUTDEVICELIST>() as u32;
+    let mut n = 0u32;
+    unsafe { GetRawInputDeviceList(None, &mut n, sz); }
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut devs = vec![RAWINPUTDEVICELIST::default(); n as usize];
+    let got = unsafe { GetRawInputDeviceList(Some(devs.as_mut_ptr()), &mut n, sz) };
+    if got == u32::MAX {
+        return Vec::new();
+    }
+    devs[..(n as usize).min(devs.len())]
+        .iter()
+        .filter_map(|d| match device_name(d.hDevice) {
+            Some(s) => Some(s),
+            None => {
+                let k = NAME_FAIL.fetch_add(1, Ordering::Relaxed) + 1;
+                if k <= 3 || k % 100 == 0 {
+                    let e = unsafe { GetLastError().0 };
+                    eprintln!("[HID] RIDI_DEVICENAME 读取失败（累计 {k} 次）err={e}");
+                }
+                None
+            }
+        })
+        .collect()
+}
+
+/// VKey（系统对遥控器 usage 的标准键盘页解释）→ 遥控器原始 usage。
+///
+/// ★ 覆盖 `keymap::PLAIN` 的全部 23 键，不只是常用键：
+///   OEM 键（0x2D..0x38）与数字键必须映射，否则 `rewind(0x36)`、
+///   `play_pause(0x31)`、`volume_up(0x1F)` 会被静默丢掉。
+fn vk_to_usage(vk: u16) -> Option<u8> {
+    Some(match vk {
+        // 字母 A-Z → 0x04..0x1D（含 voice=0x10 对应 'm'/VK 0x4D）
+        0x41..=0x5A => (vk - 0x41) as u8 + 0x04,
+        // 数字 1..9 / 0 → 0x1E..0x27
+        0x31..=0x39 => (vk - 0x31) as u8 + 0x1E,
+        0x30 => 0x27,
+        // 控制键
+        0x0D => 0x28, // Enter / OK
+        0x1B => 0x29, // Esc
+        0x08 => 0x2A, // Backspace
+        0x09 => 0x2B, // Tab
+        0x20 => 0x2C, // Space
+        // 符号键（US 键盘页 0x2D..0x38）
+        0xBD => 0x2D, // -        VK_OEM_MINUS
+        0xBB => 0x2E, // =        VK_OEM_PLUS
+        0xDB => 0x2F, // [        VK_OEM_4
+        0xDD => 0x30, // ]        VK_OEM_6
+        0xDC => 0x31, // \        VK_OEM_5   ← play_pause
+        0xBA => 0x33, // ;        VK_OEM_1
+        0xDE => 0x34, // '        VK_OEM_7
+        0xC0 => 0x35, // `        VK_OEM_3
+        0xBC => 0x36, // ,        VK_OEM_COMMA ← rewind
+        0xBE => 0x37, // .        VK_OEM_PERIOD
+        0xBF => 0x38, // /        VK_OEM_2
+        // 编辑键
+        0x2D => 0x49, // Insert
+        0x24 => 0x4A, // Home
+        0x21 => 0x4B, // PageUp
+        0x2E => 0x4C, // Delete
+        0x23 => 0x4D, // End
+        0x22 => 0x4E, // PageDown
+        // 方向键（遥控器 up/down/left/right）
+        0x27 => 0x4F, // Right
+        0x25 => 0x50, // Left
+        0x28 => 0x51, // Down
+        0x26 => 0x52, // Up
+        // 功能键
+        0x70..=0x7B => (vk - 0x70) as u8 + 0x3A, // F1..F12
+        0x14 => 0x39,                            // CapsLock
+        // 修饰键
+        0xA0 | 0x10 => 0xE1, // LShift
+        0xA1 => 0xE5,        // RShift
+        0xA2 | 0x11 => 0xE0, // LCtrl
+        0xA3 => 0xE4,        // RCtrl
+        0xA4 | 0x12 => 0xE2, // LAlt
+        0xA5 => 0xE6,        // RAlt
+        0x5B => 0xE3,        // LWin
+        0x5C => 0xE7,        // RWin
+        _ => return None,
+    })
 }
 
 fn dispatch(usages: &[u8]) {
@@ -167,166 +256,324 @@ fn dispatch(usages: &[u8]) {
     b.handle_hid_report(usages);
 }
 
-/// 启动消费者线程（幂等：只会起一次）
+/// 收到一个 Raw Input 键事件：更新 HELD，产出**当前全量快照**。
+fn on_key(vk: u16, down: bool) {
+    let Some(u) = vk_to_usage(vk) else {
+        // 静默丢键是排查噩梦：留痕，方便真机补表（交接文档 §6 的确认流程）
+        let n = FAILED.fetch_add(1, Ordering::Relaxed) + 1;
+        if n <= 10 || n % 50 == 0 {
+            eprintln!("[HID] 未映射 VKey=0x{vk:02X}（累计 {n} 次）—— 请把该键补进 vk_to_usage");
+        }
+        return;
+    };
+    let snapshot = {
+        let Ok(mut g) = HELD.lock() else { return };
+        g[u as usize] = down;
+        (1..256usize).filter(|&i| g[i]).map(|i| i as u8).collect::<Vec<u8>>()
+    };
+    // 交接文档 §6：0x0C 既可能是"按住期间的心跳"，也可能是真实键（I）。
+    // Raw Input 没有 HID 层心跳，但 backend 仍会把只含 0x0C 的快照判成幽灵报文丢掉。
+    // 保留原行为，单独计数，等真机逐键确认后再决定是否放宽。
+    if snapshot.len() == 1 && snapshot[0] == 0x0C {
+        let n = GHOST_SNAPSHOTS.fetch_add(1, Ordering::Relaxed) + 1;
+        if n == 1 {
+            eprintln!("[HID] ⚠ 出现只含 0x0C 的快照（会被 report::GHOST 丢弃）；真机确认见交接文档 §6");
+        }
+    }
+    REPORTS.fetch_add(1, Ordering::Relaxed);
+    LAST_REPORT_MS.store(now_ms(), Ordering::Relaxed);
+    // snapshot 为空 = 所有键松开 ⇒ `report::is_empty` 为 true ⇒ 语音长按正确结束
+    dispatch(&snapshot);
+}
+
+extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    const WM_INPUT_MSG: u32 = 0x00FF;
+    if msg == WM_INPUT_MSG {
+        let mut size = 0u32;
+        let hr = HRAWINPUT(lparam.0);
+        unsafe {
+            GetRawInputData(
+                hr,
+                RID_INPUT,
+                None,
+                &mut size,
+                std::mem::size_of::<RAWINPUTHEADER>() as u32,
+            );
+        }
+        if size > 0 && size <= 4096 {
+            let mut buf = vec![0u8; size as usize];
+            let got = unsafe {
+                GetRawInputData(
+                    hr,
+                    RID_INPUT,
+                    Some(buf.as_mut_ptr() as *mut c_void),
+                    &mut size,
+                    std::mem::size_of::<RAWINPUTHEADER>() as u32,
+                )
+            };
+            if got == size {
+                let ri = unsafe { &*(buf.as_ptr() as *const RAWINPUT) };
+                if ri.header.dwType == RIM_TYPEKEYBOARD.0 {
+                    let name = device_name(ri.header.hDevice).unwrap_or_default();
+                    let kb = unsafe { ri.data.keyboard };
+                    if let Some(reason) = remote_reason(&name) {
+                        if is_exact_remote(&name) {
+                            EXACT_SEEN.store(true, Ordering::Relaxed);
+                        }
+                        if !CLAIM_LOGGED.swap(true, Ordering::Relaxed) {
+                            eprintln!("[HID] ✓ 已认领遥控器 Raw Input 设备（{reason}）：{name}");
+                        }
+                        // Raw Input 的 keyboard.Message 是 WM_KEYDOWN/UP（含 SYS 变体）
+                        let down = matches!(kb.Message, 0x0100 | 0x0104);
+                        let up = matches!(kb.Message, 0x0101 | 0x0105);
+                        if down || up {
+                            on_key(kb.VKey, down);
+                        }
+                    } else {
+                        // ★ 关键可观测性：区分「系统根本没投递 WM_INPUT」与「名字没认上」。
+                        //   客户机日志里长期只有「暂未发现设备」，就是缺了这一行。
+                        let n = FILTERED.fetch_add(1, Ordering::Relaxed) + 1;
+                        if n == 1 || n % 50 == 0 {
+                            eprintln!(
+                                "[HID] WM_INPUT 已到达但未认领（累计 {n} 次）VKey=0x{:02X} name={name:?}",
+                                kb.VKey
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        return LRESULT(0);
+    }
+    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+}
+
+/// 启动消费链路（幂等，只会起一次）。
 pub fn start() {
     static STARTED: std::sync::Once = std::sync::Once::new();
     STARTED.call_once(|| {
-        // 改造状态影响行为：已改造 = 系统没有别的客户端（我们独占，不会打字母）；
-        // 仍是键盘 = kbdhid 也在读，按键会"打字母 + 执行映射"双触发。必须说清楚。
+        let force = std::env::var("IPRC1000_RAWINPUT_ANY")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        FORCE_ANY.store(force, Ordering::Relaxed);
+        if force {
+            eprintln!("[HID] ⚠ 诊断模式 IPRC1000_RAWINPUT_ANY=1：不按设备名过滤，物理键盘也会触发动作");
+        }
+
         match crate::device_probe::remote_still_keyboard() {
             Some(true) => eprintln!(
-                "[HID] ⚠ 遥控器仍是「键盘」：按键会一边往文档里打字母、一边执行映射。\
-                 请先在「环境与安装」点 ④ 改造遥控器。"
+                "[HID] 遥控器 HID 节点是「键盘」模式（正确）。★ 不要改造。\
+                 注意：这只说明注册表节点在，**不代表 Raw Input 列表里认得到它**。"
             ),
-            Some(false) => eprintln!("[HID] 遥控器已是 HID 设备（不会有系统侧按键泄漏）"),
+            Some(false) => eprintln!(
+                "[HID] ⚠ 遥控器已被改绑成 raw：HID 接口不再注册、中断通道不建立，按键与音频会全断。请运行 --restore-keyboard 恢复键盘模式。"
+            ),
             None => eprintln!("[HID] 未检测到遥控器 HID 节点（未连接 / 休眠）"),
         }
-        eprintln!("[HID] 消费者线程启动中…");
+
+        // ★ 启动时就把 Raw Input 的**真实设备名**打出来。客户机日志里长期是
+        //   「键盘模式正确」+「暂未发现设备」并存，却看不到任何设备名，
+        //   导致分不清「设备不在 / 名字读不出来 / 过滤规则不对」。
+        {
+            let names = list_devices();
+            TOTAL_SEEN.store(names.len() as u64, Ordering::Relaxed);
+            let exact = names.iter().filter(|n| is_exact_remote(n)).count();
+            if exact > 0 {
+                EXACT_SEEN.store(true, Ordering::Relaxed);
+            }
+            eprintln!("[HID] 启动枚举 Raw Input：{total} 个设备，VID/PID 精确匹配 {exact} 个", total = names.len());
+            for n in names.iter().take(12) {
+                eprintln!("[HID]   · [{}] {n}", remote_reason(n).unwrap_or("未认领"));
+            }
+            if names.is_empty() {
+                eprintln!("[HID]   · 列表为空：遥控器休眠/蓝牙断链，或 RIDI_DEVICENAME 读取失败");
+            }
+        }
+
+        // 轻量设备巡检：保留 MISS / TOTAL_SEEN 的可观测性（区分"没唤醒"和"读不到"）
         std::thread::Builder::new()
-            .name("hid-consumer".into())
-            .spawn(|| {
-                loop {
-                    let paths = enum_hid_paths();
-                    if !paths.is_empty() {
-                        eprintln!("[HID] 枚举到 {} 个遥控器接口", paths.len());
-                    }
-                    if paths.is_empty() {
-                        // 未发现接口：可能是遥控器休眠，或改造成 raw 后节点处于 phantom
-                        // （只在短窗口里出现）。500ms 轮一次，尽快抢到窗口。
-                        MISS.fetch_add(1, Ordering::Relaxed);
-                        if MISS.load(Ordering::Relaxed) % 60 == 1 {
-                            eprintln!("[HID] 暂未发现遥控器接口（正常：休眠或 phantom 窗口之间）");
+            .name("hid-device-watch".into())
+            .spawn(|| loop {
+                let names = list_devices();
+                TOTAL_SEEN.store(names.len() as u64, Ordering::Relaxed);
+                if names.iter().any(|n| is_exact_remote(n)) {
+                    EXACT_SEEN.store(true, Ordering::Relaxed);
+                }
+                let remote = names.iter().filter(|n| is_remote_name(n)).count();
+                if remote == 0 {
+                    let n = MISS.fetch_add(1, Ordering::Relaxed) + 1;
+                    if n == 1 || n % 15 == 0 {
+                        eprintln!(
+                            "[HID] 暂未认领遥控器 Raw Input 设备（累计 {n} 轮；枚举 {} 个；WM_INPUT 到达但被过滤 {} 次；名字读取失败 {} 次）",
+                            names.len(),
+                            FILTERED.load(Ordering::Relaxed),
+                            NAME_FAIL.load(Ordering::Relaxed),
+                        );
+                        for s in names.iter().take(12) {
+                            eprintln!("[HID]   · {s}");
                         }
-                        std::thread::sleep(Duration::from_millis(500));
-                        continue;
                     }
-                    let mut opened = false;
-                    for p in paths {
-                        let w = wide(&p);
-                        let h = unsafe {
-                            CreateFileW(
-                                PCWSTR(w.as_ptr()),
-                                GENERIC_READ.0,
-                                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                None,
-                                OPEN_EXISTING,
-                                FILE_ATTRIBUTE_NORMAL,
-                                None,
-                            )
-                        };
-                        let err = unsafe { windows::Win32::Foundation::GetLastError().0 };
-                        let Ok(h) = h else {
-                            // 节流：500ms 一轮，phantom 边缘会刷屏。每 20 次（约 10 秒）记一条。
-                            let n = FAILED.fetch_add(1, Ordering::Relaxed) + 1;
-                            if n == 1 || n % 20 == 0 {
-                                eprintln!("[HID] 打开失败 err={err}（累计 {n} 次）path={p}");
-                            }
-                            continue;
-                        };
-                        if h.is_invalid() {
-                            eprintln!("[HID] 句柄无效 err={err} path={p}");
-                            continue;
-                        }
-                        opened = true;
-                        REOPENED.fetch_add(1, Ordering::Relaxed);
-                        eprintln!("[HID] 已打开遥控器输入管道（成为 HID 消费者，中断通道应随即建立）");
-                        // 阻塞读；设备掉线时 ReadFile 返回失败，退出内层循环去重连
-                        let mut buf = [0u8; 64];
-                        loop {
-                            let mut n = 0u32;
-                            let ok = unsafe {
-                                ReadFile(
-                                    h,
-                                    buf.as_mut_ptr() as *mut core::ffi::c_void,
-                                    buf.len() as u32,
-                                    &mut n,
-                                    std::ptr::null_mut(),
-                                )
-                            };
-                            if ok == 0 {
-                                // 打开成功但读失败 = 设备在"打开后立刻掉线"。
-                                // 这个错误码是判断"phantom 抖动"还是"权限/独占"的唯一线索。
-                                let e = unsafe { windows::Win32::Foundation::GetLastError().0 };
-                                let n = RDERR.fetch_add(1, Ordering::Relaxed) + 1;
-                                if n == 1 || n % 20 == 0 {
-                                    eprintln!("[HID] 读取中断 err={e}（累计 {n} 次）⇒ 重连");
-                                }
-                                break;
-                            }
-                            if n == 0 {
-                                continue;
-                            }
-                            let usages = decode(&buf[..n as usize]);
-                            REPORTS.fetch_add(1, Ordering::Relaxed);
-                            LAST_REPORT_MS.store(
-                                std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .map(|d| d.as_millis() as u64)
-                                    .unwrap_or(0),
-                                Ordering::Relaxed,
-                            );
-                            dispatch(&usages);
-                        }
-                        unsafe { let _ = CloseHandle(h); }
-                        eprintln!("[HID] 设备断开，准备重连");
-                        break;
+                }
+                std::thread::sleep(Duration::from_secs(2));
+            })
+            .ok();
+
+        // Raw Input 消息线程：独立隐藏窗口 + 自己的消息队列
+        std::thread::Builder::new()
+            .name("hid-rawinput".into())
+            .spawn(|| unsafe {
+                let hmod = GetModuleHandleW(None).unwrap_or_default();
+                let hinst = HINSTANCE(hmod.0);
+                let cls = w!("IPRC1000RawInput");
+                let wc = WNDCLASSW {
+                    lpfnWndProc: Some(wndproc),
+                    hInstance: hinst,
+                    lpszClassName: cls,
+                    ..Default::default()
+                };
+                if RegisterClassW(&wc) == 0 {
+                    let e = GetLastError().0;
+                    if e != 1410 {
+                        // 1410 = ERROR_CLASS_ALREADY_EXISTS（多次启动同一进程内不重复注册）
+                        eprintln!("[HID] RegisterClassW 失败 err={e}");
+                        return;
                     }
-                    if !opened {
-                        std::thread::sleep(Duration::from_millis(500));
-                    } else {
-                        std::thread::sleep(Duration::from_millis(300));
-                    }
+                }
+                let hwnd = CreateWindowExW(
+                    WINDOW_EX_STYLE(0),
+                    cls,
+                    w!("iprc-rawinput"),
+                    WS_OVERLAPPED,
+                    0, 0, 0, 0,
+                    None, None, hinst, None,
+                );
+                if hwnd.0 == 0 {
+                    eprintln!("[HID] CreateWindowExW 失败 err={}", GetLastError().0);
+                    return;
+                }
+                let rid = RAWINPUTDEVICE {
+                    usUsagePage: 0x01, // Generic Desktop
+                    usUsage: 0x06,     // Keyboard
+                    dwFlags: RIDEV_INPUTSINK, // 窗口不在前台也收
+                    hwndTarget: hwnd,
+                };
+                if let Err(e) = RegisterRawInputDevices(
+                    &[rid],
+                    std::mem::size_of::<RAWINPUTDEVICE>() as u32,
+                ) {
+                    eprintln!("[HID] RegisterRawInputDevices 失败 {e}");
+                    return;
+                }
+                REOPENED.fetch_add(1, Ordering::Relaxed);
+                eprintln!("[HID] Raw Input 已注册（不用打开 \\kbd，绕开 ACL）");
+
+                let mut msg = MSG::default();
+                while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
                 }
             })
             .ok();
     });
 }
 
-/// 现场诊断：`--hid-probe`。列出所有含 0a5c 的 HID 接口、尝试打开、报告结果。
-///
-/// 为什么需要：客户机器上"按键完全没反应"可能是两回事 ——
-///   ① 接口存在但没人读（本模块就是来解决的）
-///   ② 接口根本不存在（raw 绑定后节点 phantom，或遥控器没连）
-/// 一条命令就能分清，不用再猜。
+/// 现场诊断：`--hid-probe`。列 Raw Input 设备，**不再尝试打开 \kbd**。
 pub fn probe() {
-    TOTAL_SEEN.store(0, Ordering::Relaxed);
-    let paths = enum_hid_paths();
-    let total = TOTAL_SEEN.load(Ordering::Relaxed);
-    // ★ 这里的 paths 已经按 VID/PID 过滤过，不能叫"总数"——
-    //   原来的文案是"HID 接口总数（含遥控器的）：0"，现场会误读成"这台机器没有任何 HID 设备"，
-    //   从而否掉整个方向。分开报：全系统多少、匹配遥控器多少。
-    println!("全系统 HID 接口：{total} 个");
-    println!("其中匹配遥控器（0A5C+8502）：{} 个", paths.len());
-    if paths.is_empty() {
-        if total == 0 {
-            println!("★ 系统里一个 HID 接口都没有 —— 这是异常情况（HID 服务没起来？）");
-        } else {
-            println!("★ 有 HID 接口，但没有遥控器的 —— 遥控器休眠/未连接，或改造成 raw 后接口未暴露");
-        }
-        return;
+    FORCE_ANY.store(
+        std::env::var("IPRC1000_RAWINPUT_ANY").map(|v| v == "1").unwrap_or(false),
+        Ordering::Relaxed,
+    );
+    let names = list_devices();
+    TOTAL_SEEN.store(names.len() as u64, Ordering::Relaxed);
+    println!("全系统 Raw Input 设备：{} 个", names.len());
+    // ★ 列**全部**设备名而非只列匹配的：客户机定位靠的正是这份清单。
+    for n in &names {
+        println!("  [{}] {n}", remote_reason(n).unwrap_or("未认领"));
     }
-    for p in &paths {
-        let w = wide(p);
-        let h = unsafe {
-            CreateFileW(
-                PCWSTR(w.as_ptr()),
-                GENERIC_READ.0,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                None,
-                OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL,
-                None,
-            )
-        };
-        match h {
-            Ok(hh) if !hh.is_invalid() => {
-                println!("可打开 ✓  {p}");
-                unsafe { let _ = CloseHandle(hh); }
-            }
-            _ => {
-                let e = unsafe { windows::Win32::Foundation::GetLastError().0 };
-                println!("打不开 ✗  err={e}  {p}");
-            }
+    let remote: Vec<&String> = names.iter().filter(|n| is_remote_name(n)).collect();
+    println!("其中认领为遥控器：{} 个", remote.len());
+    println!("按键通道：Raw Input（WM_INPUT），不打开 \\kbd，绕开 SYSTEM-only ACL，无需管理员");
+    println!(
+        "运行时统计：WM_INPUT 到达但被过滤 {} 次 / RIDI_DEVICENAME 失败 {} 次 / 已收按键 {} 条",
+        FILTERED.load(Ordering::Relaxed),
+        NAME_FAIL.load(Ordering::Relaxed),
+        REPORTS.load(Ordering::Relaxed),
+    );
+    if remote.is_empty() {
+        println!("★ 没认领到遥控器 —— 把上面这份设备清单发回来即可精确适配过滤规则。");
+        println!("  临时验证：设环境变量 IPRC1000_RAWINPUT_ANY=1 后重跑主程序，若按键生效即证明是过滤规则问题。");
+        println!("  若清单为空：按一下唤醒 / 重新配对；被改造过则先 --restore-keyboard 并重启蓝牙适配器。");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 遥控器 23 键：系统按标准键盘页解释出来的 VKey，必须能反查回原始 usage。
+    /// 少了任何一条，那个键就会在 Raw Input 通道上静默失效（且界面毫无提示）。
+    #[test]
+    fn all_remote_usages_round_trip() {
+        // (遥控器 usage, 系统 VKey) —— 与 keymap::PLAIN 逐行对齐
+        let cases: &[(u8, u16)] = &[
+            (0x17, 0x54), // power   't'
+            (0x09, 0x46), // back    'f'
+            (0x11, 0x4E), // menu    'n'
+            (0x07, 0x44), // exit    'd'
+            (0x0B, 0x48), // info    'h'
+            (0x28, 0x0D), // ok      Enter
+            (0x52, 0x26), // up
+            (0x51, 0x28), // down
+            (0x50, 0x25), // left
+            (0x4F, 0x27), // right
+            (0x08, 0x45), // favorite 'e'
+            (0x10, 0x4D), // voice   'm'  ← 语音键，丢了就没有语音
+            (0x0D, 0x4A), // account 'j'
+            (0x31, 0xDC), // play_pause '\'
+            (0x19, 0x56), // fast_forward 'v'
+            (0x36, 0xBC), // rewind  ','
+            (0x04, 0x41), // channel_up   'a'
+            (0x05, 0x42), // channel_down 'b'
+            (0x1F, 0x32), // volume_up  '2'
+            (0x20, 0x33), // volume_down '3'
+            (0x0A, 0x47), // mute    'g'
+            (0x06, 0x43), // last    'c'
+            (0x16, 0x53), // square  's'
+        ];
+        assert_eq!(cases.len(), 23);
+        for (usage, vk) in cases {
+            assert_eq!(vk_to_usage(*vk), Some(*usage), "VKey 0x{vk:02X} 应还原为 usage 0x{usage:02X}");
         }
+    }
+
+    /// 全松开必须产出空列表：`report::is_empty(&[])` 是语音长按结束的唯一判据。
+    #[test]
+    fn release_produces_empty_snapshot() {
+        assert!(iprc1000_native::report::is_empty(&[]));
+        assert!(!iprc1000_native::report::is_ghost_only(&[]));
+    }
+
+    /// 设备过滤：物理键盘 / 别的 HID 不能被当成遥控器。
+    #[test]
+    fn device_filter_requires_both_ids() {
+        assert!(is_remote_name(r"\\?\HID#VID&00020a5c_PID&8502#8&1&0000#{884b96c3-...}"));
+        assert!(!is_remote_name(r"\\?\HID#VID&00020460_PID&8502#..."));
+        assert!(!is_remote_name(r"\\?\ACPI#StandardPS2Keyboard#..."));
+    }
+
+    /// 客户机复盘（2026-11-06）：hidbth 给蓝牙 HID 生成的 RIDI_DEVICENAME
+    /// 可能不带 VID/PID，必须有兜底；但一旦出现精确匹配就关掉兜底，
+    /// 否则同一台机器上的蓝牙物理键盘也会被当成遥控器。
+    #[test]
+    fn device_claim_rules() {
+        EXACT_SEEN.store(false, Ordering::Relaxed);
+        let bt = r"\\?\BTHENUM#{00001124-0000-1000-8000-00805f9b34fb}_DEV&00020A5C#8&1&0000#{884b96c3-...}";
+        assert_eq!(remote_reason(bt), Some("蓝牙HID兜底(无精确匹配)"));
+        assert_eq!(remote_reason(r"\\?\HID#VID_046D_PID_C52B#..."), None);
+
+        EXACT_SEEN.store(true, Ordering::Relaxed);
+        assert_eq!(remote_reason(bt), None, "有精确匹配时不能再兜底认领蓝牙物理键盘");
+        assert!(remote_reason(r"\\?\HID#VID&00020a5c_PID&8502#...").is_some());
+        EXACT_SEEN.store(false, Ordering::Relaxed);
     }
 }

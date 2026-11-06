@@ -1,6 +1,6 @@
 [package]
 name = "iprc1000_native"
-version = "0.4.39"
+version = "0.4.41"
 edition = "2021"
 
 [features]
@@ -36,6 +36,7 @@ windows = { version = "0.57", features = [
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
     "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_Input",             # Raw Input：绕开 \kbd 的 SYSTEM-only ACL（2026-11-06 客户机根因）
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Controls",
     "Win32_UI_Controls_Dialogs",   # 「绑定程序」的文件选择框   # 精简面板原型（Win32 降级界面）用 ListView
@@ -43,6 +44,7 @@ windows = { version = "0.57", features = [
     "Win32_Graphics_Gdi",
     "Win32_System_LibraryLoader",
     "Win32_System_Registry",
+    "Win32_Security",          # 权限只读判定：判进程是否 elevated（不自动 UAC，按键不需要管理员）
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_Threading",
     # stderr 重定向到日志文件

@@ -205,8 +205,8 @@ pub struct Probes {
     /// 默认播放设备的名字（显示给用户看）
     pub play_name: String,
     /// 遥控器是否仍被系统当作键盘（**换机器/换遥控器后必查**）：
-    ///   Some(true)  = 还是键盘 ⇒ 按键会漏出字母，需要「改造遥控器」
-    ///   Some(false) = 已是 HID-compliant device ✓
+    ///   Some(true)  = 还是键盘 ⇒ **正确状态**：程序能读到按键；副作用是系统也会打字母
+    ///   Some(false) = 已改绑成 raw ⇒ **故障**：HID 接口不再暴露，按键全收不到
     ///   None        = 找不到遥控器的 HID 节点（未连接/未配对）
     pub remote_is_keyboard: Option<bool>,
     /// VB-CABLE 主设备的问题码：Some(0)=健康；Some(n≠0)=**装了但坏了**（黄叹号）；
@@ -294,25 +294,31 @@ fn install_cable() -> crate::step::StepResult {
     crate::installer::install_cable()
 }
 
-/// 「改造遥控器」：把它的 HID 接口从「键盘」换成「HID-compliant device」。
+/// ⚠ 2026-11-06：命令层的「改造遥控器」入口**已整体删除**。
 ///
-/// 做完之后系统的输入栈不再消费它的键 ⇒ **按键不会打出字母**；
-/// 而蓝牙 ACL 链路照常建立（音频也走它）⇒ 我们的 ETW 仍读得到原始报文。
-/// 这是"换机器 / 换遥控器后按键出字母"的根治办法（不是吞键）。
-pub fn convert_remote() -> crate::step::StepResult {
+/// 真机结论（`device_probe.rs:481-500`）：raw 绑定不注册 HID 设备接口，
+/// `hid_reader` 枚举恒 0、Windows 不建 HID 中断通道 ⇒ 按键与音频同时全断。
+/// 即「改造」与「能收到按键」不可兼得。
+///
+/// 底层 `device_probe::convert_to_hid_compliant()` 只留给手工诊断，
+/// **不暴露给界面 / 一键修复 / 安装器**；留着编译期可达的封装迟早会被误接回去。
+/// 正常状态是「仍是键盘」：按键可读，代价是系统同时打出字母（已知边界，见使用说明）。
+///
+/// 误改造的机器用下面的 `restore_keyboard_step()` 救回来。
+
+/// 把已被改造成 raw 的遥控器**恢复成键盘模式**（改造后按键全无的解药）。
+/// 删掉 devnode 让 PnP 重新枚举时按硬件 ID 装回 keyboard.inf/kbdhid。
+pub fn restore_keyboard_step() -> crate::step::StepResult {
     use crate::step::StepResult;
-    let r = crate::device_probe::convert_to_hid_compliant();
-    invalidate_probes();
-    match r {
-        Ok(msg) if msg.contains("无需改造") => StepResult::AlreadyOk(msg),
-        Ok(msg) => StepResult::Done(msg),
+    match crate::device_probe::restore_keyboard() {
+        Ok(m) => { invalidate_probes(); StepResult::Done(m) }
         Err(e) => StepResult::Failed(e),
     }
 }
 
-/// 旧的 JSON 入口（界面/脚本还在用），内部换成类型化结果。
-pub fn convert_remote_hid() -> String {
-    let r = convert_remote();
+/// 界面按钮用的 JSON 入口。
+pub fn restore_keyboard_hid() -> String {
+    let r = restore_keyboard_step();
     serde_json::json!({ "ok": r.is_ok(), "message": r.message() }).to_string()
 }
 
@@ -375,25 +381,49 @@ pub fn repair_report() -> crate::step::Report {
         rep.push("虚拟键盘驱动", repair_driver());
     }
 
-    // ④ 遥控器改造（换机器 / 换遥控器后最常见的一项）
+    // ④ 遥控器按键通道（2026-11-06 真机结论：改造 = 收不到按键，停止引导）
+    //   raw 绑定不注册 HID 设备接口 ⇒ hid_reader 枚举恒 0、Windows 不建 HID 中断通道
+    //   ⇒ 按键与音频同时全断。所以「仍是键盘」才是正确状态，「已改造」是故障态。
+    //   ★ 绝不要在这里接回任何「改造设备」动作：那会把一台能用的机器直接改坏
+    //     （命令层的改造入口已整体删除，见本文件 ④ 上方说明）。
     match p.remote_is_keyboard {
-        Some(true) => rep.push("遥控器改造", convert_remote()),
-        Some(false) => rep.push(
-            "遥控器改造",
-            StepResult::AlreadyOk(String::from("已不是键盘（不会打出字母）")),
+        Some(true) => rep.push(
+            "遥控器按键通道",
+            StepResult::AlreadyOk(String::from(
+                "键盘模式（正确）—— 程序能读到按键；系统同时会打出字母，属已知边界",
+            )),
         ),
-        // ★★ 2026-11-06（新机器实测）：**不能报 AlreadyOk**。
-        //   遥"未连接"意味着改造根本没做，而原来的 AlreadyOk 让安装器认为
-        //   "这项没问题"并以退出码 0 结束 —— 客户装完看到"安装成功"，
-        //   实际遥控器还是键盘，按一下往文档里打字母，界面却显示"遥控器在线"
-        //   （在线只看 30 秒内有没有 ETW 事件，不代表按键能解析出来）。
-        //   改成 Manual：安装器会以退出码 3 结束并提示"先按一下遥控器唤醒"。
+        Some(false) => rep.push(
+            "遥控器按键通道",
+            StepResult::Manual(String::from(
+                "已改绑成 raw，HID 接口不再暴露 ⇒ 按键全收不到。请运行 IPRC1000-Native.exe --restore-keyboard（或点界面「④ 恢复键盘模式」）恢复键盘模式，再按一下遥控器唤醒",
+            )),
+        ),
+        // 未连接 = 判不了状态，不能报 AlreadyOk（历史假绿灯：客户装完看到成功，
+        // 实际遥控器还是键盘/未连，按一下往文档里打字母）。
         None => rep.push(
-            "遥控器改造",
+            "遥控器按键通道",
             StepResult::Manual(String::from(
                 "没检测到遥控器的 HID 节点 —— 先按一下遥控器把它唤醒（或重新配对），再点一次「一键修复」",
             )),
         ),
+    }
+
+    // ⑤ BthPort ETW 注册表（2026-11-06 补进原生版）：
+    //   C# 版有 ApplyRegistry()，原生版此前一处写入代码都没有 —— 开发机早被
+    //   C# 版改好并重启过，全新客户机音频首片只 8 字节头、全判截断 ⇒ 语音无声。
+    //   这三个值在 BthPort 驱动加载时读取 ⇒ 写成功也**必须**报 NeedsReboot。
+    let reg = crate::etw_registry::status();
+    if reg.configured {
+        rep.push("ETW 注册表", StepResult::AlreadyOk(String::from("三项已就绪")));
+    } else {
+        match crate::etw_registry::apply() {
+            Ok(m) => rep.push("ETW 注册表", StepResult::NeedsReboot(m)),
+            Err(e) => rep.push(
+                "ETW 注册表",
+                StepResult::Manual(format!("{e} —— 请以管理员身份重新运行安装")),
+            ),
+        }
     }
 
     invalidate_probes();

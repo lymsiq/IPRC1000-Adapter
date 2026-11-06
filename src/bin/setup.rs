@@ -279,17 +279,23 @@ fn set_autostart(dir: &Path, on: bool) -> Result<(), String> {
 /// 跑驱动/声卡安装（用随包脚本）
 /// 调主程序的 `--install` —— **唯一**的依赖安装实现。
 ///
+/// `--install` 的结构化结果（2026-11-06）：不许靠中文日志猜语义。
+/// 0=全部就绪 / 1=需重启 / 2=需手动 / 3=失败（含"没管理员"）
+static INSTALL_OUTCOME: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
 /// 安装器自己不装任何驱动/声卡（同一个动作只能一套实现）：
 /// 主程序那套才带真实的复检判据（声卡看 `Problem` 健康码、驱动看能否创建设备、
-/// 遥控器看是否还是键盘），并且把 Windows 的 3010 如实转达成"需重启"。
-/// 这里只负责把它的输出逐行转发到安装日志里。
+/// ETW 注册表看值真的变了），并且把 Windows 的 3010 如实转达成"需重启"。
+/// 这里只负责把输出逐行转发到安装日志，并**按退出码**记下结论。
 fn run_app_install(dir: &Path, mut say: impl FnMut(String)) {
+    use std::sync::atomic::Ordering;
     let exe = dir.join(APP_EXE);
     if !exe.exists() {
         say(format!("找不到 {}，跳过依赖安装", exe.display()));
+        INSTALL_OUTCOME.store(3, Ordering::Relaxed);
         return;
     }
-    match std::process::Command::new(&exe).arg("--install").output() {
+    let outcome = match std::process::Command::new(&exe).arg("--install").output() {
         Ok(o) => {
             let out = String::from_utf8_lossy(&o.stdout);
             let err = String::from_utf8_lossy(&o.stderr);
@@ -300,14 +306,16 @@ fn run_app_install(dir: &Path, mut say: impl FnMut(String)) {
                 }
             }
             match o.status.code() {
-                Some(0) => say(String::from("依赖组件全部就绪")),
-                Some(2) => say(String::from("★ Windows 说需要重启才生效 —— 重启后不用再装")),
-                Some(3) => say(String::from("★ 有组件需要手动处理，请按上面给出的步骤操作")),
-                c => say(format!("--install 退出码 {c:?}")),
+                Some(0) => { say(String::from("依赖组件全部就绪")); 0 }
+                Some(2) => { say(String::from("★ Windows 说需要重启才生效 —— 重启后不用再装")); 1 }
+                Some(3) => { say(String::from("★ 有组件需要手动处理，请按上面给出的步骤操作")); 2 }
+                Some(4) => { say(String::from("★ 需要管理员权限：请右键本安装器 → 以管理员身份运行")); 3 }
+                c => { say(format!("--install 退出码 {c:?}（视为失败）")); 3 }
             }
         }
-        Err(e) => say(format!("无法运行 --install：{e}")),
-    }
+        Err(e) => { say(format!("无法运行 --install：{e}")); 3 }
+    };
+    INSTALL_OUTCOME.store(outcome, Ordering::Relaxed);
 }
 
 fn main() {
@@ -464,7 +472,7 @@ impl eframe::App for Setup {
                                     //   才有真实的复检判据（声卡看 Problem 健康码、驱动看能否创建
                                     //   设备、遥控器看是否还是键盘），并且会把 Windows 的 3010
                                     //   如实转达成"需重启"。这里再写一遍只会写出第二套行为。
-                                    push(String::from("开始安装依赖组件（声卡 / 键盘驱动 / 遥控器改造 / 麦克风）…"));
+                                    push(String::from("开始安装依赖组件（声卡 / 键盘驱动 / 麦克风 / 遥控器按键通道检查）…"));
                                     run_app_install(&dir, |x| push(x));
                                     push(format!("安装完成 → {}", dir.display()));
                                     Ok(())
@@ -510,20 +518,38 @@ impl eframe::App for Setup {
                     ctx.request_repaint();
                 }
                 Step::Done => {
-                    ui.label(RichText::new("✓ 安装完成".to_string().replace('✓', "√")).color(Color32::from_rgb(80, 200, 120)).heading());
+                    // ★ 2026-11-06：不再无条件打「✓ 安装完成」。
+                    //   `--install` 的退出码 2/3/4 以前只转成一行日志，界面照样报成功，
+                    //   客户机"装完看着全绿、实际一个组件都没装好"就是这么来的。
+                    let (title, color, note) = match INSTALL_OUTCOME.load(std::sync::atomic::Ordering::Relaxed) {
+                        1 => (
+                            "√ 组件已装好，但需重启一次才生效",
+                            Color32::from_rgb(235, 175, 80),
+                            "重启电脑后不用再装；重启前语音可能没声音、驱动可能没起来。",
+                        ),
+                        2 => (
+                            "△ 有组件需要手动处理",
+                            Color32::from_rgb(235, 175, 80),
+                            "按上面的日志逐条做完，再运行一次「一键安装.cmd」。",
+                        ),
+                        3 => (
+                            "× 依赖组件未装好",
+                            Color32::from_rgb(235, 110, 100),
+                            "请看上面的失败原因（最常见：没有以管理员身份运行）。修好后重新运行安装。",
+                        ),
+                        _ => (
+                            "√ 安装完成",
+                            Color32::from_rgb(80, 200, 120),
+                            "接下来：① 打开豆包/微信输入法，把麦克风设为 CABLE Output；② 程序启动后会收到托盘，右键可退出。",
+                        ),
+                    };
+                    ui.label(RichText::new(title).color(color).heading());
                     ui.add_space(6.0);
                     for l in &self.log {
                         ui.label(RichText::new(l).small());
                     }
                     ui.add_space(10.0);
-                    ui.label(
-                        RichText::new(
-                            "接下来：① 打开豆包/微信输入法，把麦克风设为 CABLE Output；\
-                             ② 程序启动后会收到托盘，右键可退出。",
-                        )
-                        .small()
-                        .weak(),
-                    );
+                    ui.label(RichText::new(note).small().weak());
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         if !self.launched
@@ -674,9 +700,19 @@ fn silent_install(args: &[String]) {
             }
         }
         // ★★ 与界面路径同一套：依赖组件统一交给主程序的 `--install`
-        //   （同一个动作只能一套实现）。它做 4 项并逐项复检：
-        //   声卡（含 Problem 健康码）/ 键盘驱动 / 遥控器改造 / 默认麦克风。
+        //   （同一个动作只能一套实现）。它做 5 项并逐项复检：
+        //   声卡（含 Problem 健康码）/ 键盘驱动 / 遥控器按键通道状态 / 默认麦克风 /
+        //   BthPort ETW 注册表（写完需重启）。
+        //   ⚠ 第 ③ 项只**判状态**，不再改造遥控器（2026-11-06：raw 绑定会切断按键通道）。
         run_app_install(&dir, |x| slog(&x));
+        let outcome = INSTALL_OUTCOME.load(std::sync::atomic::Ordering::Relaxed);
+        // 静默安装也要如实失败：以前无论 --install 返回什么都打「完成」并退出 0。
+        if outcome == 3 {
+            if let Some(p) = save_install_log_collected(&dir, &install_lines()) {
+                slog(&format!("[安装] 日志：{}", p.display()));
+            }
+            return Err(String::from("依赖组件未装好（多半没以管理员身份运行，详见上面日志）"));
+        }
         // 静默安装也把日志写进安装目录（与界面路径一致）
         if let Some(p) = save_install_log_collected(&dir, &install_lines()) {
             slog(&format!("[安装] 日志：{}", p.display()));

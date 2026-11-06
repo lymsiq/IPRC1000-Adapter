@@ -1,0 +1,12 @@
+客户机（故障机）
+  主机名   : PC-20260728LQXO
+  OS       : Windows 11 专业版 22631
+  蓝牙     : Realtek Bluetooth Adapter  USB\VID_0BDA&PID_C821\00E04C000001
+  驱动     : oem24.inf / Realtek Semiconductor Corp. / 16.4033.2312.2503
+  遥控器   : 20:C0:47:F3:13:D6  Name=IPRC1000  COD=0x20050C (Peripheral keyboard+pointing)
+  WiFi     : Realtek 8821CE / 5GHz ch36 / 433Mbps（非2.4G，排除同频干扰）
+
+开发机（对照组）
+  主机名   : 192.168.8.186
+  蓝牙     : Intel AX200
+  状态     : 已知正常，{00001124-...}_VID&00020a5c_PID&8502 / Service=HidBth

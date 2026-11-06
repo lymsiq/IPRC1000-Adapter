@@ -20,6 +20,9 @@ mod backend;
 mod cable_out;
 mod commands;
 mod device_probe;
+mod elevate;
+mod etw_registry;
+mod health;
 mod hid_reader;
 mod hotkey;
 mod installer;
@@ -360,6 +363,25 @@ fn main() {
         redirect_stderr_to_file();
     }
 
+    // ★ 2026-11-06：权限 / ETW 注册表**只读体检**，如实留痕，不强制提权。
+    //   按键已改走 Raw Input（交接文档 §3 实测不需要管理员，且不碰 \kbd 的
+    //   SYSTEM-only ACL）；仍需管理员的只剩语音的 ETW 会话与 --install 的系统动作。
+    //   不自动 UAC：客户机每次开机弹一次提权框，对按键毫无帮助，反而添堵。
+    let admin = elevate::is_admin();
+    if !admin {
+        eprintln!("[!] 当前非管理员：语音链路（ETW 会话）可能起不来；按键（Raw Input）不受影响。要用语音请右键「以管理员身份运行」。");
+    }
+    if !is_cli_tool {
+        let reg = etw_registry::status();
+        if !reg.configured {
+            eprintln!("[!] BthPort ETW 注册表未就绪：{}", reg.detail);
+            health::set_fatal(format!(
+                "语音链路注册表未就绪（{}）。请运行「一键安装.cmd」写入后重启电脑；按键不受影响。",
+                reg.detail
+            ));
+        }
+    }
+
     // ★ 全局 panic 钩子：任何线程 panic 都留痕（默认只打印到 stderr 且格式难读）。
     //   没有它的话，后台线程 panic 后功能静默失效，日志里一个字都没有 —— 排查全靠猜。
     std::panic::set_hook(Box::new(|info| {
@@ -407,7 +429,8 @@ fn main() {
         std::process::exit(0);
     }
 
-    // 诊断：`--hid-probe` 枚举遥控器 HID 接口并尝试打开（判断"有没有消费者入口"）
+    // 诊断：`--hid-probe` 列出 Raw Input 键盘设备并标出 0A5C+8502（判断"系统有没有把遥控器当键盘"）；
+    //       不打开任何 \\kbd 接口（那个接口 ACL 是 SYSTEM-only，打开必然 err=5）
     if std::env::args().any(|a| a == "--hid-probe") {
         hid_reader::probe();
         std::process::exit(0);
@@ -474,7 +497,14 @@ fn main() {
     //   与界面的「⚙ 一键修复」走**同一个** `repair_all()` —— 同一个动作只能一套实现。
     //   退出码：0 = 全部就绪；2 = 已装但需重启；3 = 有必须手动处理的项。
     if std::env::args().any(|a| a == "--install") {
-        eprintln!("IPRC1000 一键安装 —— 声卡 / 键盘驱动 / 遥控器改造 / 默认麦克风");
+        // ★ 判真实权限，不判"点了按钮"：装驱动/写 HKLM 需要管理员，
+        //   以前这里照样跑完并打"安装完成"，是客户机假成功的源头。
+        if !admin {
+            eprintln!("✗ 需要管理员权限：请右键「一键安装.cmd」→ 以管理员身份运行（或安装器右键同法）。");
+            eprintln!("  按键走 Raw Input 不需要管理员；这一步是给声卡/驱动/注册表用的。");
+            std::process::exit(4);
+        }
+        eprintln!("IPRC1000 一键安装 —— 声卡 / 键盘驱动 / 麦克风 / ETW 注册表 / 遥控器按键通道检查");
         eprintln!("（每一步装完都会立刻复检真实状态，不会只看退出码）");
         // ★ 结果类型化：退出码由结构化报告决定，**不再**靠 `msg.contains("重启")` 猜。
         //   那是同一类假绿灯（文案里出现"重启"两字就判需重启，与真实状态无关）。
@@ -614,11 +644,13 @@ fn main() {
         .spawn(backend::run_backend)
         .ok();
 
-    // ③-2 HID 输入消费者（2026-11-06）
-    //   「改造遥控器」把手柄节点改绑成 raw 后，系统里**没有**任何 HID 客户端去读输入报告，
-    //   Windows 就不建立 HID 中断通道（PSM 0x0013）⇒ 遥控器没地方投递按键 ⇒ 4 秒超时重连，
-    //   无限循环，ETW 永远抓不到按键报文（真机抓包 diag-keys.txt 铁证）。
-    //   这里补上那个消费者：打开集合、持续 ReadFile，按键就有了来源。
+    // ③-2 按键输入消费者 = Raw Input（2026-11-06 客户机根因）
+    //   旧版 CreateFileW 打开键盘顶层集合 \kbd 接口：该接口 ACL 是 SYSTEM-only，
+    //   非 SYSTEM 进程恒定 err=5，管理员也打不开 ⇒ 客户机按键全无。
+    //   现在独立线程建隐藏窗口，RegisterRawInputDevices(RIDEV_INPUTSINK) 收 WM_INPUT，
+    //   按设备名 0A5C+8502 过滤，用 HELD[256] 还原 HID 报告快照；不打开任何设备接口。
+    //   ⚠ 仍必须保持遥控器「键盘」身份：改绑成 input.inf/raw 后不注册 HID 设备接口、
+    //   Windows 不建 HID 中断通道 ⇒ 按键与音频同时全断。见 device_probe.rs。
     //   语音音频仍走 ETW（那条通道本来就有数据）。
     hid_reader::start();
 

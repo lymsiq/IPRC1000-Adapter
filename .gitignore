@@ -23,3 +23,7 @@ src/payload.zip
 .idea/
 Thumbs.db
 desktop.ini
+
+# ── Python 缓存（tools/ 下的脚本会被直接执行）──
+__pycache__/
+*.pyc

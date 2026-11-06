@@ -271,9 +271,9 @@ mod tap_tests {
     /// 用户松手后立刻又按下：补点击应被取消（否则一次操作会发两次点击）
     #[test]
     fn new_press_cancels_pending_followup() {
-        let mut f = TapFollowUp::on_release(1_000);
-        // 用户在 20 ms 内又按下了（真实连按）
-        f = TapFollowUp::None; // 由调用方置 None 表示"新的一段开始"
+        let _pending = TapFollowUp::on_release(1_000); // 松手后本会补一次点击
+        // 用户在 20 ms 内又按下了（真实连按）⇒ 调用方置 None 表示"新的一段开始"
+        let mut f = TapFollowUp::None;
         assert_eq!(f.tick(1_050), None, "取消后不能再补点击");
     }
 

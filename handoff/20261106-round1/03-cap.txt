@@ -1,0 +1,61 @@
+HCI 事件总数: 76
+时间范围: 21:44:42.235 ~ 21:44:58.653
+
+=== 时间线 ===
+  [21:44:42.235] 遥控器 Connection Request  from 20:C0:47:F3:13:D6  COD=0x20050C
+  [21:44:42.235] HCI-CMD Accept Connection Request
+  [21:44:42.414] Connection Complete   status=0x00 OK  handle=0x0001  20:C0:47:F3:13:D6
+  [21:44:42.509] Encryption Change     status=0x00 enable=1
+  [21:44:42.510]   L2CAP ConnReq   PSM=HID-Control SCID=0x0040 ident=0x02
+  [21:44:42.510]   L2CAP ConnRsp   DCID=0x0040 SCID=0x0040 ident=0x02  >> PENDING
+  [21:44:57.516]   L2CAP ConnRsp   DCID=0x0040 SCID=0x0040 ident=0x02  >> REFUSED_PSM
+  [21:44:57.677] Disconnection Complete reason=0x13 REMOTE_USER_TERMINATED
+  [21:44:58.356] 遥控器 Connection Request  from 20:C0:47:F3:13:D6  COD=0x20050C
+  [21:44:58.356] HCI-CMD Accept Connection Request
+  [21:44:58.538] Connection Complete   status=0x00 OK  handle=0x0002  20:C0:47:F3:13:D6
+  [21:44:58.648] Encryption Change     status=0x00 enable=2
+  [21:44:58.649]   L2CAP ConnReq   PSM=HID-Control SCID=0x0041 ident=0x02
+  [21:44:58.649]   L2CAP ConnRsp   DCID=0x0040 SCID=0x0041 ident=0x02  >> PENDING
+
+=== 包类型 ===
+  evt   42
+  cmd   24
+  ?     5
+  acl   5
+
+=== HCI 事件 ===
+  Command Complete                         18
+  Command Status                           7
+  Read Clock Offset Complete               3
+  Num Completed Packets                    3
+  Connection Request                       2
+  Connection Complete                      2
+  Max Slots Change                         2
+  Encryption Change                        2
+  Read Remote Supported Feat Complete      1
+  Read Remote Version Complete             1
+  Disconnection Complete                   1
+
+=== HCI 命令 ===
+  0x0C2D                                   4
+  Accept Connection Request                2
+  Create Connection Cancel                 2
+  0x1405                                   2
+  0x080D                                   2
+  0x0809                                   2
+  0x0C28                                   2
+  0x041F                                   2
+  0x1403                                   2
+  0x0C36                                   2
+  Read Remote Extended Features            1
+  Read Remote Version Information          1
+
+=== L2CAP CID ===
+  CID 0x0001 Signaling      5
+
+=== L2CAP 信令 ===
+  Connection Response            3
+  Connection Request             2
+
+=== ConnReq 的 PSM ===
+  HID-Control(0x0011)      2

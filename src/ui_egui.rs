@@ -208,6 +208,17 @@ impl eframe::App for App {
 
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
             ui.add_space(6.0);
+            // ★ 2026-11-06：后台线程的致命失败必须在界面上可见。
+            //   以前 ETW 起不来 / WinUHid 重试耗尽都只写日志，窗口照常绿，
+            //   客户机"程序跑着但完全没反应"就是这么被拖住的。
+            if let Some(f) = crate::health::fatal() {
+                ui.label(
+                    RichText::new(format!("⚠ {f}"))
+                        .color(Color32::from_rgb(255, 150, 110))
+                        .small(),
+                );
+                ui.add_space(4.0);
+            }
             ui.horizontal(|ui| {
                 ui.label(RichText::new("IPRC1000").heading().strong());
                 ui.label(RichText::new("原生内核").small().weak());
@@ -568,35 +579,36 @@ impl App {
             });
         }
 
-        // ★ 遥控器是不是还被当成键盘（**换机器 / 换遥控器后必查**）：
-        //   还是键盘 ⇒ 它的按键会被系统当键盘输入打进焦点窗口 ⇒ **打出字母**（不跑软件也会）。
-        //   正解不是"吞键"，而是把 HID 接口改成 HID-compliant device（点下面「④」）。
+        // ★ 遥控器按键通道（2026-11-06 真机结论，判据已反转）：
+        //   「仍是键盘」= 接口正常注册 = **正确状态**（副作用：系统也会打字母）。
+        //   「已改绑 raw」= 接口不再注册 = **故障**，按键与音频全断，必须恢复。
+        //   ⚠ 绝不要引导用户去改造：那会把能用的机器直接改坏。
         match p.remote_is_keyboard {
-            Some(false) => check_row(
-                ui,
-                true,
-                "遥控器不是键盘（HID-compliant）",
-                "已改造 —— 按键不会打出字母",
-            ),
-            Some(true) => {
+            Some(false) => {
                 check_row(
                     ui,
                     false,
-                    "遥控器不是键盘（HID-compliant）",
-                    "仍是键盘 —— 按键会打出字母，点「④ 改造遥控器」",
+                    "遥控器按键通道",
+                    "已改绑成 raw —— HID 接口不注册，按键收不到",
                 );
                 let warn = Color32::from_rgb(255, 170, 80);
                 ui.label(
-                    RichText::new("⚠ 这是换机器/换遥控器后的必做一步：不改的话，按遥控器会直接往光标处打字母。")
+                    RichText::new("⚠ 运行 IPRC1000-Native.exe --restore-keyboard，或点下面「④ 恢复键盘模式」；恢复后按一下遥控器唤醒。")
                         .small()
                         .color(warn),
                 );
                 ui.add_space(4.0);
             }
+            Some(true) => check_row(
+                ui,
+                true,
+                "遥控器按键通道",
+                "键盘模式（正确）—— 按键可读；系统会同时打字母（已知边界）",
+            ),
             None => check_row(
                 ui,
                 true,
-                "遥控器不是键盘（HID-compliant）",
+                "遥控器按键通道",
                 "未连接（连上后再检查）",
             ),
         }
@@ -680,20 +692,24 @@ impl App {
             }
         });
         ui.add_space(4.0);
-        // ④ 改造遥控器：换机器 / 换遥控器后必做（不做就按键出字母）。
-        //   调系统自带的「更新驱动」把 HID 接口换成 HID-compliant device（null service），
-        //   与设备管理器里"从列表选取"那一步等价。需要管理员权限（本程序本来就是管理员运行）。
+        // ④ 恢复键盘模式（2026-11-06）：**替换**原来的「改造遥控器」按钮。
+        //   改造已证实会切断按键通道（raw 绑定不注册 HID 接口）；这个按钮是它的解药，
+        //   给「按旧说明改造过、现在按键全无」的机器用。
         if ui
-            .add_enabled(!self.installing, egui::Button::new("④ 改造遥控器（不再打字母）"))
+            .add_enabled(!self.installing, egui::Button::new("④ 恢复键盘模式（改造后按键全无时用）"))
             .on_hover_text(
-                "把遥控器的 HID 接口从「键盘」换成 HID-compliant device：\n系统不再把它的按键当键盘输入（不打字母），\n而蓝牙链路照常建立，程序仍能读到原始报文。",
+                "如果之前按旧说明把遥控器改造成了 HID-compliant / raw，\nHID 接口会不再注册 ⇒ 按键与音频全部收不到。\n这里删除旧节点，让 Windows 重新枚举时装回键盘驱动。\n已经是键盘模式的机器不需要点。",
             )
             .clicked()
         {
-            self.say("正在改造遥控器…（改完请再按一下任意键确认）");
-            let r = crate::commands::convert_remote_hid();
-            crate::commands::invalidate_probes();
-            self.say(parse_msg(&r));
+            if matches!(crate::device_probe::remote_still_keyboard(), Some(true)) {
+                self.say("已经是键盘模式（正确状态），无需恢复；按键能读到就别改造。");
+            } else {
+                self.say("正在恢复键盘模式…（完成后请按一下遥控器唤醒）");
+                let r = crate::commands::restore_keyboard_hid();
+                crate::commands::invalidate_probes();
+                self.say(parse_msg(&r));
+            }
         }
         if self.installing {
             ui.add_space(6.0);

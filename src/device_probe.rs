@@ -298,8 +298,8 @@ pub fn remote_hid_instances() -> Vec<HidInst> {
 }
 
 /// 遥控器是否仍被当成键盘。
-///   Some(true)  = 还是键盘（会漏出字母）⇒ 要改造
-///   Some(false) = 已是 HID-compliant device（裸设备）✓
+///   Some(true)  = 还是键盘 ⇒ **正确状态**（Raw Input 读得到按键；副作用：系统打字母）
+///   Some(false) = 已改绑成 raw ⇒ **故障**（HID 接口不注册，按键与音频全断）
 ///   None        = 找不到 HID 节点（没连接 / 没配对）
 pub fn remote_still_keyboard() -> Option<bool> {
     let v = remote_hid_instances();
@@ -310,89 +310,22 @@ pub fn remote_still_keyboard() -> Option<bool> {
     }
 }
 
-/// 把遥控器的 HID 接口从「键盘」换成「HID-compliant device」。
-/// 返回人类可读的结果（供界面直接显示）。
-pub fn convert_to_hid_compliant() -> Result<String, String> {
-    let insts = remote_hid_instances();
-    if insts.is_empty() {
-        return Err("找不到遥控器的 HID 节点 —— 请先确认遥控器已配对并连接（按一下任意键唤醒）".into());
-    }
-    let targets: Vec<&HidInst> = insts.iter().filter(|x| x.is_keyboard).collect();
-    if targets.is_empty() {
-        return Ok("遥控器已经是 HID-compliant device，无需改造（按键不会打出字母）".into());
-    }
-    let mut ok = 0usize;
-    let mut err: Vec<String> = Vec::new();
-    for t in &targets {
-        if t.hwid.is_empty() {
-            err.push(format!("{}：读不到 HardwareID", t.inst));
-            continue;
-        }
-        if update_driver(&t.hwid, r"C:/Windows/INF/input.inf") {
-            ok += 1;
-            eprintln!("[设备] 已切换驱动：{} → HID-compliant device（{}）", t.inst, t.hwid);
-        } else {
-            err.push(format!("{}：UpdateDriver 调用失败", t.inst));
-        }
-    }
-    if ok > 0 && err.is_empty() {
-        Ok(format!("已改造 {ok} 个节点 ⇒ 系统不再把遥控器当键盘（按键不会打出字母）"))
-    } else if ok > 0 {
-        Ok(format!("部分成功：{ok} 个已改造；仍有问题：{}", err.join("；")))
-    } else {
-        Err(format!("改造失败：{}", err.join("；")))
-    }
-}
-
-/// 调 `newdev.dll!UpdateDriverForPlugAndPlayDevicesW` —— 等价于设备管理器里
-/// 「更新驱动 → 从列表选取 → HID-compliant device」那一步。
+/// ⛔ **已彻底禁用**（2026-11-06 客户机真机结论，交接文档 §4）。
 ///
-/// 动态加载而不是 #[link]：不给链接器添依赖（和 winuhid.rs 一个风格）。
-fn update_driver(hwid: &str, inf: &str) -> bool {
-    use std::ffi::c_void;
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn LoadLibraryW(path: *const u16) -> *mut c_void;
-        fn GetProcAddress(m: *mut c_void, name: *const u8) -> *mut c_void;
-        fn GetLastError() -> u32;
-    }
-    type FnUpdate = unsafe extern "system" fn(isize, *const u16, *const u16, u32, *mut i32) -> i32;
-
-    const INSTALLFLAG_FORCE: u32 = 0x1;
-    const INSTALLFLAG_NONINTERACTIVE: u32 = 0x4;
-
-    unsafe {
-        let dll: Vec<u16> = "newdev.dll\0".encode_utf16().collect();
-        let m = LoadLibraryW(dll.as_ptr());
-        if m.is_null() {
-            return false;
-        }
-        let mut name = b"UpdateDriverForPlugAndPlayDevicesW\0".to_vec();
-        let p = GetProcAddress(m, name.as_mut_ptr());
-        if p.is_null() {
-            return false;
-        }
-        let f: FnUpdate = std::mem::transmute(p);
-        let h: Vec<u16> = hwid.encode_utf16().chain(std::iter::once(0)).collect();
-        let i: Vec<u16> = inf.encode_utf16().chain(std::iter::once(0)).collect();
-        let mut reboot: i32 = 0;
-        // hwndParent 传 0：我们在后台线程跑，NONINTERACTIVE 也不会弹 UI
-        let rc = f(0, h.as_ptr(), i.as_ptr(), INSTALLFLAG_FORCE | INSTALLFLAG_NONINTERACTIVE, &mut reboot);
-        if rc == 0 {
-            // ★ 失败必须留痕：原来这里只在成功时打日志，失败是**完全静默**的
-            //   —— 判据修对之后如果真失败，日志里也什么都看不到，等于白改。
-            let err = GetLastError();
-            eprintln!(
-                "[设备] ★改造失败：{hwid} → input.inf（UpdateDriver rc=0, GetLastError={err}, reboot={reboot}）"
-            );
-            false
-        } else {
-            eprintln!(
-                "[设备] 改造成功：{hwid} → HID-compliant device（rc={rc}, reboot={reboot}）"
-            );
-            true
-        }
-    }
+/// 原来这里用 `UpdateDriverForPlugAndPlayDevicesW` 把 HID 节点改绑成
+/// `input.inf / HID_Raw_Inst.NT`。实测后果：
+///   · HID 设备接口不再注册（全系统 9 个接口、匹配遥控器 0 个）
+///   · Windows 不建 PSM 0x0013 中断通道，空口无任何 HIDP 报文
+///   · 4 秒监督超时断开重连 ⇒ 按键与音频一起全断
+/// 设备变成 `Unknown / HIDClass / svc=[]` 空壳，靠 `--restore-keyboard` 才能救回。
+///
+/// 保留函数签名是为了让旧脚本/外部调用拿到**明确错误**而不是悄悄改设备；
+/// 内部实现与 `update_driver` 已一并移除，代码里不再存在"改造设备"的路径。
+pub fn convert_to_hid_compliant() -> Result<String, String> {
+    Err(String::from(
+        "此操作已禁用：实测改造会让 HID 接口消失、按键与音频全断。\
+         若设备已被改造成 svc=[] 空壳，请运行 IPRC1000-Native.exe --restore-keyboard 恢复。",
+    ))
 }
 
 /// VB-CABLE 主设备的问题码（`ROOT\MEDIA\*` 的 `Problem` 值）。
@@ -546,9 +479,21 @@ pub fn restore_keyboard() -> Result<String, String> {
         return Err("找不到遥控器的 HID 节点 —— 请先按一下遥控器唤醒后重试".into());
     }
 
-    // 用 pnputil 删除节点，让 Windows 重新枚举时按 SDP 里的 Keyboard 集合自动装回 kbdhid。
-    // 为什么不用 UpdateDriver(keyboard.inf)：raw 绑定后设备不再声明 TLC，
-    // keyword.inf 的匹配项对不上，实测 rc=0 但什么都没改。
+    // 用 pnputil 删除节点，让 Windows 重新枚举时按硬件 ID 重新排序装回 keyboard.inf/kbdhid。
+    //
+    // ⚠ 更正一条曾经写在这里的错误结论（2026-11-06 11:1x 实测）：
+    //   原文写「raw 绑定后设备不再声明 TLC，keyboard.inf 的匹配项对不上」——**这是错的**。
+    //   删除前读 `Enum\HID\{00001124-...}\<inst>` 的 HardwareID，仍然是多值，且明确包含：
+    //       HID\VID_0A5C&UP:0001_U:0006
+    //       HID_DEVICE_SYSTEM_KEYBOARD      ← 键盘匹配项一直都在
+    //       HID_DEVICE
+    //   HardwareID 是枚举时由 hidbth 依据报告描述符生成的、缓存在 Enum 键里，raw 绑定不会改写它。
+    //   所以 keyboard.inf 在原理上能匹配上；之前 UpdateDriver(keyboard.inf) 「rc 非 0 但没变化」
+    //   另有原因（用的是设备实例 ID 而非硬件 ID、或 INF 未进 DriverStore 等），**不要据此否定这条路**。
+    //
+    //   之所以仍选 remove-device：它把 devnode 整个删掉，强制 PnP 从零重新排序，
+    //   不受上一次强制安装残留影响，比"再 UpdateDriver 一次"确定性强。
+
     let mut ok = 0usize;
     let mut err: Vec<String> = Vec::new();
     for inst in &targets {
