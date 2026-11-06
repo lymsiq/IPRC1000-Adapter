@@ -19,7 +19,7 @@
 | `IPRC1000.exe` | 主程序 |
 | `WinUHid.dll` | 按键注入；缺了按键完全不生效（日志会报「未找到 WinUHid.dll」） |
 | `icon.ico` | 窗口/托盘图标从同目录取，缺了会退回 exe 内嵌资源 |
-| `assets/`（整目录） | **「一键修复」要用**：`configure-xiaomi-audio.ps1`（设默认麦克风）、`winuhid/`（装虚拟键盘驱动）、`VBCABLE_Driver_Pack45.zip`（装虚拟声卡）。少一个，修复就有项目做不了 |
+| `assets/`（整目录） | **「一键修复」要用**：`configure-audio.ps1`（设默认麦克风）、`winuhid/`（装虚拟键盘驱动）、`VBCABLE_Driver_Pack45.zip`（装虚拟声卡）。少一个，修复就有项目做不了 |
 | `一键安装.cmd` | 首次安装入口（提权 + 调 `--install`） |
 | `使用说明.txt` | 客户向说明 |
 
@@ -115,7 +115,7 @@ WinUHid.dll           虚拟键盘驱动接口，**删了按键就不生效**
 icon.ico              窗口/托盘图标
 assets/               修复用资源（声卡安装包、驱动安装脚本、麦克风配置脚本）
 一键安装.cmd          首次安装入口（右键"以管理员身份运行"亦可）
-native.json           首次运行的配置种子
+data\ / logs\        运行后自动生成的配置与日志
 
 常见问题
 --------
@@ -143,11 +143,8 @@ def zip_it(ver: str, exe: str) -> str:
         if not os.path.exists(src):
             raise SystemExit(f"缺必需文件：{name}")
         shutil.copy2(src, os.path.join(stage, name))
-    # 配置文件种子：没有它首次启动会用默认值（也能跑，但客户的麦克风/键位要重配）
-    for name in ("native.json",):
-        src = os.path.join(ROOT, name)
-        if os.path.exists(src):
-            shutil.copy2(src, os.path.join(stage, name))
+    # ★ 不再拷根目录的 native.json：程序现在读的是 `<应用目录>\data\native.json`，
+    #   根目录那份不会被读，反而让客户以为"配置文件在这儿"。首次启动会自动生成。
 
     # ★ 整个 assets 目录都要带：「一键修复」靠它装声卡/驱动、改默认麦克风。
     #   之前只拷了 VBCABLE 的 zip，结果修复里"设默认麦克风"和"装虚拟键盘驱动"
@@ -170,7 +167,7 @@ def zip_it(ver: str, exe: str) -> str:
 
     # 交付前自检：这三样是「一键修复」的硬依赖，缺任何一个都别发
     need = [
-        os.path.join(stage, "assets", "configure-xiaomi-audio.ps1"),
+        os.path.join(stage, "assets", "configure-audio.ps1"),
         os.path.join(stage, "assets", "winuhid", "WinUHid.dll"),
         os.path.join(stage, "assets", "VBCABLE_Driver_Pack45.zip"),
         os.path.join(stage, "WinUHid.dll"),

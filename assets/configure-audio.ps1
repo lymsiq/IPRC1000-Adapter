@@ -9,12 +9,27 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ExpectedZipSha256 = "b950e39f01af1d04ea623c8f6d8eb9b6ea5c477c637295fabf20631c85116bfb"
-$StateRoot = Join-Path $env:LOCALAPPDATA "2655AI\BridgeAudio\XiaomiRemoteBridge"
+# ★ 2026-11-06：状态目录原先写死在 %LOCALAPPDATA%\2655AI\BridgeAudio\XiaomiRemoteBridge
+#   —— 那是**另一个项目**（小米遥控器音频桥）的路径，客户在资源管理器里看到
+#   "2655AI / XiaomiRemoteBridge" 完全不知道是什么，而且让安装文件散落在系统盘。
+#   现在统一放到应用目录下的 data\audio；应用目录不可写时（如装在 Program Files）
+#   才回退到 %LOCALAPPDATA%\IPRC1000\audio。
+$AppRoot = Split-Path -Parent $PSScriptRoot          # assets 的上一级 = 应用根目录
+$StateRoot = Join-Path $AppRoot "data\audio"
+try {
+  New-Item -ItemType Directory -Force -Path $StateRoot | Out-Null
+  $probe = Join-Path $StateRoot ".wtest"
+  Set-Content -LiteralPath $probe -Value "1" -Encoding ascii
+  Remove-Item -LiteralPath $probe -Force
+} catch {
+  $StateRoot = Join-Path $env:LOCALAPPDATA "IPRC1000\audio"
+  New-Item -ItemType Directory -Force -Path $StateRoot | Out-Null
+}
 $DriverRoot = Join-Path $StateRoot "VB-CABLE"
 $PreviousMicFile = Join-Path $StateRoot "previous-default-microphone.txt"
 $RebootFlag = Join-Path $StateRoot "reboot-required.flag"
 $RunOnceKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce"
-$RunOnceName = "XiaomiRemoteBridgeAudioFinish"
+$RunOnceName = "IPRC1000AudioFinish"
 function Get-VBCableEndpoint([string] $Flow, [string] $Prefix, [string] $Pattern) {
   $root = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\$Flow"
   foreach ($key in Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue) {
@@ -44,18 +59,18 @@ function Allow-MicrophonePrivacy {
 
 function Set-DefaultCaptureEndpoint([string] $DeviceId, [string] $Label) {
   Initialize-AudioEndpointApi
-  $current = [XiaomiAudioEndpoint]::GetDefaultCapture()
+  $current = [IprcAudioEndpoint]::GetDefaultCapture()
   if (-not (Test-Path -LiteralPath $PreviousMicFile) -and $current -ne $DeviceId) {
     Set-Content -LiteralPath $PreviousMicFile -Value $current -Encoding UTF8
   }
-  [XiaomiAudioEndpoint]::SetDefaultCapture($DeviceId)
+  [IprcAudioEndpoint]::SetDefaultCapture($DeviceId)
   Allow-MicrophonePrivacy
   Set-CableEndpointVolume -DeviceId $DeviceId -Level 1.0
   Write-Output ("Phase: DefaultCapture | {0} => {1}" -f $Label, $DeviceId)
 }
 
 function Initialize-AudioEndpointApi {
-  if ("XiaomiAudioEndpoint" -as [type]) { return }
+  if ("IprcAudioEndpoint" -as [type]) { return }
   Add-Type -Language CSharp -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -103,7 +118,7 @@ internal interface IAudioEndpointVolume {
   int SetMute([MarshalAs(UnmanagedType.Bool)] bool bMute, ref Guid ctx);
   int GetMute(out bool pbMute);
 }
-public static class XiaomiAudioEndpoint {
+public static class IprcAudioEndpoint {
   public static string GetDefaultCapture() {
     IMMDeviceEnumerator e = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject(); IMMDevice d = null;
     try { int hr=e.GetDefaultAudioEndpoint(EDataFlow.eCapture,ERole.eMultimedia,out d); if(hr!=0)Marshal.ThrowExceptionForHR(hr); string id; hr=d.GetId(out id); if(hr!=0)Marshal.ThrowExceptionForHR(hr); return id; }
@@ -189,7 +204,7 @@ function Prepare-DriverFiles {
 function Set-CableEndpointVolume([string] $DeviceId, [float] $Level = 1.0) {
   Initialize-AudioEndpointApi
   try {
-    $r = [XiaomiAudioEndpoint]::SetEndpointVolume($DeviceId, $Level)
+    $r = [IprcAudioEndpoint]::SetEndpointVolume($DeviceId, $Level)
     Write-Output ("Phase: Volume | {0} => {1}" -f $DeviceId, $r)
   } catch {
     Write-Output ("Phase: VolumeWarn | {0}" -f $_.Exception.Message)
@@ -273,7 +288,7 @@ try {
       $result = "OK"
     }
     "Restore" {
-      if (Test-Path -LiteralPath $PreviousMicFile) { Initialize-AudioEndpointApi; $id=(Get-Content -LiteralPath $PreviousMicFile -Raw -Encoding UTF8).Trim(); if($id){[XiaomiAudioEndpoint]::SetDefaultCapture($id)}; Remove-Item -LiteralPath $PreviousMicFile -Force }
+      if (Test-Path -LiteralPath $PreviousMicFile) { Initialize-AudioEndpointApi; $id=(Get-Content -LiteralPath $PreviousMicFile -Raw -Encoding UTF8).Trim(); if($id){[IprcAudioEndpoint]::SetDefaultCapture($id)}; Remove-Item -LiteralPath $PreviousMicFile -Force }
       Remove-ItemProperty -Path $RunOnceKey -Name $RunOnceName -Force -ErrorAction SilentlyContinue
       $result = "Previous microphone restored; VB-CABLE retained"
     }
@@ -285,7 +300,7 @@ try {
 
 # Emit result lines on stdout for the host app to parse (no desktop file / no MessageBox).
 @(
-  "Xiaomi Remote Bridge audio check",
+  "IPRC1000 audio check",
   "Time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
   "Mode: $Mode",
   "Result: $result",

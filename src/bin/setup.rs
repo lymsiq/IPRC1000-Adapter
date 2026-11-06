@@ -201,7 +201,7 @@ fn extract(dir: &Path, mut say: impl FnMut(String)) -> Result<(), String> {
 /// 写 native.json（含输入法选择）
 /// 写"种子配置"给程序首次启动读取。
 ///
-/// ★ 不直接写 `native.json`：程序读的是 `%APPDATA%\IPRC1000 Adapter\native.json`，
+/// ★ 不直接写 `native.json`：程序读的是 `<应用目录>\data\native.json`，
 ///   安装目录那份它从来不读 —— 客户在安装器里选的输入法会被**静默丢弃**。
 ///   现在由程序首次启动读种子后接管，配置只有一个属主。
 fn write_settings(dir: &Path, ime: &str, autostart: bool) -> Result<(), String> {

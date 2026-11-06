@@ -60,10 +60,7 @@ pub struct Shortcut {
 }
 
 fn file() -> PathBuf {
-    let base = std::env::var("APPDATA").unwrap_or_default();
-    PathBuf::from(base)
-        .join("IPRC1000 Adapter")
-        .join("shortcuts.json")
+    crate::paths::data_dir().join("shortcuts.json")
 }
 
 fn read_file() -> Vec<Shortcut> {

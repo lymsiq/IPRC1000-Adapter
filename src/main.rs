@@ -25,6 +25,7 @@ mod installer;
 mod keymap;
 mod macro_player;
 mod macro_store;
+mod paths;
 mod mouse_act;
 mod mouse_move;
 mod recorder;
@@ -137,7 +138,7 @@ pub fn apply_binding(id: &str, value: &str) -> String {
     }
 }
 
-/// 把 **stdout + stderr** 都重定向到 `%APPDATA%\IPRC1000 Adapter\native.log`。
+/// 把 **stdout + stderr** 都重定向到 `<应用目录>\logs\native.log`。
 ///
 /// 为什么必须这么做：之前日志靠调用方 `> file 2>&1`，用户自己双击 exe 时
 /// stderr 直接丢弃 ⇒ 出问题只能靠猜（录制键盘不工作这事就因此查了很久）。
@@ -241,10 +242,9 @@ pub fn logs_on() -> bool {
 /// （`redirect_stderr_to_file` 是 main 的第一件事，那时 settings 还没 load）。
 /// 只读 settings.json 里的一个字段，失败时按"开"处理。
 fn logs_enabled_quick() -> bool {
-    let base = std::env::var("APPDATA").unwrap_or_default();
-    let p = std::path::PathBuf::from(base)
-        .join("IPRC1000 Adapter")
-        .join("settings.json");
+    // 读的就是 settings 那份文件（native.json）。原来写的是 settings.json ——
+    // 那个文件根本不存在，于是这里永远返回 true，"关日志"一直没生效。
+    let p = crate::paths::data_dir().join("native.json");
     let Ok(txt) = std::fs::read_to_string(&p) else { return true };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) else { return true };
     v.get("logEnabled").and_then(|x| x.as_bool()).unwrap_or(true)
@@ -252,8 +252,7 @@ fn logs_enabled_quick() -> bool {
 
 /// 删除所有运行日志（关闭日志时调用一次）。
 pub fn purge_logs() {
-    let base = std::env::var("APPDATA").unwrap_or_default();
-    let dir = std::path::PathBuf::from(base).join("IPRC1000 Adapter");
+    let dir = crate::paths::logs_dir();
     for name in [
         "native.log", "bridge.log", "bridge-stats.json",
         "key-events.log", "router.log", "stuck-guard.log", "mouse.log",
@@ -295,9 +294,7 @@ pub fn silence_stdio() {
 
 fn redirect_stderr_to_file() {
     use std::os::windows::io::AsRawHandle;
-    let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".into());
-    let dir = std::path::PathBuf::from(base).join("IPRC1000 Adapter");
-    let _ = std::fs::create_dir_all(&dir);
+    let dir = crate::paths::logs_dir();
     // ★ 用户关了日志：不写文件、直接丢弃（所有 println/eprintln 都进 NUL）
     if !logs_enabled_quick() {
         LOGS_ON.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -566,6 +563,9 @@ fn main() {
     clean_stale_trace();
 
     // ① 先读配置（UI 一起来就要显示）
+    //   ★ 读之前先看"新位置有没有配置"：没有就把老 %APPDATA% 的搬过来 ——
+    //     否则升级到 0.4.34 的用户会发现键位/宏/话术全没了（其实是换了目录）。
+    paths::migrate_legacy();
     settings::load();
     macro_store::load();
     macro_store::migrate_split_both();   // 旧数据：合并的按下+弹起拆成独立步骤

@@ -68,8 +68,7 @@ fn store() -> &'static Mutex<Data> {
 }
 
 fn path() -> PathBuf {
-    let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(base).join("IPRC1000 Adapter").join("native.json")
+    crate::paths::data_dir().join("native.json")
 }
 
 fn parse_map(v: &serde_json::Value) -> HashMap<String, String> {

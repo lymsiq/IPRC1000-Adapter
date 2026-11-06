@@ -350,12 +350,9 @@ mod diag {
 
     static LOG: OnceLock<Mutex<Option<std::fs::File>>> = OnceLock::new();
 
-    /// %APPDATA%\IPRC1000 Adapter\ —— 与应用配置同目录（应用读得到）
+    /// `<应用目录>\logs\` —— 与配置同层（配置在 data\，日志在 logs\）
     pub fn app_dir() -> Option<std::path::PathBuf> {
-        let base = std::env::var("APPDATA").ok()?;
-        let d = std::path::PathBuf::from(base).join("IPRC1000 Adapter");
-        let _ = std::fs::create_dir_all(&d);
-        Some(d)
+        Some(crate::paths::logs_dir())
     }
 
     fn log_file() -> &'static Mutex<Option<std::fs::File>> {

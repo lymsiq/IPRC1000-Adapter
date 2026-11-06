@@ -23,8 +23,7 @@ pub struct Macro {
 }
 
 fn path() -> PathBuf {
-    let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(base).join("IPRC1000 Adapter").join("native-macros.json")
+    crate::paths::data_dir().join("native-macros.json")
 }
 
 fn store() -> &'static Mutex<Vec<Macro>> {

@@ -15,8 +15,7 @@ pub struct Slot {
 
 #[allow(dead_code)]
 fn path() -> PathBuf {
-    let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(base).join("IPRC1000 Adapter").join("native-text.json")
+    crate::paths::data_dir().join("native-text.json")
 }
 
 fn store() -> &'static Mutex<std::collections::HashMap<u32, Slot>> {

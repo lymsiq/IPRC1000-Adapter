@@ -703,8 +703,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     set_hint(if on { "已开启日志（重启程序后开始记录）" } else { "已关闭日志" }, C_OK);
                 }
                 ID_LOGDIR => {
-                    let base = std::env::var("APPDATA").unwrap_or_default();
-                    let dir = std::path::PathBuf::from(base).join("IPRC1000 Adapter");
+                    let dir = crate::paths::logs_dir();
                     let _ = std::process::Command::new("explorer").arg(&dir).spawn();
                     set_hint(&format!("已打开 {}", dir.display()), C_OK);
                 }

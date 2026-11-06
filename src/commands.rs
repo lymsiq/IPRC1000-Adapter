@@ -50,25 +50,25 @@ pub fn test_tone() -> String {
 
 /// 把默认录音设备设为 CABLE Output。
 ///
-/// 走 `assets/configure-xiaomi-audio.ps1 -Mode EnsureMic` —— 与 C# 版**同一条路**：
+/// 走 `assets/configure-audio.ps1 -Mode EnsureMic` —— 与 C# 版**同一条路**：
 /// 它会先记下原来的默认麦克风（卸载时能还原），而不是我们自己乱写注册表。
 pub fn set_default_mic() -> String {
     let mut cands: Vec<std::path::PathBuf> = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         if let Some(d) = exe.parent() {
-            cands.push(d.join("assets").join("configure-xiaomi-audio.ps1"));
+            cands.push(d.join("assets").join("configure-audio.ps1"));
             if let Some(p) = d.parent() {
                 cands.push(
                     p.join("IPRC1000_Adapter")
                         .join("assets")
-                        .join("configure-xiaomi-audio.ps1"),
+                        .join("configure-audio.ps1"),
                 );
             }
         }
     }
     // 开发目录兜底（源码树里跑的时候）
     cands.push(std::path::PathBuf::from(
-        "F:/vibe/IPRC1000_Adapter/assets/configure-xiaomi-audio.ps1",
+        "F:/vibe/IPRC1000_Adapter/assets/configure-audio.ps1",
     ));
 
     let shell = format!("{}{}", "power", "shell.exe");
@@ -106,7 +106,7 @@ pub fn set_default_mic() -> String {
     }
     serde_json::json!({
         "ok": false,
-        "message": "没找到 configure-xiaomi-audio.ps1 —— 请在「设置 → 系统 → 声音 → 输入」里手动选择 CABLE Output"
+        "message": "没找到 configure-audio.ps1 —— 请在「设置 → 系统 → 声音 → 输入」里手动选择 CABLE Output"
     })
     .to_string()
 }
@@ -382,9 +382,17 @@ pub fn repair_report() -> crate::step::Report {
             "遥控器改造",
             StepResult::AlreadyOk(String::from("已不是键盘（不会打出字母）")),
         ),
+        // ★★ 2026-11-06（新机器实测）：**不能报 AlreadyOk**。
+        //   遥"未连接"意味着改造根本没做，而原来的 AlreadyOk 让安装器认为
+        //   "这项没问题"并以退出码 0 结束 —— 客户装完看到"安装成功"，
+        //   实际遥控器还是键盘，按一下往文档里打字母，界面却显示"遥控器在线"
+        //   （在线只看 30 秒内有没有 ETW 事件，不代表按键能解析出来）。
+        //   改成 Manual：安装器会以退出码 3 结束并提示"先按一下遥控器唤醒"。
         None => rep.push(
             "遥控器改造",
-            StepResult::AlreadyOk(String::from("未连接（连上后再检查）")),
+            StepResult::Manual(String::from(
+                "没检测到遥控器的 HID 节点 —— 先按一下遥控器把它唤醒（或重新配对），再点一次「一键修复」",
+            )),
         ),
     }
 

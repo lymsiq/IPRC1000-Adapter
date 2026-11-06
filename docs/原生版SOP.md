@@ -50,7 +50,7 @@
 完整版在无 OpenGL 的机器上会自动降级到 Win32 界面（不黑屏、不闪退），
 但二进制里仍带 GL 代码。若客户机长期无显卡驱动，直接用 Win32 包更省资源。
 
-两个版本**共用** `%APPDATA%\IPRC1000 Adapter\` 下的同一份配置，换版本不用重配。
+两个版本**共用** `<应用目录>\data\` 下的同一份配置，换版本不用重配。
 
 ---
 
@@ -122,7 +122,7 @@
 | 时序档位 | 会话判定 600 ms（预设 1）；档位越高越不易被切断，但尾音更长 |
 | 麦克风 | 需默认输入设备为 `CABLE Output`（「一键修复」会自动设置） |
 
-> 包内脚本 `assets/configure-xiaomi-audio.ps1` 的文件名是**早期版本遗留**（当时配的是另一款遥控），
+> 包内脚本 `assets/configure-audio.ps1` 已改成中性名（旧名带 "xiaomi" 是早期项目遗留），
 > 它做的其实是通用的事：装 VB-CABLE、设默认麦克风、可一键还原。**与设备品牌无关，别因为名字跳过它。**
 
 > ⚠ 语音键是**全局**的：改任何配置组都不影响它，由「输入法」页决定。
@@ -204,7 +204,19 @@ IPRC1000-Native.exe --launch-shortcut 2
 
 ## 8. 配置与日志
 
-位置：`%APPDATA%\IPRC1000 Adapter\`
+位置：**应用目录下**（与 exe 同一层，装在哪就在哪）
+
+```text
+<应用目录>\
+├── IPRC1000-Native.exe
+├── WinUHid.dll / assets\
+├── data\      ← 配置
+└── logs\      ← 日志
+```
+
+> 若应用目录不可写（例如装在 `Program Files`），自动回退到
+> `%APPDATA%\IPRC1000 Adapter\`（配置仍放 `data\`、日志放 `logs\`）。
+> 旧版本把配置放在 `%APPDATA%`，升级后**首次启动会自动迁移**，旧文件保留不删。
 
 | 文件 | 内容 |
 |---|---|
@@ -213,7 +225,7 @@ IPRC1000-Native.exe --launch-shortcut 2
 | `macros.json` / `native-macros.json` | 宏定义 |
 | `native-text.json` | 文本槽内容 |
 | `keymap.json` | 键位覆盖（兼容旧格式） |
-| `native.log` | 运行日志（**排障先看这个**） |
+| `logs\native.log` | 运行日志（**排障先看这个**） |
 | `bridge.log` / `bridge-stats.json` | 语音桥统计 |
 | `mouse.json` | 鼠标模式参数 |
 
