@@ -20,6 +20,7 @@ mod backend;
 mod cable_out;
 mod commands;
 mod device_probe;
+mod dev_install;
 mod elevate;
 mod etw_registry;
 mod health;
@@ -423,6 +424,21 @@ fn main() {
     // 恢复：`--restore-keyboard` 把遥控器从 raw 绑回键盘（改造后按键全无反应时的解药）
     if std::env::args().any(|a| a == "--restore-keyboard") {
         match device_probe::restore_keyboard() {
+            Ok(m) => println!("{m}"),
+            Err(e) => println!("失败：{e}"),
+        }
+        std::process::exit(0);
+    }
+
+    // 止字符：`--convert-hid` 把遥控器从 kbdhid 改绑到 mshidkmdf（HID-compliant device）。
+    // 目标：系统不再往焦点窗口打字母，同时 HID 接口 / Raw Input / ETW 都保持不变。
+    // 需要管理员；回退用 `--restore-keyboard`。
+    if std::env::args().any(|a| a == "--convert-hid") {
+        if !elevate::is_admin() {
+            println!("失败：需要管理员权限（要改设备驱动绑定）。请以管理员身份重新运行本命令。");
+            std::process::exit(4);
+        }
+        match device_probe::convert_to_hid_compliant() {
             Ok(m) => println!("{m}"),
             Err(e) => println!("失败：{e}"),
         }

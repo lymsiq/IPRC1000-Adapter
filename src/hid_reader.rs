@@ -388,8 +388,13 @@ pub fn start() {
                 EXACT_SEEN.store(true, Ordering::Relaxed);
             }
             eprintln!("[HID] 启动枚举 Raw Input：{total} 个设备，VID/PID 精确匹配 {exact} 个", total = names.len());
-            for n in names.iter().take(12) {
-                eprintln!("[HID]   · [{}] {n}", remote_reason(n).unwrap_or("未认领"));
+            // ★ 必须打**全部**：之前 take(12) 把真正的遥控器截掉了，
+            //   现场只能看到一堆鼠标键盘，反而更迷惑。
+            for (i, n) in names.iter().enumerate() {
+                eprintln!(
+                    "[HID]   {i:2}. [{}] {n}",
+                    remote_reason(n).unwrap_or("未认领")
+                );
             }
             if names.is_empty() {
                 eprintln!("[HID]   · 列表为空：遥控器休眠/蓝牙断链，或 RIDI_DEVICENAME 读取失败");
@@ -415,8 +420,8 @@ pub fn start() {
                             FILTERED.load(Ordering::Relaxed),
                             NAME_FAIL.load(Ordering::Relaxed),
                         );
-                        for s in names.iter().take(12) {
-                            eprintln!("[HID]   · {s}");
+                        for (i, s) in names.iter().enumerate() {
+                            eprintln!("[HID]   {i:2}. {s}");
                         }
                     }
                 }

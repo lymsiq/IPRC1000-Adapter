@@ -236,8 +236,10 @@ pub struct HidInst {
     pub inst: String,
     /// `Driver` 值指向 kbdclass ⇒ 系统仍把它当键盘
     pub is_keyboard: bool,
-    /// `HardwareID` 的第一项（改造时要原样传给 UpdateDriver…）
+    /// `HardwareID` 的第一项
     pub hwid: String,
+    /// 完整**设备实例 ID**（`HID\{vidpid}\{inst}`），SetupAPI 用这个打开设备
+    pub full_id: String,
 }
 
 /// 读 REG_MULTI_SZ 的第一项
@@ -291,7 +293,8 @@ pub fn remote_hid_instances() -> Vec<HidInst> {
                 .into_iter()
                 .next()
                 .unwrap_or_default();
-            out.push(HidInst { inst, is_keyboard: is_kb, hwid });
+            let full_id = format!(r"HID\{vidpid}\{inst}");
+            out.push(HidInst { inst, is_keyboard: is_kb, hwid, full_id });
         }
     }
     out
@@ -365,22 +368,56 @@ pub fn remote_still_keyboard() -> Option<bool> {
     bt_hid_bound()
 }
 
-/// ⛔ **已彻底禁用**（2026-11-06 客户机真机结论，交接文档 §4）。
+/// 把遥控器从 `kbdhid`（键盘）改绑到 `mshidkmdf`（**HID-compliant device**）。
 ///
-/// 原来这里用 `UpdateDriverForPlugAndPlayDevicesW` 把 HID 节点改绑成
-/// `input.inf / HID_Raw_Inst.NT`。实测后果：
-///   · HID 设备接口不再注册（全系统 9 个接口、匹配遥控器 0 个）
-///   · Windows 不建 PSM 0x0013 中断通道，空口无任何 HIDP 报文
-///   · 4 秒监督超时断开重连 ⇒ 按键与音频一起全断
-/// 设备变成 `Unknown / HIDClass / svc=[]` 空壳，靠 `--restore-keyboard` 才能救回。
+/// 目的：让系统**不再往焦点窗口打字母**，同时按键照常可读：
+///   · 不再绑 `kbdhid` ⇒ 不打字符
+///   · 绑 `mshidkmdf`，仍属 HIDClass ⇒ HID 接口照常注册
+///   · TLC 仍是 `0x01/0x06` ⇒ Raw Input 的 `WM_INPUT` 照常投递
+///   · ETW 读 BthPort 的 ACL 包，与 HID 驱动绑定无关 ⇒ 照常有数据
 ///
-/// 保留函数签名是为了让旧脚本/外部调用拿到**明确错误**而不是悄悄改设备；
-/// 内部实现与 `update_driver` 已一并移除，代码里不再存在"改造设备"的路径。
+/// 安装细节在 `dev_install::install_hid_compliant`（SetupAPI 按型号强制安装）。
+/// 旧实现用 `UpdateDriverForPlugAndPlayDevicesW` 按硬件 ID 匹配，而 `input.inf`
+/// 只匹配 `HID_DEVICE`，设备是 `HID_DEVICE_SYSTEM_KEYBOARD` ⇒ 必然失败
+/// （`GetLastError=0`，开发机日志实证）。
+///
+/// 回退：`--restore-keyboard`（删 devnode，让 PnP 按硬件 ID 重新选回 `keyboard.inf`）。
 pub fn convert_to_hid_compliant() -> Result<String, String> {
-    Err(String::from(
-        "此操作已禁用：实测改造会让 HID 接口消失、按键与音频全断。\
-         若设备已被改造成 svc=[] 空壳，请运行 IPRC1000-Native.exe --restore-keyboard 恢复。",
-    ))
+    const INF: &str = r"C:\Windows\INF\input.inf";
+
+    let insts = remote_hid_instances();
+    if insts.is_empty() {
+        return Err("找不到遥控器的 HID 节点 —— 先按一下遥控器唤醒，确认设备管理器里能看到它".into());
+    }
+    let targets: Vec<&HidInst> = insts.iter().filter(|x| x.is_keyboard).collect();
+    if targets.is_empty() {
+        return Ok("遥控器已经是 HID-compliant device，无需改造（按键不会打出字母）".into());
+    }
+
+    let mut done = 0usize;
+    let mut errs: Vec<String> = Vec::new();
+    for t in &targets {
+        match crate::dev_install::install_hid_compliant(&t.full_id, INF) {
+            Ok(()) => {
+                done += 1;
+                eprintln!("[设备] 已改绑为 HID-compliant device：{}", t.full_id);
+            }
+            Err(e) => {
+                eprintln!("[设备] ★改绑失败：{} → {e}", t.full_id);
+                errs.push(format!("{}：{e}", t.inst));
+            }
+        }
+    }
+
+    if done == 0 {
+        Err(format!("改造失败：{}", errs.join("；")))
+    } else if errs.is_empty() {
+        Ok(format!(
+            "已改造 {done} 个节点 ⇒ 系统不再把遥控器当键盘（不打字母），按键仍可读。若出现异常，用 --restore-keyboard 回退。"
+        ))
+    } else {
+        Ok(format!("部分成功：{done} 个已改造；问题：{}", errs.join("；")))
+    }
 }
 
 /// VB-CABLE 主设备的问题码（`ROOT\MEDIA\*` 的 `Problem` 值）。
