@@ -340,14 +340,17 @@ pub fn load_group(map: &std::collections::HashMap<String, String>) {
     for (id, val) in map {
         let Some(u) = usage_of_id(id) else { continue };
         let v = val.trim();
+        // ★ 只有"动作"区间才当作动作并跳过。
+        //   原来 `parse::<i32>()` 成功就无条件 continue ⇒ **单个 VK 也被当成动作**，
+        //   于是 `"83"`（只绑 S）这种单键绑定重启后直接丢失
+        //   （"17,83" 因为有逗号解析失败才侥幸走对分支）。
+        //   这个坑很隐蔽：改完当场生效（apply_binding 里设了 override），
+        //   一重启就没了，而界面上显示的绑定串还是对的。
         if let Ok(act) = v.parse::<i32>() {
-            // 负数值一律是"动作"：鼠标(-1..-6) 与「打开程序」(-2001..-2999)。
-            // 原来只认 -6..-1，导致重启后"打开程序"绑定静默失效
-            // （界面照样显示"打开 XX"，按键却没反应）。
             if (-6..=-1).contains(&act) || (-2999..=-2001).contains(&act) {
                 set_action(u, Some(act));
+                continue;
             }
-            continue;
         }
         let vks: Vec<u16> = v.split(',').filter_map(|x| x.trim().parse::<u16>().ok()).collect();
         set_override(u, vks);

@@ -37,6 +37,7 @@ mod text_slot;
 mod winuhid;
 #[cfg(feature = "gui")]
 mod ui_edit;
+mod ui_edit_win32;
 #[cfg(feature = "gui")]
 mod ui_egui;
 #[cfg(feature = "gui")]

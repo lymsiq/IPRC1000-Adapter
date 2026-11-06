@@ -664,10 +664,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     None => set_hint("请先在表格里选中一行，再点「改映射」", C_HINT),
                     Some(u) if !editable(u) => set_hint(
                         "这一项由「唤醒」或完整界面决定，此处不支持单独修改", C_HINT),
-                    Some(_) => {
-                        CAP = 2;
-                        set_hint("请按目标键（可先按住 Ctrl/Alt/Shift/Win）…", C_HINT);
-                        let _ = windows::Win32::UI::Input::KeyboardAndMouse::SetFocus(hwnd);
+                    Some(u) => {
+                        // 可视化面板（与完整版同一套键表与编码），选完直接落库
+                        let id = crate::keymap::id_of(u);
+                        let label = crate::keymap::name_of(u);
+                        let cur = crate::settings::binding_in_group(&id);
+                        if let Some(v) = crate::ui_edit_win32::show(hwnd, &label, &cur) {
+                            let r = crate::apply_binding(&id, &v);
+                            rebuild_list();
+                            set_hint(&r, C_OK);
+                        }
                     }
                 },
                 ID_DEFAULT => {
