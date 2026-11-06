@@ -9,7 +9,7 @@
 |---|---|---|
 | 目录 | `F:\vibe\iprc1000_native` | `F:\vibe\iprc1000_gui_dotnet` |
 | 仓库 | **本仓（独立 git）** | 父仓 `F:\vibe`（由 `.gitignore` 白名单跟踪） |
-| 版本 | `Cargo.toml` 的 `version`，当前 **0.4.51** | `IPRC1000Adapter.csproj` 的 `<Version>`，当前 **1.2.164** |
+| 版本 | `Cargo.toml` 的 `version`，当前 **0.4.52** | `IPRC1000Adapter.csproj` 的 `<Version>`，当前 **1.2.164** |
 | 界面 | egui（原生，无 WebView2） | WinForms + WebView2 |
 | 发布包 | `IPRC1000_Native_v<版本>.zip` / `IPRC1000_Native_Setup_v<版本>.exe` | `IPRC1000_Adapter_v<版本>.zip` |
 | 关系 | 逐步取代 C# 版 | 存量用户仍在用 |

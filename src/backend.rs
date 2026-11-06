@@ -679,110 +679,10 @@ impl Activity {
     }
 }
 
-/// 蓝牙设备名里是否含 "IPRC"（与 C# 侧 RemoteNameHint 一致）
-///
-/// 读 `HKLM\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\<MAC>\Name`，
-/// 值是 UTF-8 字节串（可能有结尾 NUL）。这是"配对过的蓝牙设备名"的权威来源。
-#[cfg(target_os = "windows")]
-#[allow(dead_code)] // 改用 ETW 事件判在线后暂不调用；保留供 UI 显示"已配对"
-fn bth_device_name_present() -> bool {
-    use std::os::windows::ffi::OsStrExt;
-    #[link(name = "advapi32")]
-    extern "system" {
-        fn RegOpenKeyExW(h: usize, sub: *const u16, opt: u32, sam: u32, out: *mut usize) -> i32;
-        fn RegEnumKeyExW(h: usize, idx: u32, name: *mut u16, len: *mut u32,
-                         res: *mut u32, class: *mut u16, clen: *mut u32, ft: *mut u8) -> i32;
-        fn RegQueryValueExW(h: usize, name: *const u16, res: *mut u32, ty: *mut u32,
-                            data: *mut u8, len: *mut u32) -> i32;
-        fn RegCloseKey(h: usize) -> i32;
-    }
-    const HKEY_LOCAL_MACHINE: usize = 0x8000_0002;
-    const KEY_READ: u32 = 0x2_0019;
-    let root: Vec<u16> = std::ffi::OsStr::new("SYSTEM\\CurrentControlSet\\Services\\BTHPORT\\Parameters\\Devices")
-        .encode_wide().chain(std::iter::once(0)).collect();
-    let val: Vec<u16> = std::ffi::OsStr::new("Name").encode_wide().chain(std::iter::once(0)).collect();
-    unsafe {
-        let mut hk: usize = 0;
-        if RegOpenKeyExW(HKEY_LOCAL_MACHINE, root.as_ptr(), 0, KEY_READ, &mut hk) != 0 { return false; }
-        let mut buf = [0u16; 256];
-        let mut i = 0u32;
-        let mut found = false;
-        loop {
-            let mut len = buf.len() as u32;
-            let rc = RegEnumKeyExW(hk, i, buf.as_mut_ptr(), &mut len,
-                                   std::ptr::null_mut(), std::ptr::null_mut(),
-                                   std::ptr::null_mut(), std::ptr::null_mut());
-            if rc != 0 { break; }
-            let mac: Vec<u16> = buf[..len as usize].to_vec();
-            let mut sub: usize = 0;
-            if RegOpenKeyExW(hk, mac.as_ptr(), 0, KEY_READ, &mut sub) == 0 {
-                let mut data = [0u8; 128];
-                let mut dlen: u32 = data.len() as u32;
-                let mut ty: u32 = 0;
-                if RegQueryValueExW(sub, val.as_ptr(), std::ptr::null_mut(), &mut ty,
-                                    data.as_mut_ptr(), &mut dlen) == 0 && dlen > 0 {
-                    let text = String::from_utf8_lossy(&data[..dlen as usize]).to_lowercase();
-                    if text.contains("iprc") { found = true; }
-                }
-                RegCloseKey(sub);
-            }
-            if found { break; }
-            i += 1;
-        }
-        RegCloseKey(hk);
-        found
-    }
-}
 
 #[cfg(not(target_os = "windows"))]
 fn bth_device_name_present() -> bool { true }
 
-/// 遥控器是否还在系统里（只看注册表，1 秒最多查一次）
-#[cfg(target_os = "windows")]
-#[allow(dead_code)] // 同上：`remote_present()` 是静态配对状态，不能代表"此刻在线"
-fn remote_present() -> bool {
-    use std::os::windows::ffi::OsStrExt;
-
-    // ★★ 2026-10-29：**按蓝牙名称识别**（用户确认：设备名固定为 IPRC1000）。
-    //   原来的判据是 `Enum\HID` 里出现 `0a5c` && `8502` —— 那是 Broadcom 的 VID/PID，
-    //   换一只不同批次/不同芯片的遥控器就会**误判成"未连接"**。
-    //   名称在 `Services\BTHPORT\Parameters\Devices\<MAC>\Name`（UTF-8 字节串），
-    //   与 C# 侧 Env.PairedRemoteMacs() 用的是同一个来源，两边判据保持一致。
-    if bth_device_name_present() { return true; }
-
-    // 兜底：老逻辑（有些堆栈不写 BTHPORT\Name）
-    let path: Vec<u16> = std::ffi::OsStr::new("SYSTEM\\CurrentControlSet\\Enum\\HID")
-        .encode_wide().chain(std::iter::once(0)).collect();
-    #[link(name = "advapi32")]
-    extern "system" {
-        fn RegOpenKeyExW(h: usize, sub: *const u16, opt: u32, sam: u32, out: *mut usize) -> i32;
-        fn RegEnumKeyExW(h: usize, idx: u32, name: *mut u16, len: *mut u32,
-                         res: *mut u32, class: *mut u16, clen: *mut u32, ft: *mut u8) -> i32;
-        fn RegCloseKey(h: usize) -> i32;
-    }
-    const HKEY_LOCAL_MACHINE: usize = 0x8000_0002;
-    const KEY_READ: u32 = 0x2_0019;
-    unsafe {
-        let mut hk: usize = 0;
-        if RegOpenKeyExW(HKEY_LOCAL_MACHINE, path.as_ptr(), 0, KEY_READ, &mut hk) != 0 { return false; }
-        let mut buf = [0u16; 256];
-        let mut i = 0u32;
-        let mut found = false;
-        loop {
-            let mut len = buf.len() as u32;
-            let rc = RegEnumKeyExW(hk, i, buf.as_mut_ptr(), &mut len,
-                                   std::ptr::null_mut(), std::ptr::null_mut(),
-                                   std::ptr::null_mut(), std::ptr::null_mut());
-            if rc != 0 { break; }
-            let name = String::from_utf16_lossy(&buf[..len as usize]).to_lowercase();
-            // VID/PID 由 device_id 按蓝牙名称发现后提供，不再写死
-            if crate::device_id::matches(&name) { found = true; break; }
-            i += 1;
-        }
-        RegCloseKey(hk);
-        found
-    }
-}
 #[cfg(not(target_os = "windows"))]
 fn remote_present() -> bool { true }
 
@@ -3357,7 +3257,7 @@ fn replay_mode(path: &str, bridge: Arc<Mutex<Bridge>>, realtime: bool, stats: Ar
 
 /// 供 UI（Tauri 命令）读取的只读快照 —— 只暴露界面真正需要的几项。
 /// 开始录键（清掉上一次的结果）。egui 版改用弹框内直接读键盘，这里保留给旧调用方。
-#[allow(dead_code)]
+#[allow(dead_code)] // 未接 UI：按键录制（开始）
 pub fn begin_capture() {
     if let Ok(mut g) = captured().lock() {
         *g = None;
@@ -3388,7 +3288,7 @@ pub fn set_preset(i: u8) {
 ///   · 录到了   → `{ok:true, vks:[...], label:"Ctrl+A"}`
 ///   · 还在等   → `{ok:false, capturing:true}`（前端每 100 ms 轮询一次）
 ///   · 没在录   → `{ok:false, capturing:false}`
-#[allow(dead_code)]
+#[allow(dead_code)] // 未接 UI：按键录制（取结果）
 pub fn take_capture() -> String {
     if let Ok(mut g) = captured().lock() {
         if let Some(vks) = g.take() {
@@ -3468,7 +3368,7 @@ fn dir_slot(usage: u8) -> Option<usize> {
     }
 }
 
-#[allow(dead_code)]  // 字段多，不同 UI 版本按需读
+#[allow(dead_code)] // 未接 UI：sessions/cable_name/last_key 等字段留给界面显示，egui 版暂未读
 pub struct Snapshot {
     pub frames: u64,
     pub sessions: u64,

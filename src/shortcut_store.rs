@@ -124,7 +124,7 @@ pub fn save(num: u32, name: &str, path: &str, args: &str) -> Result<u32, String>
     }
 }
 
-#[allow(dead_code)] // 目前界面用不到（"删除按键"删的是键位，不是快捷方式条目），留给 CLI/后续
+#[allow(dead_code)] // 未接 UI（功能已实现，等界面入口）
 pub fn delete(num: u32) -> Result<(), String> {
     let mut all = list();
     if num == 0 || num as usize > all.len() {

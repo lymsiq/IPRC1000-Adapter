@@ -36,7 +36,7 @@ pub fn action_name(act: i32) -> &'static str {
 
 /// 是不是"按住型"动作（按下/松开各有意义）。
 /// 滚轮和切组是**一次性**的，只在按下那一刻触发，松开什么都不做。
-#[allow(dead_code)]  // 保留：以后做"按住型动作"的超时释放会用到
+#[allow(dead_code)] // 未接：按住型鼠标动作的超时释放
 pub fn is_hold_action(act: i32) -> bool {
     matches!(act, ACT_LEFT | ACT_RIGHT)
 }

@@ -80,7 +80,7 @@ impl Setup {
         }
     }
 
-    #[allow(dead_code)]
+#[allow(dead_code)] // 未接 UI（功能已实现，等界面入口）
     fn say(&mut self, s: impl Into<String>) {
         let line = s.into();
         eprintln!("[安装] {line}");
@@ -809,7 +809,6 @@ fn open_url(u: &str) {
 }
 
 /// 让"未使用"的告警安静：Write 目前没用上，但保留便于将来写日志
-#[allow(dead_code)]
 fn _unused(mut w: impl Write) {
     let _ = w.flush();
 }

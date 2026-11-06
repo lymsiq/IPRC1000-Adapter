@@ -312,12 +312,10 @@ pub fn set_preset(v: u8) {
     }
 }
 
-#[allow(dead_code)]
 pub fn log_enabled() -> bool {
     store().lock().map(|d| d.log_enabled).unwrap_or(true)
 }
 
-#[allow(dead_code)]
 pub fn set_log_enabled(v: bool) {
     if let Ok(mut d) = store().lock() {
         d.log_enabled = v;
@@ -359,7 +357,6 @@ pub fn set_device_binding(b: &DeviceBinding) {
 }
 
 /// 清掉学习结果，下次重新发现（换遥控器时用）。
-#[allow(dead_code)]
 pub fn clear_device_binding() {
     if let Ok(mut d) = store().lock() {
         d.device = None;
@@ -467,7 +464,7 @@ pub fn groups_ui() -> Vec<serde_json::Value> {
 }
 
 /// 新建一个普通组，返回新组 id
-#[allow(dead_code)]
+#[allow(dead_code)] // 未接 UI：配置组管理（新建）
 pub fn new_group(name: &str) -> Result<u8, String> {
     let mut d = store().lock().map_err(|_| "存储忙".to_string())?;
     if d.groups.len() >= 16 {
@@ -485,7 +482,7 @@ pub fn new_group(name: &str) -> Result<u8, String> {
 }
 
 /// 删除一个组（默认组与鼠标模式组不可删）
-#[allow(dead_code)]
+#[allow(dead_code)] // 未接 UI：配置组管理（删除）
 pub fn delete_group(id: u8) -> Result<(), String> {
     let mut d = store().lock().map_err(|_| "存储忙".to_string())?;
     let idx = id as usize;
@@ -504,7 +501,7 @@ pub fn delete_group(id: u8) -> Result<(), String> {
     Ok(())
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // 未接 UI：配置组管理（重命名）
 pub fn rename_group(id: u8, name: &str) -> Result<(), String> {
     let mut d = store().lock().map_err(|_| "存储忙".to_string())?;
     let idx = id as usize;

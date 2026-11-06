@@ -224,17 +224,6 @@ impl Rec {
         Some(Self { tx })
     }
 
-    /// 投递一段 16-bit 小端单声道 PCM。**非阻塞**：队列满就丢，绝不拖累调用方。
-    ///
-    /// 保留字节接口：字节流来源（ETW 原始帧）可直接用，不必先转成 `i16` 数组。
-    #[allow(dead_code)]
-    pub fn write_pcm16le(&self, pcm: &[u8]) {
-        if pcm.is_empty() {
-            return;
-        }
-        let n = pcm.len() & !1;
-        let _ = self.tx.try_send(pcm[..n].to_vec());
-    }
 
     /// 投递一串 i16 样本（48k 那路用）
     pub fn write_samples(&self, s: &[i16]) {

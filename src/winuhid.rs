@@ -37,14 +37,14 @@ const CFG_LEN: usize = 56;
 // 字段偏移（Pack=1，x64）
 // 这两个字段我们始终写 0（supportedEvents=0 / containerId 全零让 Windows 分配），
 // 常量留着是为了和 C# 的 `DeviceConfig` 逐字段对照 —— 以后要改布局时不会数错偏移。
-#[allow(dead_code)]
+#[allow(dead_code)] // 保留：与 C# DeviceConfig 逐字段对照用
 const OFF_SUPPORTED_EVENTS: usize = 0;
 const OFF_VENDOR_ID: usize = 4;
 const OFF_PRODUCT_ID: usize = 6;
 const OFF_VERSION: usize = 8;
 const OFF_DESC_LEN: usize = 10;
 const OFF_DESC_PTR: usize = 12;
-#[allow(dead_code)]
+#[allow(dead_code)] // 保留：与 C# DeviceConfig 逐字段对照用
 const OFF_CONTAINER: usize = 20;
 const OFF_INSTANCE_ID: usize = 36;
 const OFF_HARDWARE_IDS: usize = 44;

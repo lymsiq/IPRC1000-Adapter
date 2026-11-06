@@ -13,7 +13,6 @@
 
 // Win32 版（feature = win32_only）不编译 egui/托盘那一套，因此有一批函数"没有调用者"。
 // 逐个加 cfg 门控收益不大、还容易把完整版编坏，所以只在这一类构建下统一放开。
-#![cfg_attr(feature = "win32_only", allow(dead_code))]
 
 mod autostart;
 mod backend;
@@ -1175,7 +1174,6 @@ pub fn set_window_alpha(alpha: u8) {
 /// egui 的 run_native 在**没有任何可见窗口**时会返回 → main 结束 → 进程退出。
 /// 早先"关窗后程序直接消失"就是这个原因（隐藏 = 让 eframe 认为窗口没了）。
 /// 最小化后窗口仍然存在（只是不可见），egui 会继续跑、托盘也能唤回。
-#[allow(dead_code)]  // 已被 ViewportCommand::Minimized 取代（Win32 版会被 winit 还原）
 pub fn minimize_window() {
     unsafe {
         use windows::Win32::UI::WindowsAndMessaging::*;
@@ -1367,7 +1365,7 @@ fn tray_thread() {
 }
 
 /// 把主窗口显示出来。**已被 SHOW_REQ 机制取代**（eframe 不认外部 ShowWindow），保留作参考。
-#[allow(dead_code)]
+#[allow(dead_code)] // 未接：托盘唤起主窗口（现在用 ViewportCommand）
 fn show_window() {
     unsafe {
         use windows::Win32::UI::WindowsAndMessaging::*;

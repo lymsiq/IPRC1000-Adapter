@@ -10,16 +10,15 @@
 //! 为什么不用 SetupAPI：注册表读取无副作用、不需要设备句柄、失败也只是返回空列表，
 //! 比 SetupDiGetClassDevs 那一套轻得多；而我们要的信息（实例名 + Driver）注册表里全有。
 
-#![allow(dead_code)]  // 整个模块：设备枚举供将来的界面用，当前 egui 版未接
 
 use windows::core::PCWSTR;
 use windows::Win32::System::Registry::*;
 
 /// 一台设备的节点信息（界面只要 path 和 online）
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct Node {
     pub path: String,
+#[allow(dead_code)] // 未接 UI（功能已实现，等界面入口）
     pub online: bool,
 }
 
@@ -115,6 +114,7 @@ fn value_string(h: HKEY, name: &str) -> Option<String> {
 /// 只扫 `HID\` 下**我们这个遥控器 VID/PID** 的分支 —— 系统里通常有十几个 HID 设备
 /// （键盘、鼠标、耳机…），全列出来既慢又没意义；界面要的是"**这只遥控器**有几个节点、
 /// 它们是不是还在线"。
+#[allow(dead_code)] // 未接：HID 节点枚举（doctor 改用 bt_nodes）
 pub fn hid_nodes() -> Vec<Node> {
     let mut out = Vec::new();
     let Some(root) = open_key(r"SYSTEM\CurrentControlSet\Enum\HID") else {
@@ -173,6 +173,7 @@ pub fn bt_nodes() -> Vec<Node> {
 ///
 /// 为什么不每次现算：`getState` 每 2 秒一次，而枚举注册表要几十毫秒；
 /// 设备热插拔的变化有 15 秒延迟完全可以接受（界面本来就不是实时监控）。
+#[allow(dead_code)] // 未接：节点缓存
 pub fn nodes_cached() -> (Vec<Node>, Vec<Node>, bool) {
     use std::sync::{Mutex, OnceLock};
     use std::time::Instant;
@@ -257,6 +258,7 @@ pub struct HidInst {
     /// `Driver` 值指向 kbdclass ⇒ 系统仍把它当键盘
     pub is_keyboard: bool,
     /// `HardwareID` 的第一项
+#[allow(dead_code)] // 未接 UI（功能已实现，等界面入口）
     pub hwid: String,
     /// 完整**设备实例 ID**（`HID\{vidpid}\{inst}`），SetupAPI 用这个打开设备
     pub full_id: String,

@@ -68,14 +68,12 @@ pub fn set_override(usage: u8, vks: Vec<u16>) {
     }
 }
 
-#[allow(dead_code)]  // 保留给「恢复出厂设置」（界面暂未接）
 pub fn remove_override(usage: u8) {
     if let Ok(mut g) = ov().lock() {
         g.remove(&usage);
     }
 }
 
-#[allow(dead_code)]
 pub fn overrides() -> std::collections::HashMap<u8, Vec<u16>> {
     ov().lock().map(|g| g.clone()).unwrap_or_default()
 }

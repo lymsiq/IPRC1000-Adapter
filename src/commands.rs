@@ -13,7 +13,7 @@ use crate::backend;
 /// 为什么要它：语音不出声时，第一步要分清"链路没声音"还是"输入法选错设备"。
 /// 这个测试音**绕过遥控器和 ETW**，直接由我们写声卡 —— 能听到就说明
 /// CABLE → 输入法这一段是通的，问题在上游。
-#[allow(dead_code)]  // 环境页将来会放「发送测试音」按钮
+#[allow(dead_code)] // 未接 UI：环境页「发送测试音」按钮
 pub fn test_tone() -> String {
     let Some(shared) = backend::shared() else {
         return serde_json::json!({ "ok": false, "message": "业务还没启动" }).to_string();
@@ -117,7 +117,7 @@ pub fn set_default_mic() -> String {
 ///   · 判的是**设备真实状态**，不是"点了按钮"；
 ///   · 做不到的事**明说怎么做**，不假装成功；
 ///   · 同一个动作只有一套实现（这里直接复用 `set_default_mic`）。
-#[allow(dead_code)]  // 旧「一键体检」入口，egui 版改成分项按钮
+#[allow(dead_code)] // 未接 UI：旧「一键体检」入口
 pub fn run_setup() -> String {
     let Some(shared) = backend::shared() else {
         return serde_json::json!({ "ok": false, "message": "业务还没启动" }).to_string();
@@ -287,7 +287,6 @@ pub fn probes() -> Probes {
 }
 
 /// 强制下次 probes() 重新探测（装完驱动后调）
-#[allow(dead_code)]
 pub fn invalidate_probes() {
     if let Ok(mut g) = PROBES.lock() {
         *g = None;

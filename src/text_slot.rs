@@ -7,13 +7,11 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Clone, Default)]
-#[allow(dead_code)]  // name 由界面用，后端只负责存取
 pub struct Slot {
     pub name: String,
     pub text: String,
 }
 
-#[allow(dead_code)]
 fn path() -> PathBuf {
     crate::paths::data_dir().join("native-text.json")
 }
@@ -61,7 +59,7 @@ pub fn set(slot: u32, name: &str, text: &str) {
 }
 
 /// 界面列表用（哪个槽有内容）
-#[allow(dead_code)]
+#[allow(dead_code)] // 未接 UI：列表渲染入口
 pub fn list_for_ui() -> Vec<serde_json::Value> {
     let g = match store().lock() { Ok(g) => g, Err(_) => return Vec::new() };
     let mut out: Vec<serde_json::Value> = g

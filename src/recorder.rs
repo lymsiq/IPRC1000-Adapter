@@ -184,7 +184,7 @@ fn push(e: RawEvent) {
     }
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // 待修：键盘录制钩子未安装（当前只装了 WH_MOUSE_LL）
 unsafe extern "system" fn kb_proc(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if code >= 0 && RECORDING.load(Ordering::Relaxed) {
         let kb = &*(lp.0 as *const KBDLLHOOKSTRUCT);
@@ -348,7 +348,7 @@ pub fn build_steps(evs: &[RawEvent]) -> Vec<serde_json::Value> {
 ///
 /// 明确不支持：新版 JSON5 的流程控制（sequence/if/goto/label）、滚轮 —— 都会记进 warnings，
 /// 不静默丢弃（静默丢步骤比报错更糟：用户以为导成功了）。
-#[allow(dead_code)]
+#[allow(dead_code)] // 未接 UI：KeymouseGo 脚本导入
 pub fn import_kmgo(txt: &str) -> (Vec<serde_json::Value>, Vec<String>) {
     let mut evs: Vec<RawEvent> = Vec::new();
     let mut warns: Vec<String> = Vec::new();

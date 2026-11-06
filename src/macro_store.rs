@@ -106,7 +106,6 @@ pub fn save(num: u32, name: &str, steps: Vec<Value>, loop_count: u32) -> Result<
     Ok(final_num)
 }
 
-#[allow(dead_code)]  // 界面暂无"删除宏"入口，保留
 pub fn delete(num: u32) {
     if let Ok(mut g) = store().lock() {
         g.retain(|m| m.num != num);
@@ -115,7 +114,7 @@ pub fn delete(num: u32) {
 }
 
 /// 界面用的列表（`state.macros`）：只给概要，不带 steps（避免每 2 秒传一大坨）
-#[allow(dead_code)]
+#[allow(dead_code)] // 未接 UI：列表渲染入口
 pub fn list_for_ui() -> Vec<Value> {
     all()
         .iter()
@@ -134,7 +133,7 @@ pub fn list_for_ui() -> Vec<Value> {
 }
 
 /// 取一条宏给编辑界面（带 steps）
-#[allow(dead_code)]
+#[allow(dead_code)] // 未接 UI：结构转展示模型
 pub fn to_ui(m: &Macro) -> Value {
     json!({
         "ok": true,

@@ -30,7 +30,7 @@ pub fn fatal() -> Option<String> {
 }
 
 /// 故障恢复后清掉（例如驱动重连成功）。目前只留给将来用。
-#[allow(dead_code)]
+#[allow(dead_code)] // 未接 UI（功能已实现，等界面入口）
 pub fn clear() {
     if let Ok(mut g) = FATAL.lock() {
         *g = None;
