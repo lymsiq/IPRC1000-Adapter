@@ -814,6 +814,8 @@ pub struct Bridge {
     inline_last: [u8; 8],
     /// 调试录音：收到的 16 kHz 原始音频（`IPRC1000_RECORD` 控制，默认 None）
     rec16: Option<crate::capture::Rec>,
+    /// 原始帧导出（IPRC1000_DUMP_RAW 设置时才有）
+    dump_raw: Option<crate::raw_dump::RawDump>,
 }
 
 impl Bridge {
@@ -872,6 +874,7 @@ impl Bridge {
             inline,
             inline_last: [0u8; 8],
             rec16: crate::capture::Rec::open("16k", 16000),
+            dump_raw: crate::raw_dump::RawDump::from_env(),
             cable,
         }
     }
@@ -2000,6 +2003,11 @@ impl Bridge {
     fn push_payload(&mut self, p: &[u8]) {
         if p.len() != FRAME_LEN {
             return;
+        }
+        // 原始帧导出（只有 IPRC1000_DUMP_RAW 设置时才存在）。
+        // 用途：换适配器后音频异常时，拿原始 653 字节离线试 HDR 偏移与分片拼法。
+        if let Some(d) = self.dump_raw.as_ref() {
+            d.write(p);
         }
 
         // ★ 本帧是不是"新会话的第一帧"。

@@ -22,6 +22,7 @@ mod doctor;
 mod autorepeat;
 mod device_id;
 mod power;
+mod raw_dump;
 mod commands;
 mod device_probe;
 mod dev_install;
