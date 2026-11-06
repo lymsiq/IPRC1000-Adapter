@@ -42,6 +42,8 @@ pub struct Data {
     pub trigger: String,
     pub preset: u8,
     pub log_enabled: bool,
+    /// 音频调试录音：勾上后把收到的音频写进「程序目录\wav\」（默认关，零开销）
+    pub record_audio: bool,
     pub active_group: u8,
     pub groups: Vec<Group>,
 }
@@ -53,6 +55,7 @@ impl Default for Data {
             trigger: "hold".into(),
             preset: 1,
             log_enabled: true,
+            record_audio: false,
             active_group: 0,
             groups: vec![
                 Group::normal("默认配置组 1"),
@@ -161,6 +164,9 @@ pub fn load() {
     if let Some(b) = v["logEnabled"].as_bool() {
         d.log_enabled = b;
     }
+    if let Some(b) = v["recordAudio"].as_bool() {
+        d.record_audio = b;
+    }
     if let Some(arr) = v["groups"].as_array() {
         if !arr.is_empty() {
             let mut gs: Vec<Group> = arr
@@ -208,6 +214,7 @@ fn save(d: &Data) {
         "schemaVersion": 2,
         "ime": d.ime, "trigger": d.trigger, "preset": d.preset,
         "logEnabled": d.log_enabled,
+        "recordAudio": d.record_audio,
         "activeGroup": d.active_group,
         "groups": groups,
         "_comment": "IPRC1000 原生内核设置（与 C# 版 settings.json 互不影响）"
@@ -269,6 +276,18 @@ pub fn log_enabled() -> bool {
 pub fn set_log_enabled(v: bool) {
     if let Ok(mut d) = store().lock() {
         d.log_enabled = v;
+        save(&d);
+    }
+}
+
+/// 音频调试录音开关（界面复选框 / IPRC1000_RECORD 环境变量）
+pub fn record_audio() -> bool {
+    store().lock().map(|d| d.record_audio).unwrap_or(false)
+}
+
+pub fn set_record_audio(v: bool) {
+    if let Ok(mut d) = store().lock() {
+        d.record_audio = v;
         save(&d);
     }
 }

@@ -205,7 +205,7 @@ impl CableOut {
 /// 在音频线程里真正打开设备并建流（返回 stream + 设备名 + 声道数）
 fn build_stream(ring: Arc<Mutex<Ring>>) -> Result<(cpal::Stream, String, u16), String> {
     let host = cpal::default_host();
-    let mut picked = None;
+    let mut picked: Option<(cpal::Device, String, u8)> = None;
     let mut seen: Vec<String> = Vec::new();
     for d in host
         .output_devices()
@@ -213,15 +213,28 @@ fn build_stream(ring: Arc<Mutex<Ring>>) -> Result<(cpal::Stream, String, u16), S
     {
         let n = d.name().unwrap_or_default();
         seen.push(n.clone());
-        // ★ 名字放宽到「含 CABLE」：不同机器上端点实名不一致，
-        //   `CABLE Input` / `CABLE Input (VB-Audio Virtual Cable)` /
-        //   `VB-Audio Virtual Cable` 都出现过（客户机实测第三种）。
-        //   只认精确的 `CABLE Input` 会直接判"没装"，把音频整段丢掉。
-        if picked.is_none() && n.to_uppercase().contains(TARGET_KEYWORD) {
-            picked = Some((d, n));
+        let up = n.to_uppercase();
+        if !up.contains(TARGET_KEYWORD) {
+            continue;
+        }
+        // ★ 打分选最优（2026-11-06 客户机实测）：
+        //   同一台机器上会同时出现 `CABLE Input` 和 `CABLE In 16 Ch`，
+        //   后者是 16 通道变体。客户机的 `CABLE In 16 Ch` 被写满了，
+        //   但输入法接的是 `CABLE Output`（对应 `CABLE Input` 那一路），
+        //   写到 16 Ch 等于**声音进了另一根线**，表现为"有波形、没输出"。
+        //   所以：精确 `CABLE Input` > 其它非 16Ch > 16Ch 变体。
+        let score: u8 = if up.contains("CABLE INPUT") && !up.contains("16 CH") {
+            3
+        } else if !up.contains("16 CH") {
+            2
+        } else {
+            1
+        };
+        if picked.as_ref().map(|(_, _, s)| *s).unwrap_or(0) < score {
+            picked = Some((d, n, score));
         }
     }
-    let (device, name) = picked.ok_or_else(|| {
+    let (device, name, _) = picked.ok_or_else(|| {
         format!(
             "没有找到 VB-CABLE 输出端点（按名字含 CABLE 匹配）。当前输出设备：{}",
             if seen.is_empty() {

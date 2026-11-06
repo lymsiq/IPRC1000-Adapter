@@ -31,16 +31,23 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
 /// 录音目标目录；未启用返回 None
+///
+/// 开关来源（后者优先，便于临时调试）：
+///   ① 配置文件 `recordAudio`（界面复选框）
+///   ② 环境变量 `IPRC1000_RECORD`（`0` 强制关，其它值强制开）
+///
+/// 目录固定在**程序目录下的 `wav\`**，跟着程序走，用户直接能翻到。
 fn target_dir() -> Option<PathBuf> {
-    let v = std::env::var("IPRC1000_RECORD").ok()?;
-    if v.is_empty() || v == "0" {
+    let enabled = match std::env::var("IPRC1000_RECORD").ok().as_deref() {
+        Some("0") => false,
+        Some(_) => true,
+        None => crate::settings::record_audio(),
+    };
+    if !enabled {
         return None;
     }
-    if v == "1" {
-        let appdata = std::env::var("APPDATA").ok()?;
-        return Some(PathBuf::from(appdata).join("IPRC1000 Adapter"));
-    }
-    Some(PathBuf::from(v))
+    let base = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    Some(base.join("wav"))
 }
 
 pub struct Rec {

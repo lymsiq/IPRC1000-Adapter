@@ -740,9 +740,10 @@ impl App {
                 "遥控器保持「键盘」身份时，系统会把每次按键打成一个字母。\n\
                  这一步把它改绑成 HID-compliant device：\n\
                  · 不再绑键盘驱动 ⇒ 不再打字母\n\
-                 · HID 接口与 Raw Input 照常 ⇒ 按键仍可读\n\
-                 需要管理员；设备会短暂断开几秒。\n\
-                 想还原点「⑤ 恢复键盘模式」。",
+                 · HID 接口仍在，但 **Raw Input 里就没有这台设备了**\n\n\
+                 ⚠ 代价（实测）：改绑后按键会收不到，而且**必须删除设备并重新配对**\n\
+                 才能恢复——点「⑤ 恢复键盘模式」只删节点，不够。\n\
+                 日常使用建议不要点，接受打字；只有确实被打字困扰时才用。",
             )
             .clicked()
         {
@@ -778,6 +779,28 @@ impl App {
             crate::commands::invalidate_probes();
             self.say(parse_msg(&r));
         }
+        ui.add_space(6.0);
+        // 录音调试开关（2026-11-06）：不用设环境变量，勾一下就行
+        let mut rec = crate::settings::record_audio();
+        if ui
+            .checkbox(&mut rec, "录音调试（音频写进 wav\\ 目录，排查语音用）")
+            .on_hover_text(
+                "勾上后把两路音频各写一个 WAV 到「程序目录\\wav\\」，文件名带时分秒：\n\
+                 capture-16k-*.wav  收到的原始音频\n\
+                 capture-48k-*.wav  重采样后真正送进 CABLE 的\n\n\
+                 下次打开音频流时生效（说话前静止 3 分钟，或重启程序）。\n\
+                 边写边回写 WAV 长度，随时强杀进程文件都能直接播。",
+            )
+            .changed()
+        {
+            crate::settings::set_record_audio(rec);
+            if rec {
+                self.say("已开启录音：下次打开音频流时写 wav\\ 目录（16k 与 48k 各一份）");
+            } else {
+                self.say("已关闭录音");
+            }
+        }
+
         if self.installing {
             ui.add_space(6.0);
             ui.label(RichText::new(&self.install_msg).color(Color32::from_rgb(120, 200, 255)));
