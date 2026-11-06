@@ -354,6 +354,7 @@ fn main() {
             || a == "--check-key"
             || a == "--bind-program"
             || a == "--hid-probe"
+            || a == "--restore-keyboard"
     });
     if !is_cli_tool {
         redirect_stderr_to_file();
@@ -395,6 +396,15 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+
+    // 恢复：`--restore-keyboard` 把遥控器从 raw 绑回键盘（改造后按键全无反应时的解药）
+    if std::env::args().any(|a| a == "--restore-keyboard") {
+        match device_probe::restore_keyboard() {
+            Ok(m) => println!("{m}"),
+            Err(e) => println!("失败：{e}"),
+        }
+        std::process::exit(0);
     }
 
     // 诊断：`--hid-probe` 枚举遥控器 HID 接口并尝试打开（判断"有没有消费者入口"）

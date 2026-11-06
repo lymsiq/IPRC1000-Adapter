@@ -477,3 +477,104 @@ pub fn winuhid_driver_installed() -> bool {
     // 至少有一个实例（0000/0001…）
     !subkeys(k).is_empty()
 }
+
+/// 「取消改造」：把遥控器的 HID 节点从 raw 绑回键盘。
+///
+/// ## 为什么需要（2026-11-06 真机结论）
+///
+/// 改造（`input.inf / HID_Raw_Inst.NT`）的注释写着"系统不再消费按键，但程序仍能读到报文"——
+/// 前半句对，**后半句错**。真机实测（`hid-window*.csv` + `--hid-probe`）：
+///
+/// ```text
+/// 11:00:47  HID 节点 present=True / Status=OK / CM_PROB_NONE     ← 设备在
+///           全系统 HID 接口 9 个，匹配遥控器 0 个                  ← 但没有它的接口
+/// ```
+///
+/// raw 绑定**不注册 HID 设备接口** ⇒
+///   · 程序无法 CreateFile 当消费者（`hidOpen` 永远 0）
+///   · Windows 也就不建 HID 中断通道（PSM 0x0013）
+///   · 遥控器没地方投递按键 ⇒ 4 秒监督超时断开重连
+///   · ETW 只剩信令可看（`otherEvents` 涨、`keyEvents` 恒 0）
+///
+/// 也就是说：**改造与"能收到按键"不可兼得**。这只遥控器只有一个 Keyboard 集合，
+/// 系统里也没有第二个客户端能替它消费。所以正解是"不改造 + 钩子吞键"，本函数就是回到起点。
+pub fn restore_keyboard() -> Result<String, String> {
+    // 枚举注册表里的遥控器节点（含 phantom —— 正是它们需要被删掉）。
+    // 实例 ID 形如 HID\{00001124-...}_VID&00020a5c_PID&8502\9&378511c7&1&0000
+    let mut targets: Vec<String> = Vec::new();
+    unsafe {
+        use windows::Win32::System::Registry::*;
+        let mut root = HKEY::default();
+        let path: Vec<u16> = r"SYSTEM\CurrentControlSet\Enum\HID\0"
+            .replace(r"\0", "")
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        if RegOpenKeyExW(HKEY_LOCAL_MACHINE, windows::core::PCWSTR(path.as_ptr()), 0, KEY_READ, &mut root).is_err() {
+            return Err("打不开 HID 枚举键".into());
+        }
+        let mut i = 0u32;
+        loop {
+            let mut buf = [0u16; 256];
+            let mut len = buf.len() as u32;
+            if RegEnumKeyExW(root, i, windows::core::PWSTR(buf.as_mut_ptr()), &mut len, None,
+                             windows::core::PWSTR::null(), None, None).is_err() { break; }
+            i += 1;
+            let key = String::from_utf16_lossy(&buf[..len as usize]);
+            let up = key.to_uppercase();
+            if !(up.contains("0A5C") && up.contains("8502")) { continue; }
+            let mut sub = HKEY::default();
+            let sp: Vec<u16> = format!(r"SYSTEM\CurrentControlSet\Enum\HID\{key}")
+                .encode_utf16().chain(std::iter::once(0)).collect();
+            if RegOpenKeyExW(HKEY_LOCAL_MACHINE, windows::core::PCWSTR(sp.as_ptr()), 0, KEY_READ, &mut sub).is_err() { continue; }
+            let mut j = 0u32;
+            loop {
+                let mut b2 = [0u16; 256];
+                let mut l2 = b2.len() as u32;
+                if RegEnumKeyExW(sub, j, windows::core::PWSTR(b2.as_mut_ptr()), &mut l2, None,
+                                 windows::core::PWSTR::null(), None, None).is_err() { break; }
+                j += 1;
+                let inst = String::from_utf16_lossy(&b2[..l2 as usize]);
+                targets.push(format!(r"HID\{key}\{inst}"));
+            }
+            let _ = RegCloseKey(sub);
+        }
+        let _ = RegCloseKey(root);
+    }
+
+    if targets.is_empty() {
+        return Err("找不到遥控器的 HID 节点 —— 请先按一下遥控器唤醒后重试".into());
+    }
+
+    // 用 pnputil 删除节点，让 Windows 重新枚举时按 SDP 里的 Keyboard 集合自动装回 kbdhid。
+    // 为什么不用 UpdateDriver(keyboard.inf)：raw 绑定后设备不再声明 TLC，
+    // keyword.inf 的匹配项对不上，实测 rc=0 但什么都没改。
+    let mut ok = 0usize;
+    let mut err: Vec<String> = Vec::new();
+    for inst in &targets {
+        let out = std::process::Command::new(r"C://Windows//System32//pnputil.exe")
+            .args(["/remove-device", inst])
+            .output();
+        match out {
+            Ok(o) if o.status.success() => {
+                ok += 1;
+                eprintln!("[设备] 已删除节点（下次连接会自动重新识别）：{inst}");
+            }
+            Ok(o) => {
+                let msg = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                err.push(format!("{inst}：{msg}"));
+            }
+            Err(e) => err.push(format!("{inst}：pnputil 启动失败 {e}")),
+        }
+    }
+
+    if ok > 0 {
+        Ok(format!(
+            "已删除 {ok} 个旧节点。\n现在按一下遥控器唤醒它 —— Windows 会重新识别并装回键盘驱动，\
+             按键链路就会恢复。\n⚠ 恢复后系统会重新消费按键（可能打出字母），\
+             在程序侧用钩子吞掉之前属于正常现象。"
+        ))
+    } else {
+        Err(format!("删除失败（需要以管理员身份运行）：{}", err.join("；")))
+    }
+}
