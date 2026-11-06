@@ -22,6 +22,7 @@ mod capture;
 mod doctor;
 mod autorepeat;
 mod device_id;
+mod power;
 mod commands;
 mod device_probe;
 mod dev_install;
@@ -375,6 +376,7 @@ fn main() {
             || a == "--diag"
             || a == "--doctor"
             || a == "--forget-device"
+            || a == "--no-sleep"
             || a == "--audio"
             || a == "--launch-shortcut"
             || a == "--check-key"
@@ -558,6 +560,23 @@ fn main() {
         std::process::exit(0);
     }
 
+    // 只关蓝牙省电（换机器必做；对应协议 §3 B5）
+    if std::env::args().any(|a| a == "--no-sleep") {
+        match power::apply() {
+            Ok((n, f)) => msg_box(
+                "蓝牙省电已处理",
+                &format!(
+                    "检查 {n} 项，写入 {f} 项为 0。\n\n\
+                     需要重启蓝牙适配器（或重启电脑）才生效。\n\
+                     之后空闲不会再挂起，按键时也不用重新连。"
+                ),
+                false,
+            ),
+            Err(e) => msg_box("处理失败", &e, true),
+        }
+        std::process::exit(0);
+    }
+
     // 忘掉已学习的遥控器身份（换遥控器 / 换机器后用）
     if std::env::args().any(|a| a == "--forget-device") {
         device_id::invalidate();
@@ -581,6 +600,12 @@ fn main() {
     if std::env::args().any(|a| a == "--repair") {
         let r = commands::repair_all();
         eprintln!("{r}");
+        // 省电开关：换机器必做，否则空闲就断链
+        match power::apply() {
+            Ok((0, 0)) => eprintln!("[省电] 没有需要处理的蓝牙设备"),
+            Ok((n, f)) => eprintln!("[省电] 检查 {n} 项，关闭 {f} 项（重启适配器或电脑后生效）"),
+            Err(e) => eprintln!("[省电] 失败：{e}"),
+        }
         use std::io::Write as _;
         let _ = std::io::stdout().flush();
         std::process::exit(0);

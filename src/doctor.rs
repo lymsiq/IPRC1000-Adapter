@@ -333,6 +333,39 @@ pub fn collect() -> Vec<Item> {
     it.verdict = Verdict::Ok;
     v.push(it);
 
+    // ── 10. 蓝牙省电（换机器必查） ──
+    let findings = crate::power::audit();
+    let bad: Vec<_> = findings.iter().filter(|f| !f.ok()).collect();
+    let mut it = item(
+        next(),
+        "蓝牙省电",
+        if findings.is_empty() {
+            "没找到蓝牙适配器 / HID 设备".to_string()
+        } else if bad.is_empty() {
+            format!("{} 项开关全为 0，空闲不会挂起", findings.len())
+        } else {
+            format!(
+                "{} 项中 {} 项未关：\n{}",
+                findings.len(),
+                bad.len(),
+                bad.iter()
+                    .map(|f| format!("    {} / {} = {}", f.device, f.switch, f.describe()))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        },
+        "空闲断链的根因：适配器 EnhancedPowerManagement / SelectiveSuspend 会挂起设备，蓝牙 HID 挂起后不保证自动重连",
+        "管理员运行 `IPRC1000-Native.exe --repair` 会自动写成 0；或设备管理器里取消「允许计算机关闭此设备以节约电源」",
+    );
+    it.verdict = if findings.is_empty() {
+        Verdict::Skip
+    } else if bad.is_empty() {
+        Verdict::Ok
+    } else {
+        Verdict::Warn
+    };
+    v.push(it);
+
     v
 }
 
