@@ -20,6 +20,8 @@ mod backend;
 mod cable_out;
 mod capture;
 mod doctor;
+mod autorepeat;
+mod device_id;
 mod commands;
 mod device_probe;
 mod dev_install;
@@ -372,6 +374,7 @@ fn main() {
             || a == "--repair"
             || a == "--diag"
             || a == "--doctor"
+            || a == "--forget-device"
             || a == "--audio"
             || a == "--launch-shortcut"
             || a == "--check-key"
@@ -552,6 +555,18 @@ fn main() {
                 false,
             );
         }
+        std::process::exit(0);
+    }
+
+    // 忘掉已学习的遥控器身份（换遥控器 / 换机器后用）
+    if std::env::args().any(|a| a == "--forget-device") {
+        device_id::invalidate();
+        msg_box(
+            "已清除遥控器身份",
+            "已忘掉学到的设备名/VID/PID。下次启动会按名称关键字重新发现并保存。\n\n\
+             如果新遥控器名字里没有 IPRC，可在 data\\native.json 的 deviceNameHints 里加关键字。",
+            false,
+        );
         std::process::exit(0);
     }
 

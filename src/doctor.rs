@@ -189,14 +189,23 @@ pub fn collect() -> Vec<Item> {
     // ── 4. HID 子节点（决定按键能不能读到） ──
     let insts = crate::device_probe::remote_hid_instances();
     let kb = insts.iter().filter(|i| i.is_keyboard).count();
+    // 身份来源：现在按**蓝牙设备名**发现，不再依赖写死 VID/PID
+    let who = match crate::device_id::get() {
+        Some(id) => format!("按名称发现：{}（{}）VID=0x{:04X} PID=0x{:04X}", id.name, id.mac, id.vid, id.pid),
+        None => format!(
+            "未按名称发现（用兜底 VID=0x{:04X} PID=0x{:04X}），可能是设备未配对",
+            crate::device_id::FALLBACK_VID,
+            crate::device_id::FALLBACK_PID
+        ),
+    };
     let mut it = item(
         next(),
         "HID 子节点",
         if insts.is_empty() {
-            "0 个（遥控器未连接，或节点被删）".to_string()
+            format!("{who}\n0 个（遥控器未连接，或节点被删）")
         } else {
             format!(
-                "{} 个，其中绑键盘驱动 {} 个：\n{}",
+                "{who}\n{} 个，其中绑键盘驱动 {} 个：\n{}",
                 insts.len(),
                 kb,
                 insts

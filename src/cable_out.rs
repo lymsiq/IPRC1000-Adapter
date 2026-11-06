@@ -161,27 +161,22 @@ impl CableOut {
         }
     }
 
-    /// 写入一帧 **16 kHz** / 16-bit / 单声道 PCM（小端字节）。
+    /// 写入一帧 **48 kHz** / 16-bit / 单声道 PCM（小端字节）。
     ///
-    /// ★ 必须重采样到 48 kHz（2026-11-06 客户机实测）：
-    ///   上游每帧只有 320 个样本（16 kHz / 20 ms），而输出流是 48 kHz。
-    ///   原来直接 `push_one` 塞进去 ⇒ 320/48000 = 6.67 ms 当 20 ms 播，
-    ///   **整段语音 3 倍速、音调变尖、时长剩 1/3**，表现为"声音很小、识别不出字"。
-    ///   这里按 3:1 做线性插值上采样，每个输入样本补两个中间样本。
+    /// ★★ 这里**绝不能再做重采样**（2026-11-06 血泪）：
+    ///   上游 `backend::push_payload` 已经把 16 kHz 的 320 样本**三点线性内插成
+    ///   960 个 48 kHz 样本**（见那里的 `prev/d/3、d*2/3`）。本函数收到的
+    ///   `pcm` 就是 48 kHz。
+    ///   之前我误以为这里是 16k，又加了 3:1 —— 变成 **9 倍数据**，
+    ///   播放就是 **3 倍慢、音调低沉**（用户原话"音调低沉、像慢放"）。
     pub fn push(&mut self, pcm: &[u8]) {
-        const RATIO: i32 = (SR / 16000) as i32; // 3
-        let mut buf: Vec<i16> = Vec::with_capacity(pcm.len() * 3 / 2 + 8);
+        let mut buf: Vec<i16> = Vec::with_capacity(pcm.len() / 2 + 8);
         {
             let Ok(mut r) = self.ring.lock() else { return };
-            let mut prev: i32 = 0;
             for c in pcm.chunks_exact(2) {
-                let cur = i16::from_le_bytes([c[0], c[1]]) as i32;
-                for k in 1..=RATIO {
-                    let v = (prev + (cur - prev) * k / RATIO) as i16;
-                    r.push_one(v);
-                    buf.push(v);
-                }
-                prev = cur;
+                let v = i16::from_le_bytes([c[0], c[1]]);
+                r.push_one(v);
+                buf.push(v);
             }
         }
         self.bytes += pcm.len() as u64;

@@ -100,9 +100,22 @@ pub fn report_age_ms() -> u64 {
 }
 
 /// 精确认领：VID/PID 或设备名带 IPRC。
+///
+/// VID/PID 不再写死 —— 由 `device_id` 按**蓝牙设备名**发现后提供
+/// （`BTHPORT\...\Devices\*\Name` 含 IPRC → 取它的 VID/PID）。
+/// 这里用"裸十六进制片段"而不是 `VID&xxxx` 全串，是因为 Raw Input 的设备名有多种形态：
+///   `\\?\HID#VID&00020a5c_PID&8502#...`、`\\?\BTHENUM#{00001124…}_DEV&00020A5C#...`
+/// 只匹配 `VID&` 会漏掉 `DEV&` 那种。发现失败时 `device_id` 回落到 0x0A5C/0x8502，
+/// 行为与改造前一致。
 fn is_exact_remote(name: &str) -> bool {
     let u = name.to_uppercase();
-    (u.contains("0A5C") && (u.contains("8502") || u.contains("IPRC"))) || u.contains("IPRC")
+    if u.contains("IPRC") {
+        return true;
+    }
+    let (vid, pid) = crate::device_id::vid_pid();
+    let v = format!("{vid:04X}");
+    let p = format!("{pid:04X}");
+    u.contains(&v) && (u.contains(&p) || u.contains("IPRC"))
 }
 
 /// 认领规则：返回 Some(原因) 表示这是遥控器，原因写进日志便于回溯。

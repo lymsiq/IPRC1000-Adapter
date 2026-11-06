@@ -23,6 +23,26 @@ pub struct Node {
     pub online: bool,
 }
 
+// ── 设备身份匹配（2026-11-06 去硬编码）──
+//
+// 原来这里把 `VID&00020A5C` / `PID&8502` 写死。现在统一走 `device_id`：
+// 先按**蓝牙设备名**发现"是哪一只"（`BTHPORT\...\Devices\*\Name` 含 IPRC），
+// 再取它的 VID/PID 拼匹配串。换同型号遥控器、换品牌都不用改代码。
+//
+// 发现失败时 `device_id` 返回兜底值（0x0A5C/0x8502），行为与改造前完全一致。
+
+fn has_vid_token(up: &str) -> bool {
+    crate::device_id::vid_tokens()
+        .iter()
+        .any(|t| up.contains(&t.to_uppercase()))
+}
+
+fn has_pid_token(up: &str) -> bool {
+    crate::device_id::pid_tokens()
+        .iter()
+        .any(|t| up.contains(&t.to_uppercase()))
+}
+
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
@@ -105,8 +125,8 @@ pub fn hid_nodes() -> Vec<Node> {
         // ⚠ 实际键名里是 `VID&00020a5c`（& 而非 _），两种写法都要认 ——
         //   第一次只匹配 `VID_` 导致 HID 节点永远是空的（首页一直显示"不在线"）。
         let up = vidpid.to_uppercase();
-        let has_vid = up.contains("VID_00020A5C") || up.contains("VID&00020A5C");
-        let has_pid = up.contains("PID_8502") || up.contains("PID&8502");
+        let has_vid = has_vid_token(&up);
+        let has_pid = has_pid_token(&up);
         if !(has_vid || has_pid) {
             continue;
         }
@@ -137,7 +157,7 @@ pub fn bt_nodes() -> Vec<Node> {
         let Some(k) = open_key(&path) else { continue };
         // 服务分支名里带 VID/PID（如 {00001124-...}_VID&00020a5c_PID&8502）
         let up = svc.to_uppercase();
-        if !(up.contains("VID&00020A5C") || up.contains("PID&8502")) {
+        if !(has_vid_token(&up) || has_pid_token(&up)) {
             continue;
         }
         for inst in subkeys(k) {
@@ -278,8 +298,8 @@ pub fn remote_hid_instances() -> Vec<HidInst> {
         let up = vidpid.to_uppercase();
         // ⚠ 键名里是 `VID&00020a5c`（& 而非 _），两种写法都要认 —— 只匹配 `VID_`
         //   会让节点永远是空的（首页一直显示"不在线"）。
-        let has_vid = up.contains("VID_00020A5C") || up.contains("VID&00020A5C");
-        let has_pid = up.contains("PID_8502") || up.contains("PID&8502");
+        let has_vid = has_vid_token(&up);
+        let has_pid = has_pid_token(&up);
         if !(has_vid || has_pid) {
             continue;
         }
@@ -334,10 +354,7 @@ pub fn bt_hid_bound() -> Option<bool> {
         if !up.contains("00001124") {
             continue;
         }
-        let ours = up.contains("VID&00020A5C")
-            || up.contains("VID_00020A5C")
-            || up.contains("PID&8502")
-            || up.contains("PID_8502");
+        let ours = has_vid_token(&up) || has_pid_token(&up);
         if !ours {
             continue;
         }
@@ -548,7 +565,7 @@ pub fn restore_keyboard() -> Result<String, String> {
             i += 1;
             let key = String::from_utf16_lossy(&buf[..len as usize]);
             let up = key.to_uppercase();
-            if !(up.contains("0A5C") && up.contains("8502")) { continue; }
+            if !(has_vid_token(&up) && has_pid_token(&up)) { continue; }
             let mut sub = HKEY::default();
             let sp: Vec<u16> = format!(r"SYSTEM\CurrentControlSet\Enum\HID\{key}")
                 .encode_utf16().chain(std::iter::once(0)).collect();

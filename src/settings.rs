@@ -46,6 +46,28 @@ pub struct Data {
     pub record_audio: bool,
     pub active_group: u8,
     pub groups: Vec<Group>,
+    /// 已学习的遥控器身份（首次发现后落盘，之后不再依赖任何硬编码）
+    pub device: Option<DeviceBinding>,
+    /// 名称关键字：新机器上"按名字找遥控器"时用。默认两条，可在配置里改。
+    pub device_name_hints: Vec<String>,
+}
+
+/// 一台遥控器的身份。**发现一次、存下来、以后照此匹配** ——
+/// 这就是"不硬编码 VID/PID"的落点：换遥控器只需删掉这一段让它重新学习。
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct DeviceBinding {
+    /// 蓝牙显示名，如 `IPRC1000`
+    pub name: String,
+    /// 配对记录键名（小写 MAC），如 `20c0470a3483`
+    pub mac: String,
+    pub vid: u16,
+    pub pid: u16,
+}
+
+impl Default for DeviceBinding {
+    fn default() -> Self {
+        Self { name: String::new(), mac: String::new(), vid: 0, pid: 0 }
+    }
 }
 
 impl Default for Data {
@@ -57,6 +79,8 @@ impl Default for Data {
             log_enabled: true,
             record_audio: false,
             active_group: 0,
+            device: None,
+            device_name_hints: vec!["IPRC".into(), "Broadcom Bluetooth Wireless".into()],
             groups: vec![
                 Group::normal("默认配置组 1"),
                 Group { name: "鼠标模式".into(), bindings: HashMap::new(), kind: 1 },
@@ -167,6 +191,25 @@ pub fn load() {
     if let Some(b) = v["recordAudio"].as_bool() {
         d.record_audio = b;
     }
+    // 已学习的遥控器身份 + 名称关键字（去硬编码）
+    if let Some(h) = v["deviceNameHints"].as_array() {
+        let hints: Vec<String> = h
+            .iter()
+            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+            .collect();
+        if !hints.is_empty() {
+            d.device_name_hints = hints;
+        }
+    }
+    if let Some(dev) = v.get("device") {
+        if !dev.is_null() {
+            if let Ok(b) = serde_json::from_value::<DeviceBinding>(dev.clone()) {
+                if !b.mac.is_empty() && b.vid != 0 {
+                    d.device = Some(b);
+                }
+            }
+        }
+    }
     if let Some(arr) = v["groups"].as_array() {
         if !arr.is_empty() {
             let mut gs: Vec<Group> = arr
@@ -215,6 +258,8 @@ fn save(d: &Data) {
         "ime": d.ime, "trigger": d.trigger, "preset": d.preset,
         "logEnabled": d.log_enabled,
         "recordAudio": d.record_audio,
+        "device": d.device,
+        "deviceNameHints": d.device_name_hints,
         "activeGroup": d.active_group,
         "groups": groups,
         "_comment": "IPRC1000 原生内核设置（与 C# 版 settings.json 互不影响）"
@@ -290,6 +335,44 @@ pub fn set_record_audio(v: bool) {
         d.record_audio = v;
         save(&d);
     }
+}
+
+// ── 遥控器身份（去硬编码的落点）──
+
+/// 已学习的遥控器身份。`None` = 还没学过，调用方应先扫描再保存。
+pub fn device_binding() -> Option<DeviceBinding> {
+    store().lock().ok().and_then(|d| d.device.clone())
+}
+
+/// 保存学到的身份。只在**发现成功**时调用，避免把空值写进去。
+pub fn set_device_binding(b: &DeviceBinding) {
+    if b.mac.is_empty() || b.vid == 0 {
+        return;
+    }
+    if let Ok(mut d) = store().lock() {
+        if d.device.as_ref().map(|x| (&x.mac, x.vid) == (&b.mac, b.vid)).unwrap_or(false) {
+            return; // 没变化，不重复写盘
+        }
+        d.device = Some(b.clone());
+        save(&d);
+    }
+}
+
+/// 清掉学习结果，下次重新发现（换遥控器时用）。
+#[allow(dead_code)]
+pub fn clear_device_binding() {
+    if let Ok(mut d) = store().lock() {
+        d.device = None;
+        save(&d);
+    }
+}
+
+/// 名称关键字。新机器上按名字找遥控器靠它；默认两条，用户可改。
+pub fn device_name_hints() -> Vec<String> {
+    store()
+        .lock()
+        .map(|d| d.device_name_hints.clone())
+        .unwrap_or_else(|_| vec!["IPRC".into()])
 }
 
 // ── 配置组 ──

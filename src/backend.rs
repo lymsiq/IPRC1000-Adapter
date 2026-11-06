@@ -773,7 +773,8 @@ fn remote_present() -> bool {
                                    std::ptr::null_mut(), std::ptr::null_mut());
             if rc != 0 { break; }
             let name = String::from_utf16_lossy(&buf[..len as usize]).to_lowercase();
-            if name.contains("0a5c") && name.contains("8502") { found = true; break; }
+            // VID/PID 由 device_id 按蓝牙名称发现后提供，不再写死
+            if crate::device_id::matches(&name) { found = true; break; }
             i += 1;
         }
         RegCloseKey(hk);
@@ -2063,6 +2064,13 @@ impl Bridge {
 
     fn emit_key(&self, usage: Option<u8>, down: bool) {
         let Some(u) = usage else { return };
+        // ★ 2026-11-06：首次按下时补一个 KEYUP，阻止 Windows 自动重复。
+        //   遥控器是键盘身份，按住语音键时 kbdclass 会自己重复（用户实测 3 秒 30+ 个 m）。
+        //   这里只在**首次 DOWN** 调用（差分逻辑保证重复 DOWN 被过滤），
+        //   设备按住期间零报文 ⇒ 不会再触发 ⇒ 最多只打 1 个字符。
+        if down {
+            crate::autorepeat::suppress(u);
+        }
         self.stats.lock().unwrap_or_else(|e| e.into_inner()).key_events += 1;
         // 附带 ETW 时间戳，应用侧可算"设备产生事件 → 我们收到"的真实延迟
         let msg = format!("KEY {u:02X} {} {}\n", if down { 1 } else { 0 }, self.last_ts);
@@ -2274,10 +2282,12 @@ impl Bridge {
             self.audio_reopen_rx = Some(rx);
             eprintln!("[音频] 空闲后首次使用 ⇒ 后台重开输出流（本帧及后续几帧丢弃）");
         }
-        // 调试录音：先落 16 kHz 原始（判断"收到的音频本身对不对"）
-        // 只做一次 try_send，写盘在后台线程 —— 这里跑在 ETW 回调上，绝不能碰文件 I/O
+        // 调试录音：落**真正的 16 kHz 原始**（s16），不是上面插值后的 out。
+        //   ★ 之前这里写的是 out（48k），文件名却叫 capture-16k，导致两个文件
+        //     都不可信：16k 那个其实是 48k 内容（标错头），48k 那个是 9 倍数据
+        //     （因为 cable_out 又插值了一次）。2026-11-06 修正。
         if let Some(r) = self.rec16.as_ref() {
-            r.write_pcm16le(&out);
+            r.write_samples(&s16);
         }
         if let Some(c) = self.cable.as_mut() {
             c.push(&out);
