@@ -31,12 +31,24 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::ERROR_SUCCESS;
 use windows::Win32::System::Registry::*;
 
-/// 适配器上要关的三个开关
-pub const ADAPTER_SWITCHES: &[&str] = &[
-    "EnhancedPowerManagementEnabled",
-    "SelectiveSuspendEnabled",
-    "AllowIdleIrpInD3",
+/// 适配器上要关的开关：`(相对 Device Parameters 的子路径, 键名)`。
+///
+/// ★★ `WDF\IdleInWorkingState` 才是**真正生效**的那个。实测 Intel AX200：
+///    `EnhancedPowerManagementEnabled` / `SelectiveSuspendEnabled` / `AllowIdleIrpInD3`
+///    三个**根本不存在**，只有 `WDF\IdleInWorkingState = 1`。
+///    所以第一版"三项全未设置"的判断虽然报了，但改完不会有用 —— 改的地方不对。
+///
+///    只关注**实际存在的**键：不存在的跳过，避免刷一堆"未设置"噪声。
+pub const ADAPTER_SWITCHES: &[(&str, &str)] = &[
+    ("WDF", "IdleInWorkingState"),
+    ("", "EnhancedPowerManagementEnabled"),
+    ("", "SelectiveSuspendEnabled"),
+    ("", "AllowIdleIrpInD3"),
 ];
+
+/// 当前是否已被选择性挂起（**只读诊断**，不要写：驱动自己维护）。
+/// `1` = 此刻已挂起 ⇒ 说明省电正在生效，用户按键时要先唤醒。
+pub const SUSPENDED_STATE: &str = "DeviceSelectiveSuspended";
 /// HID 设备上要关的一个开关
 pub const HID_SWITCH: &str = "EnhancedPowerManagementEnabled";
 
@@ -50,11 +62,23 @@ pub struct Finding {
 
 impl Finding {
     pub fn ok(&self) -> bool {
+        // 状态项（当前是否已挂起）不参与"合格/不合格"判定
+        if self.switch == SUSPENDED_STATE {
+            return true;
+        }
         // ★ 只有显式 0 才算已关。`None` = 值不存在 = **系统默认允许省电**，
         //   这正是空闲断链的来源（实测：Intel 适配器三个开关全都不存在）。
         self.value == Some(0)
     }
     pub fn describe(&self) -> String {
+        if self.switch == SUSPENDED_STATE {
+            return match self.value {
+                Some(1) => "1（**此刻已挂起** —— 省电正在生效，按键要先唤醒）".into(),
+                Some(0) => "0（当前清醒）".into(),
+                Some(v) => format!("{v}"),
+                None => "未设置".into(),
+            };
+        }
         match self.value {
             Some(0) => "0（已关）".into(),
             Some(v) => format!("{v}（**未关**）"),
@@ -171,7 +195,13 @@ fn bluetooth_adapters() -> Vec<String> {
                 //   （读它返回 ERROR_FILE_NOT_FOUND）。要用 `ClassGUID` 或 `Service`。
                 let guid = get_string(k, "ClassGUID").unwrap_or_default();
                 let svc = get_string(k, "Service").unwrap_or_default();
+                // ★ 跳过幽灵设备（DN_PHANTOM = 0x20）：拔掉的 dongle 会留在
+                //   Enum\USB 里，报出来只会误导（用户实测：VID_0A12 早已拔掉）。
+                let flags = get_dword(k, "ConfigFlags").unwrap_or(0);
                 let _ = RegCloseKey(k);
+                if flags & 0x20 != 0 {
+                    continue;
+                }
                 let is_bt = guid.eq_ignore_ascii_case("{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}")
                     || svc.eq_ignore_ascii_case("BTHUSB")
                     || svc.eq_ignore_ascii_case("bthenum");
@@ -203,6 +233,18 @@ fn hid_instances() -> Vec<String> {
                 continue;
             };
             for inst in subkeys(pk) {
+                let ipath = format!("SYSTEM\\CurrentControlSet\\Enum\\HID\\{parent}\\{inst}");
+                let flags = match open(&ipath, false) {
+                    Some(k) => {
+                        let f = get_dword(k, "ConfigFlags").unwrap_or(0);
+                        let _ = RegCloseKey(k);
+                        f
+                    }
+                    None => 0,
+                };
+                if flags & 0x20 != 0 {
+                    continue;   // 幽灵节点（设备已拔/休眠 phantom）
+                }
                 out.push(format!(r"HID\{parent}\{inst}"));
             }
             let _ = RegCloseKey(pk);
@@ -217,14 +259,23 @@ pub fn audit() -> Vec<Finding> {
     let mut out = Vec::new();
     for dev in bluetooth_adapters() {
         let dp = format!("SYSTEM\\CurrentControlSet\\Enum\\{dev}\\Device Parameters");
+        for (sub, sw) in ADAPTER_SWITCHES {
+            let path = if sub.is_empty() { dp.clone() } else { format!("{dp}\\{sub}") };
+            unsafe {
+                let Some(k) = open(&path, false) else { continue };
+                // ★ 只报**实际存在**的键。不存在的跳过 —— 否则会刷一堆
+                //   "未设置"，把真正的 WDF\IdleInWorkingState 淹掉。
+                if let Some(v) = get_dword(k, sw) {
+                    out.push(Finding { device: dev.clone(), switch: sw, value: Some(v) });
+                }
+                let _ = RegCloseKey(k);
+            }
+        }
+        // 只读：当前是否已被挂起（省电是否正在起作用）
         unsafe {
             let Some(k) = open(&dp, false) else { continue };
-            for sw in ADAPTER_SWITCHES {
-                out.push(Finding {
-                    device: dev.clone(),
-                    switch: sw,
-                    value: get_dword(k, sw),
-                });
+            if let Some(v) = get_dword(k, SUSPENDED_STATE) {
+                out.push(Finding { device: dev.clone(), switch: SUSPENDED_STATE, value: Some(v) });
             }
             let _ = RegCloseKey(k);
         }
@@ -255,19 +306,19 @@ pub fn apply() -> Result<(usize, usize), String> {
 
     for dev in bluetooth_adapters() {
         let dp = format!("SYSTEM\\CurrentControlSet\\Enum\\{dev}\\Device Parameters");
-        unsafe {
-            let Some(k) = open(&dp, true) else { continue };
-            for sw in ADAPTER_SWITCHES {
-                checked += 1;
-                let cur = get_dword(k, sw);
-                if cur.map(|v| v != 0).unwrap_or(false) {
-                    if set_dword(k, sw, 0) {
+        for (sub, sw) in ADAPTER_SWITCHES {
+            let path = if sub.is_empty() { dp.clone() } else { format!("{dp}\\{sub}") };
+            unsafe {
+                let Some(k) = open(&path, true) else { continue };
+                if let Some(v) = get_dword(k, sw) {
+                    checked += 1;
+                    if v != 0 && set_dword(k, sw, 0) {
                         fixed += 1;
-                        eprintln!("  [省电] {dev} / {sw}: {cur:?} → 0");
+                        eprintln!("  [省电] {dev} / {sw}: {v} → 0");
                     }
                 }
+                let _ = RegCloseKey(k);
             }
-            let _ = RegCloseKey(k);
         }
     }
 

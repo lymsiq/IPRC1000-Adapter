@@ -560,19 +560,20 @@ fn main() {
     }
 
     // 只关蓝牙省电（换机器必做；对应协议 §3 B5）
+    // 不弹窗：结果写 logs\no-sleep.log，便于脚本/远程调用
     if std::env::args().any(|a| a == "--no-sleep") {
-        match power::apply() {
-            Ok((n, f)) => msg_box(
-                "蓝牙省电已处理",
-                &format!(
-                    "检查 {n} 项，写入 {f} 项为 0。\n\n\
-                     需要重启蓝牙适配器（或重启电脑）才生效。\n\
-                     之后空闲不会再挂起，按键时也不用重新连。"
-                ),
-                false,
+        let msg = match power::apply() {
+            Ok((n, f)) => format!(
+                "检查 {n} 项，写入 {f} 项为 0。\n需要重启蓝牙适配器（或重启电脑）才生效。"
             ),
-            Err(e) => msg_box("处理失败", &e, true),
+            Err(e) => format!("失败：{e}"),
+        };
+        let p = crate::paths::logs_dir().join("no-sleep.log");
+        if let Some(d) = p.parent() {
+            let _ = std::fs::create_dir_all(d);
         }
+        let _ = std::fs::write(&p, msg.as_bytes());
+        eprintln!("[省电] {msg}");
         std::process::exit(0);
     }
 
