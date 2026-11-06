@@ -46,7 +46,16 @@ fn target_dir() -> Option<PathBuf> {
     if !enabled {
         return None;
     }
-    let base = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let base = match std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+    {
+        Some(b) => b,
+        None => {
+            eprintln!("[录音] 取程序目录失败，无法确定 wav 目录");
+            return None;
+        }
+    };
     Some(base.join("wav"))
 }
 
@@ -60,8 +69,20 @@ impl Rec {
     /// 按 tag（`16k` / `48k`）与采样率开一个 16-bit 单声道 WAV。
     /// 未启用时返回 None，调用方用 Option 直接跳过。
     pub fn open(tag: &str, rate: u32) -> Option<Self> {
-        let dir = target_dir()?;
-        std::fs::create_dir_all(&dir).ok()?;
+        let Some(dir) = target_dir() else {
+            // ★ 必须留痕：原来这里 `.ok()?` 静默返回 None，
+            //   配置明明是 true 也看不到任何提示，只能靠猜（2026-11-06 踩过）。
+            eprintln!(
+                "[录音] {tag} 未启用：配置 recordAudio={} 环境变量 IPRC1000_RECORD={:?}",
+                crate::settings::record_audio(),
+                std::env::var("IPRC1000_RECORD").ok()
+            );
+            return None;
+        };
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            eprintln!("[录音] {tag} 建目录失败 {}：{e}", dir.display());
+            return None;
+        }
         let stamp = {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -71,13 +92,22 @@ impl Rec {
             format!("{:02}{:02}{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
         };
         let path = dir.join(format!("capture-{tag}-{stamp}.wav"));
-        let mut f = OpenOptions::new()
+        let mut f = match OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
             .open(&path)
-            .ok()?;
-        Self::write_header(&mut f, rate, 1).ok()?;
+        {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("[录音] {tag} 打开文件失败 {}：{e}", path.display());
+                return None;
+            }
+        };
+        if let Err(e) = Self::write_header(&mut f, rate, 1) {
+            eprintln!("[录音] {tag} 写 WAV 头失败：{e}");
+            return None;
+        }
         eprintln!("[录音] {tag} -> {}", path.display());
         Some(Self { f, bytes: 0 })
     }
