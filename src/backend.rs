@@ -684,6 +684,7 @@ impl Activity {
 /// 读 `HKLM\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\<MAC>\Name`，
 /// 值是 UTF-8 字节串（可能有结尾 NUL）。这是"配对过的蓝牙设备名"的权威来源。
 #[cfg(target_os = "windows")]
+#[allow(dead_code)] // 改用 ETW 事件判在线后暂不调用；保留供 UI 显示"已配对"
 fn bth_device_name_present() -> bool {
     use std::os::windows::ffi::OsStrExt;
     #[link(name = "advapi32")]
@@ -738,6 +739,7 @@ fn bth_device_name_present() -> bool { true }
 
 /// 遥控器是否还在系统里（只看注册表，1 秒最多查一次）
 #[cfg(target_os = "windows")]
+#[allow(dead_code)] // 同上：`remote_present()` 是静态配对状态，不能代表"此刻在线"
 fn remote_present() -> bool {
     use std::os::windows::ffi::OsStrExt;
 
@@ -3221,19 +3223,23 @@ pub fn run_backend() {
         let act = std::sync::Arc::clone(&activity);
         if feed_enabled {
             std::thread::spawn(move || {
-                let mut present_checked = 0u64;
-                let mut present = true;
                 loop {
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_millis() as u64).unwrap_or(0);
                     let last = act.last_event_ms.load(Ordering::Relaxed);
 
-                    // 遥控器在线性：每秒最多查一次注册表
-                    if now.saturating_sub(present_checked) > 1000 {
-                        present = remote_present();
-                        present_checked = now;
-                    }
+                    // ★★ 在线判定改用 **ETW 事件**，不再问 `remote_present()`。
+                    //
+                    //   实测（2026-11-06 客户机）：配对记录在、`Service=HidBth` 也绑了，
+                    //   但 Raw Input 里没有这台设备（改绑残留 / 休眠 phantom）⇒
+                    //   `remote_present()` 返回 false ⇒ `present=false` ⇒ 填缓冲退到
+                    //   `FLUSH_FEED_COLD_MS * 5 = 200*5 = 1000 ms` ⇒ **按键延迟整整 1 秒**，
+                    //   表现为"重连后还是不能用"。开发机恰好 `remote_present()` 为 true，
+                    //   所以一直是 10 ms —— 这就是"开发机没这问题"的全部原因。
+                    //
+                    //   ETW 事件是"设备此刻真的在通信"的唯一硬证据，比"配对记录存在"可靠。
+                    let present = last != 0 && now.saturating_sub(last) < 3000;
 
                     let idle = if last == 0 { u64::MAX } else { now.saturating_sub(last) };
                     // ★ 遥控器在线时**始终用热档（10 ms）**，不再按空闲时长降档。
