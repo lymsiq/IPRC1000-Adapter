@@ -103,6 +103,32 @@ Enum\BTHENUM\Dev_20C047F313D6        Service = (空)
 
 ---
 
-## Round 2 — 待开始
+## Round 2 — 2026-11-06 14:0x
 
-触发条件：重新配对完成后，或开发侧交付新构建（需附 build hash）。
+### 方向
+开发机 → 客户机（交付执行单 + 新构建）
+
+### 状态
+**S3 已修待验**（修法为操作层：重配强制重跑 SDP；软件侧判据已修）
+
+### 交付物
+
+| 项 | 路径 / 值 |
+|---|---|
+| 客户机执行单 | `handoff\20261106-round2\执行单-客户机.md` |
+| 主程序 | `IPRC1000_Native_v0.4.41.zip` 4.02 MB · sha256 `cbd2f345f2fef5c16d362866ba6f92e06e30ef8e3cd794e845ad82f21bbc56fb` |
+| 安装器 | `IPRC1000_Native_Setup_v0.4.41.exe` 8.28 MB · sha256 `3a99aedef14100ded83c3c983b48d440ccabb2e7c83b9e02de67936cca28f8a0` |
+| exe | sha256 `eec3dcb1a3498d74…`（payload↔target 一致） |
+| 项目留言（已 @丁浩） | `msg_79e8dab6b0424ba9920dc146cf1dbcf7` |
+| 跟踪待办 | `rmxurh` · 进行中 · 指派丁浩 · 截止 2026-11-07 |
+
+0.4.41 相对 0.4.40：`bt_hid_bound()` 三态判据（读 `Enum\BTHENUM\{00001124}` 的 `Service`，
+不再读 `Enum\HID` 缓存 HardwareID）+ Raw Input 认领可观测（`--hid-probe`、`IPRC1000_RAWINPUT_ANY=1`、
+未认领打印 VKey+设备名）。⚠ 0.4.40 包打于 13:24，**不含**判据修复（commit 1e49dc0 在 14:01），
+客户机不要用 0.4.40 验判据。
+
+### 待客户机验证
+
+按执行单 §1–§5：重配后 `C2 = HidBth`、`C3 记录数 > 0`；
+再装 0.4.41 看环境页绿 + `native.log` 有 `[KEY]`；7 步判定链全 PASS 才升 S4。
+重配 2 次仍 0 条 → 执行单 §6 硬件分支（更新驱动 → 禁用启用适配器 → RTL8761B/CSR8510 dongle 或 AX200）。
