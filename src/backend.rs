@@ -2275,7 +2275,8 @@ impl Bridge {
             eprintln!("[音频] 空闲后首次使用 ⇒ 后台重开输出流（本帧及后续几帧丢弃）");
         }
         // 调试录音：先落 16 kHz 原始（判断"收到的音频本身对不对"）
-        if let Some(r) = self.rec16.as_mut() {
+        // 只做一次 try_send，写盘在后台线程 —— 这里跑在 ETW 回调上，绝不能碰文件 I/O
+        if let Some(r) = self.rec16.as_ref() {
             r.write_pcm16le(&out);
         }
         if let Some(c) = self.cable.as_mut() {

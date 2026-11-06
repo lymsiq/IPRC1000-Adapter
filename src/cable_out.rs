@@ -185,8 +185,8 @@ impl CableOut {
             }
         }
         self.bytes += pcm.len() as u64;
-        // 调试录音：这一路才是真正送进 CABLE 的音频
-        if let Some(rec) = self.rec48.as_mut() {
+        // 调试录音：这一路才是真正送进 CABLE 的音频（同样只投递，不阻塞）
+        if let Some(rec) = self.rec48.as_ref() {
             rec.write_samples(&buf);
         }
     }
