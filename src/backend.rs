@@ -1973,7 +1973,19 @@ impl Bridge {
         if down {
             crate::autorepeat::suppress(u);
         }
-        self.stats.lock().unwrap_or_else(|e| e.into_inner()).key_events += 1;
+        // ★★ 2026-11-06：这里是**所有按键的公共路径**（Raw Input 与 ETW 都会走）。
+        //   之前 `last_key_ms` 只在三个"特殊分支"里更新（鼠标模式 / 打开程序 /
+        //   鼠标动作），普通按键一律不更新 ⇒ 界面的 `key_online` 恒为 false
+        //   ⇒ 明明 `keyEvents` 在涨，状态栏却一直显示"已连接，按键通道未就绪"。
+        //   用户被这句误导了整整半天。公共路径必须自己记时间。
+        {
+            let mut st = self.stats.lock().unwrap_or_else(|e| e.into_inner());
+            st.key_events += 1;
+            if down {
+                st.last_key_usage = u;
+                st.last_key_ms = diag::now_ms();
+            }
+        }
         // 附带 ETW 时间戳，应用侧可算"设备产生事件 → 我们收到"的真实延迟
         let msg = format!("KEY {u:02X} {} {}\n", if down { 1 } else { 0 }, self.last_ts);
         if let Some(k) = self.key_sink.as_ref() {
