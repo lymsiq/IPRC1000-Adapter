@@ -2858,6 +2858,10 @@ pub fn run_backend() {
                         "\"truncCont\":{},\"oddFrag\":{},\"hdrOdd\":{},",
                         "\"orphanCont\":{},\"shortPdu\":{},\"sigFrag\":{},",
                         "\"hidReports\":{},\"keyEvents\":{},\"otherEvents\":{},",
+                        // HID 直读消费者（0.4.36 起按键的另一个来源）：
+                        //   hidDirect = 读到的报告数 / hidOpen = 句柄打开次数 / hidMiss = 枚举落空轮数。
+                        // ★ 这三个字段不加，现场就没法判断"是没唤醒、还是打开了没数据、还是根本没打开"。
+                        "\"hidDirect\":{},\"hidOpen\":{},\"hidMiss\":{},",
                         // 启动诊断：第一个带键的报文（-1 = 至今没收到过任何带键报文）
                         "\"firstKeyMs\":{},\"firstKeyUsage\":\"0x{:02X}\",",
                         "\"silentMs\":{},\"inSession\":{}}}"
@@ -2892,6 +2896,9 @@ pub fn run_backend() {
                     s.sig_frag,
                     s.hid_reports,
                     s.key_events,
+                    crate::hid_reader::REPORTS.load(std::sync::atomic::Ordering::Relaxed),
+                    crate::hid_reader::REOPENED.load(std::sync::atomic::Ordering::Relaxed),
+                    crate::hid_reader::MISS.load(std::sync::atomic::Ordering::Relaxed),
                     s.other,
                     if s.first_key_seen { s.first_key_ms as i64 } else { -1i64 },
                     s.first_key_usage,
@@ -3438,8 +3445,13 @@ pub struct Snapshot {
     pub last_key_age_ms: u64,
     /// 最近一次 ETW 事件距现在多少毫秒（u64::MAX = 从未有过）
     pub last_event_age_ms: u64,
-    /// 在线 = 30 秒内有过事件（遥控器会休眠，不能只看"曾经连过"）
+    /// **链路级**在线：30 秒内有过任意 ETW 事件。
+    /// ⚠ 它只证明"ETW 消费者活着、蓝牙链路在动"，**不代表按键通道可用** ——
+    ///   真机见过"一直显示在线、按键全无反应"（L2CAP 信令 2 次/秒刷新它）。
     pub online: bool,
+    /// **按键级**在线：30 秒内真的收到过按键（ETW 解析出的，或 HID 直读读到的）。
+    /// 界面该显示的是这个。
+    pub key_online: bool,
 }
 
 impl Bridge {
@@ -3465,6 +3477,11 @@ impl Bridge {
             last_key_age_ms: key_age,
             last_event_age_ms: evt_age,
             online: evt_age != u64::MAX && evt_age < 30_000,
+            key_online: (key_age != u64::MAX && key_age < 30_000)
+                || {
+                    let hid_age = crate::hid_reader::report_age_ms();
+                    hid_age != u64::MAX && hid_age < 30_000
+                },
         }
     }
 }
@@ -3484,6 +3501,15 @@ fn report(stats: &Arc<Mutex<Stats>>, bridge: &Arc<Mutex<Bridge>>) {
         .as_ref()
         .map(|u| (u.sent, u.pcm_bytes))
         .unwrap_or((0, 0));
+    // HID 直读消费者：打开过几次 / 读到几条 / 枚举落空几轮。
+    // 没有这三行，现场只能靠 --hid-probe 手工试一次，分不清"没唤醒"和"打开了没数据"。
+    eprintln!(
+        "[i] HID 消费者：打开 {} 次 · 读到 {} 条 · 枚举落空 {} 轮 · 打开失败 {} 次",
+        crate::hid_reader::REOPENED.load(std::sync::atomic::Ordering::Relaxed),
+        crate::hid_reader::REPORTS.load(std::sync::atomic::Ordering::Relaxed),
+        crate::hid_reader::MISS.load(std::sync::atomic::Ordering::Relaxed),
+        crate::hid_reader::FAILED.load(std::sync::atomic::Ordering::Relaxed),
+    );
     eprintln!(
         "\n[i] 音频帧 {}  被截断首片 {}  HID报告 {}  按键事件 {}  其他事件 {}",
         st.frames, st.truncated_first, st.hid_reports, st.key_events, st.other

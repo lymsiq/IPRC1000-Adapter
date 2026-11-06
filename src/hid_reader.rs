@@ -55,15 +55,34 @@ extern "system" {
     ) -> i32;
 }
 
-/// HID 设备接口类 GUID（`{4d1e55b2-f16f-11cf-88cb-001111000030}`）
-const HID_INTERFACE_GUID: &str = "{4d1e55b2-f16f-11cf-88cb-001111000030}";
-
 /// 已读到的报告总数（诊断用，界面/日志可看）
 pub static REPORTS: AtomicU64 = AtomicU64::new(0);
 /// 已成功打开过设备几次（掉线重连会 +1）
 pub static REOPENED: AtomicU64 = AtomicU64::new(0);
 /// 枚举不到接口的轮数（诊断：用来区分"遥控器休眠"和"改造后 phantom"）
 pub static MISS: AtomicU64 = AtomicU64::new(0);
+/// 最近一次读到 HID 报告的时刻（Unix ms）。界面/统计用它判断"按键通道是否真的在用"。
+pub static LAST_REPORT_MS: AtomicU64 = AtomicU64::new(0);
+/// 打开失败的累计次数（日志按次数节流）
+pub static FAILED: AtomicU64 = AtomicU64::new(0);
+/// 上一轮枚举看到的**全系统** HID 接口总数（不是匹配数）——排障用来区分
+/// "系统一个 HID 都没有" 和 "有 HID 但没有遥控器的"
+pub static TOTAL_SEEN: AtomicU64 = AtomicU64::new(0);
+/// ReadFile 失败次数（"打开成功但立刻掉线"的次数）
+pub static RDERR: AtomicU64 = AtomicU64::new(0);
+
+/// 距上次读到报告多少毫秒（u64::MAX = 从未读到过）
+pub fn report_age_ms() -> u64 {
+    let t = LAST_REPORT_MS.load(Ordering::Relaxed);
+    if t == 0 {
+        return u64::MAX;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    now.saturating_sub(t)
+}
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -123,7 +142,12 @@ fn enum_hid_paths() -> Vec<String> {
                 n += 1;
             }
             let path = String::from_utf16_lossy(std::slice::from_raw_parts(base, n));
-            if path.to_uppercase().contains("VID&00020A5C") || path.to_uppercase().contains("VID_00020A5C") {
+            TOTAL_SEEN.fetch_add(1, Ordering::Relaxed);
+            // ★ 匹配放宽到「含 0A5C 且含 8502」：
+            //   接口路径里 VID 的写法随蓝牙栈变化（`vid_00020a5c` / `vid_0a5c` / 带 `0002` 前缀），
+            //   锁死某一种写法会漏设备（真机已见两种）。两个独立字段都命中才算，误命中概率极低。
+            let u = path.to_uppercase();
+            if u.contains("0A5C") && u.contains("8502") {
                 out.push(path);
             }
         }
@@ -132,27 +156,9 @@ fn enum_hid_paths() -> Vec<String> {
     out
 }
 
-/// 把 8 字节标准键盘报告解成 usage 列表。
-///
-/// 报告格式（见 SDP 里的 48 字节描述符）：`[8 位修饰键][保留 1 字节][6 个 usage]`。
-/// 有的栈会给缓冲区加上 1 字节 Report ID（本设备是 1），所以先按长度判断一下。
+/// 报文 → usage 列表。**解析逻辑在 `report::from_report_bytes`**，两条路径共用。
 fn decode(buf: &[u8]) -> Vec<u8> {
-    let b = if buf.len() >= 9 && buf[0] == 1 { &buf[1..] } else { buf };
-    if b.len() < 8 {
-        return Vec::new();
-    }
-    let mut v = Vec::with_capacity(14);
-    for i in 0..8 {
-        if b[0] & (1 << i) != 0 {
-            v.push(0xE0 + i as u8); // 左Ctrl..右GUI
-        }
-    }
-    for u in &b[2..8] {
-        if *u != 0 {
-            v.push(*u);
-        }
-    }
-    v
+    iprc1000_native::report::from_report_bytes(buf)
 }
 
 fn dispatch(usages: &[u8]) {
@@ -165,6 +171,16 @@ fn dispatch(usages: &[u8]) {
 pub fn start() {
     static STARTED: std::sync::Once = std::sync::Once::new();
     STARTED.call_once(|| {
+        // 改造状态影响行为：已改造 = 系统没有别的客户端（我们独占，不会打字母）；
+        // 仍是键盘 = kbdhid 也在读，按键会"打字母 + 执行映射"双触发。必须说清楚。
+        match crate::device_probe::remote_still_keyboard() {
+            Some(true) => eprintln!(
+                "[HID] ⚠ 遥控器仍是「键盘」：按键会一边往文档里打字母、一边执行映射。\
+                 请先在「环境与安装」点 ④ 改造遥控器。"
+            ),
+            Some(false) => eprintln!("[HID] 遥控器已是 HID 设备（不会有系统侧按键泄漏）"),
+            None => eprintln!("[HID] 未检测到遥控器 HID 节点（未连接 / 休眠）"),
+        }
         eprintln!("[HID] 消费者线程启动中…");
         std::thread::Builder::new()
             .name("hid-consumer".into())
@@ -200,7 +216,11 @@ pub fn start() {
                         };
                         let err = unsafe { windows::Win32::Foundation::GetLastError().0 };
                         let Ok(h) = h else {
-                            eprintln!("[HID] 打开失败 err={err} path={p}");
+                            // 节流：500ms 一轮，phantom 边缘会刷屏。每 20 次（约 10 秒）记一条。
+                            let n = FAILED.fetch_add(1, Ordering::Relaxed) + 1;
+                            if n == 1 || n % 20 == 0 {
+                                eprintln!("[HID] 打开失败 err={err}（累计 {n} 次）path={p}");
+                            }
                             continue;
                         };
                         if h.is_invalid() {
@@ -224,6 +244,13 @@ pub fn start() {
                                 )
                             };
                             if ok == 0 {
+                                // 打开成功但读失败 = 设备在"打开后立刻掉线"。
+                                // 这个错误码是判断"phantom 抖动"还是"权限/独占"的唯一线索。
+                                let e = unsafe { windows::Win32::Foundation::GetLastError().0 };
+                                let n = RDERR.fetch_add(1, Ordering::Relaxed) + 1;
+                                if n == 1 || n % 20 == 0 {
+                                    eprintln!("[HID] 读取中断 err={e}（累计 {n} 次）⇒ 重连");
+                                }
                                 break;
                             }
                             if n == 0 {
@@ -231,6 +258,13 @@ pub fn start() {
                             }
                             let usages = decode(&buf[..n as usize]);
                             REPORTS.fetch_add(1, Ordering::Relaxed);
+                            LAST_REPORT_MS.store(
+                                std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_millis() as u64)
+                                    .unwrap_or(0),
+                                Ordering::Relaxed,
+                            );
                             dispatch(&usages);
                         }
                         unsafe { let _ = CloseHandle(h); }
@@ -255,10 +289,20 @@ pub fn start() {
 ///   ② 接口根本不存在（raw 绑定后节点 phantom，或遥控器没连）
 /// 一条命令就能分清，不用再猜。
 pub fn probe() {
+    TOTAL_SEEN.store(0, Ordering::Relaxed);
     let paths = enum_hid_paths();
-    println!("HID 接口总数（含遥控器的）：{}", paths.len());
+    let total = TOTAL_SEEN.load(Ordering::Relaxed);
+    // ★ 这里的 paths 已经按 VID/PID 过滤过，不能叫"总数"——
+    //   原来的文案是"HID 接口总数（含遥控器的）：0"，现场会误读成"这台机器没有任何 HID 设备"，
+    //   从而否掉整个方向。分开报：全系统多少、匹配遥控器多少。
+    println!("全系统 HID 接口：{total} 个");
+    println!("其中匹配遥控器（0A5C+8502）：{} 个", paths.len());
     if paths.is_empty() {
-        println!("★ 一个都没找到 —— 遥控器未连接，或改造成 raw 后接口不暴露");
+        if total == 0 {
+            println!("★ 系统里一个 HID 接口都没有 —— 这是异常情况（HID 服务没起来？）");
+        } else {
+            println!("★ 有 HID 接口，但没有遥控器的 —— 遥控器休眠/未连接，或改造成 raw 后接口未暴露");
+        }
         return;
     }
     for p in &paths {

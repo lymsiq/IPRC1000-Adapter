@@ -59,6 +59,17 @@ pub fn is_online() -> bool {
         .unwrap_or(false)
 }
 
+/// **按键级**在线：30 秒内真的收到过按键（ETW 或 HID 直读）。
+///
+/// 与 `is_online()` 的区别是这轮审查的核心结论：`is_online()` 只看"30 秒内有没有
+/// 任意 ETW 事件"，L2CAP 信令保活 2 次/秒就能把它刷成"在线" ——
+/// 于是"显示在线、按键全无"这类故障被掩盖。界面要显示的是这个。
+pub fn is_key_online() -> bool {
+    backend::shared()
+        .and_then(|sh| sh.lock().ok().map(|b| b.snapshot().key_online))
+        .unwrap_or(false)
+}
+
 /// 虚拟键盘是否就绪
 pub fn is_inject_ready() -> bool {
     backend::shared()

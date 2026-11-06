@@ -359,12 +359,19 @@ unsafe fn refresh_status() {
     //   与后台注入线程抢同一个设备槽位。实测：WinUHid.dll 缺失时在 WM_CREATE 里
     //   直接 0xC0000005 崩溃；即使不崩，也会干扰正在工作的注入。
     let drv = crate::device_probe::winuhid_driver_installed();
+    // ★ 第 4 项原来是"遥控器"= 改造状态（是否还是键盘），那是**配置态**不是**运行态**：
+    //   改造成功但按键收不到时它也显示 ✓，等于假绿灯。改成显示"按键"是否真的在收。
+    //   （审查 P0-1 / P2-2：两个发行版对同一故障的呈现必须一致。）
     let items: [(&str, bool); 4] = [
         ("声卡", p.cable_in && p.cable_out),
         ("麦克风", p.mic_is_cable),
         ("键盘驱动", drv),
-        ("遥控器", p.remote_is_keyboard == Some(false)),
+        ("按键", crate::is_key_online()),
     ];
+    // 改造状态改为一次性提示：仍是键盘 = 会双触发，必须说
+    if p.remote_is_keyboard == Some(true) {
+        set_hint("遥控器还是「键盘」模式：按键会打出字母，建议点「一键修复」改造", C_WARN);
+    }
     for (i, (name, ok)) in items.iter().enumerate() {
         if let Some(h) = STATUS_LABELS.get(i) {
             let txt = format!("{} {}", name, if *ok { "✓" } else { "⚠" });

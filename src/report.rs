@@ -185,3 +185,23 @@ mod tests {
         }
     }
 }
+
+/// 8 字节标准键盘报告 → usage 列表。
+///
+/// ★ 两条路径（ETW 与 HID 直读）必须共用这里的解析，否则同一台设备会产出
+///   语义不同的两套 usage：
+///   · ETW 路径的输入是 `acl[8..14]`（6 个 usage 字节），**从不含修饰键字节**；
+///   · HID 直读拿到的是完整 8 字节 `[modifier][reserved][6×usage]`。
+///
+/// ★ **不展开修饰键**（这里刻意只取 b[2..8]）：
+///   展开会让"真实键盘上按着 Ctrl"变成遥控器的一次按键事件（误触发），
+///   而且 ETW 路径本来就不产生 0xE0..0xE7 —— 两条路必须同语义。
+///   遥控器自己的按键（含语音键 0x10、方向键、音量键）都在这 6 个字节里，不需要修饰位。
+pub fn from_report_bytes(buf: &[u8]) -> Vec<u8> {
+    // 有的栈会在缓冲区前置 1 字节 Report ID（本设备是 1）
+    let b = if buf.len() >= 9 && buf[0] == 1 { &buf[1..] } else { buf };
+    if b.len() < 8 {
+        return Vec::new();
+    }
+    b[2..8].iter().copied().filter(|u| *u != 0).collect()
+}

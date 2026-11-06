@@ -216,8 +216,15 @@ impl eframe::App for App {
                     // 客户最想确认的是"我按了，机器到底收没收到、触发了什么"。
                     ui.vertical(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let (txt, color) = if crate::is_online() {
+                            // 三态：链路通 ≠ 按键能收。只显示"在线"会把
+                            // "已连接但按键通道没起来"整类故障藏掉。
+                            let (txt, color) = if crate::is_key_online() {
                                 ("● 遥控器在线", Color32::from_rgb(80, 200, 120))
+                            } else if crate::is_online() {
+                                (
+                                    "◐ 已连接，按键通道未就绪（按一下键试试）",
+                                    Color32::from_rgb(230, 160, 60),
+                                )
                             } else {
                                 ("○ 遥控器休眠（按任意键唤醒）", Color32::from_rgb(200, 170, 80))
                             };
