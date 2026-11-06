@@ -16,8 +16,12 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-/// 目标设备名（VB-CABLE 的播放端）
-const TARGET_DEVICE: &str = "CABLE Input";
+/// VB-CABLE 输出端点的匹配关键字：**只认「名字含 CABLE」**。
+///
+/// 不同机器上实名不一致，实测出现过三种：
+/// `CABLE Input` / `CABLE Input (VB-Audio Virtual Cable)` / `VB-Audio Virtual Cable`。
+/// 精确匹配 `CABLE Input` 会在第三种机器上直接判"没装"，把音频整段丢掉。
+const TARGET_KEYWORD: &str = "CABLE";
 const SR: usize = 48000;
 /// 环形缓冲容量（毫秒）—— 只影响"最多能积压多少"，不直接等于延迟
 const RING_MS: usize = 200;
@@ -149,11 +153,24 @@ impl CableOut {
         }
     }
 
-    /// 写入一帧 48k/16bit/单声道 PCM（小端字节，长度 = 样本数 × 2）
+    /// 写入一帧 **16 kHz** / 16-bit / 单声道 PCM（小端字节）。
+    ///
+    /// ★ 必须重采样到 48 kHz（2026-11-06 客户机实测）：
+    ///   上游每帧只有 320 个样本（16 kHz / 20 ms），而输出流是 48 kHz。
+    ///   原来直接 `push_one` 塞进去 ⇒ 320/48000 = 6.67 ms 当 20 ms 播，
+    ///   **整段语音 3 倍速、音调变尖、时长剩 1/3**，表现为"声音很小、识别不出字"。
+    ///   这里按 3:1 做线性插值上采样，每个输入样本补两个中间样本。
     pub fn push(&mut self, pcm: &[u8]) {
+        const RATIO: i32 = (SR / 16000) as i32; // 3
         let Ok(mut r) = self.ring.lock() else { return };
+        let mut prev: i32 = 0;
         for c in pcm.chunks_exact(2) {
-            r.push_one(i16::from_le_bytes([c[0], c[1]]));
+            let cur = i16::from_le_bytes([c[0], c[1]]) as i32;
+            for k in 1..=RATIO {
+                let v = prev + (cur - prev) * k / RATIO;
+                r.push_one(v as i16);
+            }
+            prev = cur;
         }
         self.bytes += pcm.len() as u64;
     }
@@ -173,15 +190,31 @@ impl CableOut {
 fn build_stream(ring: Arc<Mutex<Ring>>) -> Result<(cpal::Stream, String, u16), String> {
     let host = cpal::default_host();
     let mut picked = None;
-    for d in host.output_devices().map_err(|e| format!("枚举输出设备失败：{e}"))? {
+    let mut seen: Vec<String> = Vec::new();
+    for d in host
+        .output_devices()
+        .map_err(|e| format!("枚举输出设备失败：{e}"))?
+    {
         let n = d.name().unwrap_or_default();
-        if n.contains(TARGET_DEVICE) {
+        seen.push(n.clone());
+        // ★ 名字放宽到「含 CABLE」：不同机器上端点实名不一致，
+        //   `CABLE Input` / `CABLE Input (VB-Audio Virtual Cable)` /
+        //   `VB-Audio Virtual Cable` 都出现过（客户机实测第三种）。
+        //   只认精确的 `CABLE Input` 会直接判"没装"，把音频整段丢掉。
+        if picked.is_none() && n.to_uppercase().contains(TARGET_KEYWORD) {
             picked = Some((d, n));
-            break;
         }
     }
-    let (device, name) = picked
-        .ok_or_else(|| format!("没有找到输出设备「{TARGET_DEVICE}」（VB-CABLE 装了吗？）"))?;
+    let (device, name) = picked.ok_or_else(|| {
+        format!(
+            "没有找到 VB-CABLE 输出端点（按名字含 CABLE 匹配）。当前输出设备：{}",
+            if seen.is_empty() {
+                String::from("（枚举结果为空）")
+            } else {
+                seen.join(" | ")
+            }
+        )
+    })?;
 
     let supported = device
         .default_output_config()
