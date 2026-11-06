@@ -1,0 +1,41 @@
+﻿host=WIN-20260401P4X
+os=Microsoft Windows 11 专业工作站版 build 26300
+admin=True
+bt_adapter_count=4
+bt_adapter[0]=OK | 英特尔(R) 无线 Bluetooth(R) | USB\VID_8087&PID_0029\6&2AD36A86&0&14
+bt_adapter[1]=Unknown | Microsoft 蓝牙枚举器 | BTH\MS_BTHBRB\7&AF1883C&0&1
+bt_adapter[2]=Unknown | Microsoft 蓝牙 LE 枚举器 | BTH\MS_BTHLE\7&AF1883C&0&3
+bt_adapter[3]=Unknown | Bluetooth Device (RFCOMM Protocol TDI) | BTH\MS_RFCOMM\7&AF1883C&0&0
+bt_driver=英特尔(R) 无线 Bluetooth(R) | ver=22.140.0.4 | inf=oem7.inf
+btpair[0].mac=20c0470a3483
+btpair[0].name=IPRC1000
+btpair[0].ids=vid=0xA5C pid=0x8502
+btpair[0].servicesForKeys=0
+btpair[0].sdpRecords=0
+btpair[0].hasHIDservice=no
+btpair[1].mac=20c047f313d6
+btpair[1].name=IPRC1000
+btpair[1].ids=vid=0xA5C pid=0x8502
+btpair[1].servicesForKeys=1
+btpair[1].sdpRecords=3
+btpair[1].hasHIDservice=yes
+btpair[2].mac=20c047f31941
+btpair[2].name=IPRC1000
+btpair[2].ids=vid=0xA5C pid=0x8502
+btpair[2].servicesForKeys=0
+btpair[2].sdpRecords=0
+btpair[2].hasHIDservice=no
+btpair_count=3
+bthenum_hid_bound=yes
+bthenum_hid_service=HidBth
+enumhid_count=1
+enumhid_service=<empty>
+enumhid_class=<empty>
+enumhid_classguid={745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+cable_present=yes
+cable_count=1
+cable[VB-Audio Virtual Cable]=OK
+winuhid_node=yes
+hidbth_event_count=2
+hidbth_event=11-06 15:08:28 id=2 蓝牙 HID 设备 超出范围或不响应。
+hidbth_event=11-06 14:38:14 id=2 蓝牙 HID 设备 超出范围或不响应。
