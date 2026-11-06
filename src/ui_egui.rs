@@ -617,12 +617,24 @@ impl App {
                     );
                     ui.add_space(4.0);
                 } else {
+                    // 改绑后 HID 服务还在，但设备不再作为键盘设备出现在 Raw Input
+                    // ⇒ 按键其实收不到。这里必须报红并给恢复指引，不能写"按键可读"
+                    // （0.4.41 写反了，导致界面一句"可读"一句"未就绪"自相矛盾）。
                     check_row(
                         ui,
-                        true,
+                        false,
                         "遥控器按键通道",
-                        "HID 服务已绑定，且已改绑 HID-compliant device —— 按键可读、不打字母",
+                        "已被改绑成 HID-compliant device ⇒ 不打字母，但 Raw Input 里没有这台设备，按键收不到",
                     );
+                    let warn = Color32::from_rgb(255, 140, 90);
+                    ui.label(
+                        RichText::new(
+                            "⚠ 修法：先点「⑤ 恢复键盘模式」，再删除设备、重新配对（只恢复不重配不够）。",
+                        )
+                        .small()
+                        .color(warn),
+                    );
+                    ui.add_space(4.0);
                 }
             }
             // ★ 无节点不是"未连接"那么轻：SDP 没跑通就没有 PSM 0x0011 监听者，

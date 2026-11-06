@@ -453,7 +453,11 @@ pub fn repair_report() -> crate::step::Report {
                      点「④ 禁止打字母」可改绑成 HID-compliant device（不打字母、按键照读）",
                 )
             } else {
-                String::from("HID 服务已绑定，且已改绑 HID-compliant device ⇒ 按键可读、不打字母")
+                String::from(
+                    "HID 服务已绑定，但设备已被改绑成 HID-compliant device ⇒ 系统不再当键盘（不打字母），\
+                     同时也**不再出现在 Raw Input 里，按键收不到**。\
+                     修法：点「⑤ 恢复键盘模式」，然后删除设备重新配对（只恢复不重配不够）。",
+                )
             }),
         ),
         Some(false) => rep.push(
