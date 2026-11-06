@@ -89,6 +89,8 @@ pub struct CableOut {
     pub channels: u16,
     /// 已写入的 PCM 字节数（诊断/统计用）
     pub bytes: u64,
+    /// 调试录音：重采样后真正送进设备的 48 kHz 音频
+    rec48: Option<crate::capture::Rec>,
 }
 
 impl Drop for CableOut {
@@ -134,7 +136,13 @@ impl CableOut {
 
         match rx.recv_timeout(std::time::Duration::from_secs(8)) {
             Ok(Ok((name, channels))) => Ok(Self {
-                ring, stop, handle: Some(handle), name, channels, bytes: 0,
+                ring,
+                stop,
+                handle: Some(handle),
+                name,
+                channels,
+                bytes: 0,
+                rec48: crate::capture::Rec::open("48k", SR as u32),
             }),
             Ok(Err(e)) => Err(e),
             Err(_) => Err("打开 CABLE Input 超时（8 秒）".to_string()),
@@ -162,17 +170,25 @@ impl CableOut {
     ///   这里按 3:1 做线性插值上采样，每个输入样本补两个中间样本。
     pub fn push(&mut self, pcm: &[u8]) {
         const RATIO: i32 = (SR / 16000) as i32; // 3
-        let Ok(mut r) = self.ring.lock() else { return };
-        let mut prev: i32 = 0;
-        for c in pcm.chunks_exact(2) {
-            let cur = i16::from_le_bytes([c[0], c[1]]) as i32;
-            for k in 1..=RATIO {
-                let v = prev + (cur - prev) * k / RATIO;
-                r.push_one(v as i16);
+        let mut buf: Vec<i16> = Vec::with_capacity(pcm.len() * 3 / 2 + 8);
+        {
+            let Ok(mut r) = self.ring.lock() else { return };
+            let mut prev: i32 = 0;
+            for c in pcm.chunks_exact(2) {
+                let cur = i16::from_le_bytes([c[0], c[1]]) as i32;
+                for k in 1..=RATIO {
+                    let v = (prev + (cur - prev) * k / RATIO) as i16;
+                    r.push_one(v);
+                    buf.push(v);
+                }
+                prev = cur;
             }
-            prev = cur;
         }
         self.bytes += pcm.len() as u64;
+        // 调试录音：这一路才是真正送进 CABLE 的音频
+        if let Some(rec) = self.rec48.as_mut() {
+            rec.write_samples(&buf);
+        }
     }
 
     /// 当前积压（毫秒）—— 用于界面"延迟"显示

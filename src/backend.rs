@@ -909,6 +909,8 @@ pub struct Bridge {
     inline: Option<crate::winuhid::Injector>,
     /// 上一次真正提交给系统的整份报告 —— 内容没变就不重复提交
     inline_last: [u8; 8],
+    /// 调试录音：收到的 16 kHz 原始音频（`IPRC1000_RECORD` 控制，默认 None）
+    rec16: Option<crate::capture::Rec>,
 }
 
 impl Bridge {
@@ -966,6 +968,7 @@ impl Bridge {
             pending: None,
             inline,
             inline_last: [0u8; 8],
+            rec16: crate::capture::Rec::open("16k", 16000),
             cable,
         }
     }
@@ -2270,6 +2273,10 @@ impl Bridge {
             });
             self.audio_reopen_rx = Some(rx);
             eprintln!("[音频] 空闲后首次使用 ⇒ 后台重开输出流（本帧及后续几帧丢弃）");
+        }
+        // 调试录音：先落 16 kHz 原始（判断"收到的音频本身对不对"）
+        if let Some(r) = self.rec16.as_mut() {
+            r.write_pcm16le(&out);
         }
         if let Some(c) = self.cable.as_mut() {
             c.push(&out);

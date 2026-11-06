@@ -18,6 +18,7 @@
 mod autostart;
 mod backend;
 mod cable_out;
+mod capture;
 mod commands;
 mod device_probe;
 mod dev_install;
