@@ -2896,10 +2896,15 @@ pub fn run_backend() {
                     s.sig_frag,
                     s.hid_reports,
                     s.key_events,
+                    // ★ 顺序必须严格跟着格式串走：otherEvents 在 hidDirect 之前。
+                    //   上一版把三个新参数插到了 s.key_events 后面、s.other 前面，
+                    //   于是从 otherEvents 起整体错位一格 ——
+                    //   stats 里 hidOpen 显示的是 MISS、otherEvents 显示的是 HID 报告数。
+                    //   假仪表比没仪表更糟：现场会据此得出完全相反的结论。
+                    s.other,
                     crate::hid_reader::REPORTS.load(std::sync::atomic::Ordering::Relaxed),
                     crate::hid_reader::REOPENED.load(std::sync::atomic::Ordering::Relaxed),
                     crate::hid_reader::MISS.load(std::sync::atomic::Ordering::Relaxed),
-                    s.other,
                     if s.first_key_seen { s.first_key_ms as i64 } else { -1i64 },
                     s.first_key_usage,
                     silent,
