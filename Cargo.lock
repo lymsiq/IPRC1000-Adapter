@@ -1456,7 +1456,7 @@ dependencies = [
 
 [[package]]
 name = "iprc1000_native"
-version = "0.4.46"
+version = "0.4.47"
 dependencies = [
  "cpal",
  "eframe",
