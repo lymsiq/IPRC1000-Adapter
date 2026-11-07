@@ -2,13 +2,12 @@
 //!
 //! ## 为什么**不**自动提权
 //!
-//! 交接文档 §3 已在客户机证实：按键通道的根因是 `\kbd` 接口的 SYSTEM-only ACL，
-//! 改成 Raw Input 后**不需要管理员**（原型实测 20/20 按键全捕获）。
-//! 此时若给主程序加 `requireAdministrator` 或启动时 `runas` 重启，只会让客户机
-//! 每次开机多一个 UAC 弹窗，对按键毫无帮助。
+//! 按键主路径是 ETW BthPort ACL（`backend::handle_fragment` 解析 a1 01 报告），
+//! 需要管理员；0.4.40 起叠加的 Raw Input 是第二条路径，不需要管理员。
+//! 仍不自动提权：主清单保持 asInvoker，由用户自己决定何时右键「以管理员身份运行」。
 //!
-//! 仍然需要管理员的只剩**语音链路**（`UserTrace::start_and_process()` 要求
-//! Administrators 或 Performance Log Users）与 `--install` 里的驱动/注册表动作。
+//! 需要管理员的动作：ETW 会话（`UserTrace::start_and_process()` 要求
+//! Administrators 或 Performance Log Users）、语音链路、`--install` 里的驱动/注册表动作。
 //! 所以这里只做判定：非管理员时由 `health` 在界面上如实提示，
 //! 由用户自己决定要不要右键「以管理员身份运行」，不替用户弹 UAC。
 

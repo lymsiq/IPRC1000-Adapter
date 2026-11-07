@@ -337,7 +337,7 @@ pub fn remote_hid_instances() -> Vec<HidInst> {
 /// 所以判据必须读 **`Enum\BTHENUM\{00001124-...}_VID&00020a5c_PID&8502\<inst>` 的 `Service`**，
 /// 必须是 `HidBth`。
 ///
-/// ⚠ **不能读 `Enum\HID` 下的节点**：那是设备被改造/换驱动后留下的空壳，
+/// ⚠ **不能读 `Enum\HID` 下的节点**：它会缓存 HardwareID（HID_Inst 是标准 HID 驱动，不是空壳），
 /// 它的 `HardwareID` 里永远有 `HID_DEVICE_SYSTEM_KEYBOARD`（枚举时缓存，不会被改写），
 /// 会让界面报「键盘模式正确」的**假绿灯**——客户机就是这么被误导的。
 ///
@@ -392,7 +392,7 @@ pub fn remote_still_keyboard() -> Option<bool> {
 /// 目的：让系统**不再往焦点窗口打字母**，同时按键照常可读：
 ///   · 不再绑 `kbdhid` ⇒ 不打字符
 ///   · 绑 `mshidkmdf`，仍属 HIDClass ⇒ HID 接口照常注册
-///   · TLC 仍是 `0x01/0x06` ⇒ Raw Input 的 `WM_INPUT` 照常投递
+///   · 设备不再作为键盘 TLC 注册给 Raw Input ⇒ 该路径不再列这台设备
 ///   · ETW 读 BthPort 的 ACL 包，与 HID 驱动绑定无关 ⇒ 照常有数据
 ///
 /// 安装细节在 `dev_install::install_hid_compliant`（SetupAPI 按型号强制安装）。
@@ -429,14 +429,14 @@ pub fn convert_to_hid_compliant() -> Result<String, String> {
     }
 
     if done == 0 {
-        Err(format!("改造失败：{}", errs.join("；")))
+        Err(format!("改绑失败：{}", errs.join("；")))
     } else if errs.is_empty() {
         Ok(format!(
-            "已改造 {done} 个节点 ⇒ 不再打字母，但 Raw Input 里不再有这台设备，按键收不到。\
-             必须删除设备重新配对才能恢复（--restore-keyboard 只删节点，不够）。"
+            "已改绑 {done} 个节点 ⇒ 不再打字母；ETW ACL 主路径照常收按键与语音。\
+             Raw Input 不再列该设备，属提示不是故障，无需重配对。"
         ))
     } else {
-        Ok(format!("部分成功：{done} 个已改造；问题：{}", errs.join("；")))
+        Ok(format!("部分成功：{done} 个已改绑；问题：{}", errs.join("；")))
     }
 }
 
@@ -523,7 +523,7 @@ pub fn winuhid_driver_installed() -> bool {
     !subkeys(k).is_empty()
 }
 
-/// 「取消改造」：把遥控器的 HID 节点从 raw 绑回键盘。
+/// 「恢复 Raw Input 枚举」：仅在需要该路径时使用（改绑本身不是故障）。
 ///
 /// ## 为什么需要（2026-11-06 真机结论）
 ///
@@ -541,8 +541,9 @@ pub fn winuhid_driver_installed() -> bool {
 ///   · 遥控器没地方投递按键 ⇒ 4 秒监督超时断开重连
 ///   · ETW 只剩信令可看（`otherEvents` 涨、`keyEvents` 恒 0）
 ///
-/// 也就是说：**改造与"能收到按键"不可兼得**。这只遥控器只有一个 Keyboard 集合，
-/// 系统里也没有第二个客户端能替它消费。所以正解是"不改造 + 钩子吞键"，本函数就是回到起点。
+/// 2026-11-07 更正：改绑不会切断按键（ETW ACL 主路径仍在）。
+/// 本函数只是「需要让遥控器重新出现在 Raw Input 列表时」的可选恢复手段，
+/// 不是故障解药；按键语音全断请查蓝牙链路（--doctor [11]）。
 pub fn restore_keyboard() -> Result<String, String> {
     // 枚举注册表里的遥控器节点（含 phantom —— 正是它们需要被删掉）。
     // 实例 ID 形如 HID\{00001124-...}_VID&00020a5c_PID&8502\9&378511c7&1&0000

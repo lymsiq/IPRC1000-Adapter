@@ -76,18 +76,13 @@ impl Outcome {
 /// 返回 `None` 表示没找到匹配的设备（未配对 / 适配器不在）。
 pub fn renegotiate(name_hint: &str) -> Option<Outcome> {
     unsafe {
-        // ① 找第一个蓝牙适配器
+        // ① 找第一个蓝牙适配器。注意 BluetoothFindFirstRadio 返回的是
+        //    HBLUETOOTH_RADIO_FIND（查找句柄），radio 才是 HANDLE，两者要分别关闭。
         let mut radio = HANDLE::default();
-        let found = BluetoothFindFirstRadio(std::ptr::null(), &mut radio);
-        let Ok(first) = found else {
-            return None;
-        };
+        let radio_find = BluetoothFindFirstRadio(std::ptr::null(), &mut radio).ok()?;
         let hradio = radio;
-        let _iter = first;
+        let hint = name_hint.to_uppercase();
 
-        let mut target: Option<BLUETOOTH_DEVICE_INFO> = None;
-
-        // 遍历该适配器下的设备
         let params = BLUETOOTH_DEVICE_SEARCH_PARAMS {
             dwSize: std::mem::size_of::<BLUETOOTH_DEVICE_SEARCH_PARAMS>() as u32,
             fReturnAuthenticated: true.into(),
@@ -98,62 +93,83 @@ pub fn renegotiate(name_hint: &str) -> Option<Outcome> {
             cTimeoutMultiplier: 0,
             hRadio: hradio,
         };
+        // ★ BLUETOOTH_DEVICE_INFO::default() 是 zeroed，dwSize=0 会让所有
+        //   Bluetooth* API 返回 ERROR_INVALID_PARAMETER，必须显式填。
+        let fresh = || BLUETOOTH_DEVICE_INFO {
+            dwSize: std::mem::size_of::<BLUETOOTH_DEVICE_INFO>() as u32,
+            ..Default::default()
+        };
+        let name_of = |d: &BLUETOOTH_DEVICE_INFO| {
+            String::from_utf16_lossy(
+                &d.szName.iter().take_while(|&&c| c != 0).copied().collect::<Vec<_>>(),
+            )
+        };
 
-        if let Ok(hfind) = BluetoothFindFirstDevice(&params, &mut BLUETOOTH_DEVICE_INFO::default()) {
-            loop {
-                let mut info = BLUETOOTH_DEVICE_INFO::default();
-                if BluetoothFindNextDevice(hfind, &mut info).is_err() {
-                    break;
-                }
-                let name = String::from_utf16_lossy(
-                    &info.szName.iter().take_while(|&&c| c != 0).copied().collect::<Vec<_>>(),
-                );
-                if name.to_uppercase().contains(&name_hint.to_uppercase()) {
-                    target = Some(info);
-                    break;
+        // ② 枚举设备：FindFirstDevice 会填好**第一个**，不能丢掉再从 Next 开始。
+        let mut target: Option<BLUETOOTH_DEVICE_INFO> = None;
+        let mut dev0 = fresh();
+        if let Ok(hfind) = BluetoothFindFirstDevice(&params, &mut dev0) {
+            if name_of(&dev0).to_uppercase().contains(&hint) {
+                target = Some(dev0);
+            }
+            if target.is_none() {
+                loop {
+                    let mut next = fresh();
+                    if BluetoothFindNextDevice(hfind, &mut next).is_err() {
+                        break;
+                    }
+                    if name_of(&next).to_uppercase().contains(&hint) {
+                        target = Some(next);
+                        break;
+                    }
                 }
             }
             let _ = BluetoothFindDeviceClose(hfind);
         }
-        let _ = CloseHandle(hradio);
+        // 查找句柄用完即关；hradio 后面还要传给 SetServiceState/GetDeviceInfo
+        let _ = BluetoothFindRadioClose(radio_find);
 
-        let dev = target?;
-        let dev_name = String::from_utf16_lossy(
-            &dev.szName.iter().take_while(|&&c| c != 0).copied().collect::<Vec<_>>(),
-        );
+        let dev = match target {
+            Some(d) => d,
+            None => {
+                let _ = CloseHandle(hradio);
+                return None;
+            }
+        };
+        let dev_name = name_of(&dev);
 
-        // ② 禁用 HID 服务
-        let rc_disable = BluetoothSetServiceState(
+        // ③ 禁用 HID 服务（此时 hradio 仍然有效）
+        let disabled = BluetoothSetServiceState(
             hradio,
             &dev,
             &HID_SERVICE,
             BLUETOOTH_SERVICE_DISABLE,
-        );
-        let disabled = rc_disable == 0;
+        ) == 0;
         if disabled {
-            // 给蓝牙栈一点时间真正停下这条服务
             std::thread::sleep(std::time::Duration::from_millis(600));
         }
 
-        // ③ 重新启用
-        let rc_enable = BluetoothSetServiceState(
+        // ④ 重新启用
+        let enabled = BluetoothSetServiceState(
             hradio,
             &dev,
             &HID_SERVICE,
             BLUETOOTH_SERVICE_ENABLE,
-        );
-        let enabled = rc_enable == 0;
+        ) == 0;
 
-        // ④ 等最多 1 秒，看设备是否回到已连接
+        // ⑤ 等最多 1 秒，看设备是否回到已连接
         let mut connected = false;
         for _ in 0..10 {
             std::thread::sleep(std::time::Duration::from_millis(100));
-            let mut info = dev;
+            let mut info = dev; // Copy，dwSize 已填好
             if BluetoothGetDeviceInfo(hradio, &mut info) == 0 && info.fConnected.as_bool() {
                 connected = true;
                 break;
             }
         }
+
+        // ★ 所有 API 调用结束后才关闭 radio 句柄（旧版在这里之前就 Close 了）
+        let _ = CloseHandle(hradio);
 
         Some(Outcome {
             device: dev_name,

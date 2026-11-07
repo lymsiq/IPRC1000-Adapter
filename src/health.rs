@@ -29,10 +29,20 @@ pub fn fatal() -> Option<String> {
     FATAL.lock().ok().and_then(|g| g.clone())
 }
 
-/// 故障恢复后清掉（例如驱动重连成功）。目前只留给将来用。
-#[allow(dead_code)] // 未接 UI（功能已实现，等界面入口）
+/// 故障恢复后清掉（保留给显式恢复流程；当前 ETW 用 clear_matching 精确清）。
+#[allow(dead_code)]
 pub fn clear() {
     if let Ok(mut g) = FATAL.lock() {
         *g = None;
+    }
+}
+
+/// 只清掉某一类故障（按消息前缀），避免误清掉其它仍然存在的致命错误。
+/// 例：ETW 会话启动成功后只清「启动 ETW 会话失败」，不动 WinUHid 的注入故障。
+pub fn clear_matching(prefix: &str) {
+    if let Ok(mut g) = FATAL.lock() {
+        if g.as_deref().map(|s| s.starts_with(prefix)).unwrap_or(false) {
+            *g = None;
+        }
     }
 }

@@ -390,21 +390,27 @@ fn main() {
     if !is_cli_tool {
         redirect_stderr_to_file();
     }
+    // ★★ 2026-11-07：CLI 子命令也必须先加载配置。
+    //   `--doctor` / `--no-sleep` 会走到 device_id::get() → set_device_binding() → save()，
+    //   若 store() 里还是出厂默认 Data，就会把 ime / trigger / groups / recordAudio
+    //   全部写回 native.json —— 跑一次体检就丢光用户键位和输入法档位。
+    settings::load();
 
     // ★ 2026-11-06：权限 / ETW 注册表**只读体检**，如实留痕，不强制提权。
     //   按键已改走 Raw Input（交接文档 §3 实测不需要管理员，且不碰 \kbd 的
-    //   SYSTEM-only ACL）；仍需管理员的只剩语音的 ETW 会话与 --install 的系统动作。
-    //   不自动 UAC：客户机每次开机弹一次提权框，对按键毫无帮助，反而添堵。
+    //   SYSTEM-only ACL）。更正（11-07）：按键主路径是 ETW BthPort ACL，同样需要管理员；
+    //   Raw Input 只是叠加的第二条路径。ETW 会话、--install 的系统动作都需要管理员。
+    //   仍不自动 UAC：由用户自己决定何时以管理员身份运行。
     let admin = elevate::is_admin();
     if !admin {
-        eprintln!("[!] 当前非管理员：语音链路（ETW 会话）可能起不来；按键（Raw Input）不受影响。要用语音请右键「以管理员身份运行」。");
+        eprintln!("[!] 当前非管理员：ETW 会话可能起不来，语音与按键主路径都会受影响（仅 Raw Input 备用可用）；请以管理员身份运行。要用语音请右键「以管理员身份运行」。");
     }
     if !is_cli_tool {
         let reg = etw_registry::status();
         if !reg.configured {
             eprintln!("[!] BthPort ETW 注册表未就绪：{}", reg.detail);
             health::set_fatal(format!(
-                "语音链路注册表未就绪（{}）。请运行「一键安装.cmd」写入后重启电脑；按键不受影响。",
+                "语音链路注册表未就绪（{}）。请运行「一键安装.cmd」写入后重启电脑；语音不可用，若 [4] 为非键盘则按键也不可用。",
                 reg.detail
             ));
         }
@@ -458,7 +464,7 @@ fn main() {
     }
 
     // 止字符：`--convert-hid` 把遥控器从 kbdhid 改绑到 mshidkmdf（HID-compliant device）。
-    // 目标：系统不再往焦点窗口打字母，同时 HID 接口 / Raw Input / ETW 都保持不变。
+    // 目标：系统不再往焦点窗口打字母；HID 接口与 ETW 保持不变，Raw Input 不再列该设备。
     // 需要管理员；回退用 `--restore-keyboard`。
     if std::env::args().any(|a| a == "--convert-hid") {
         if !elevate::is_admin() {
@@ -532,7 +538,7 @@ fn main() {
     }
 
     // 环境体检（2026-11-06）：每一项给「实测值 / 判据 / 修法」三列。
-    // 为什么单独做：界面曾写「已改绑 ⇒ 按键可读」，实际收不到 —— 结论对不上依据时
+    // 为什么单独做：界面曾写「已改绑 ⇒ 按键可读」并被误判；11-07 复测确认该判断成立，全断真因是 Realtek 链路断 —— 结论对不上依据时
     // 人只能靠猜，一天就耗在这上面。`--doctor` 强制每行都能被复核。
     // 用法：`--doctor`（写 logs\doctor.txt）或 `--doctor D:\out.txt`
     if let Some(i) = std::env::args().position(|a| a == "--doctor") {
@@ -642,7 +648,7 @@ fn main() {
         //   以前这里照样跑完并打"安装完成"，是客户机假成功的源头。
         if !admin {
             eprintln!("✗ 需要管理员权限：请右键「一键安装.cmd」→ 以管理员身份运行（或安装器右键同法）。");
-            eprintln!("  按键走 Raw Input 不需要管理员；这一步是给声卡/驱动/注册表用的。");
+            eprintln!("  按键主路径 ETW 需管理员；这一步给声卡/驱动/注册表用。");
             std::process::exit(4);
         }
         eprintln!("IPRC1000 一键安装 —— 声卡 / 键盘驱动 / 麦克风 / ETW 注册表 / 遥控器按键通道检查");
@@ -785,14 +791,14 @@ fn main() {
         .spawn(backend::run_backend)
         .ok();
 
-    // ③-2 按键输入消费者 = Raw Input（2026-11-06 客户机根因）
+    // ③-2 按键输入：ETW BthPort ACL 为主路径，Raw Input 为叠加的第二条路径
     //   旧版 CreateFileW 打开键盘顶层集合 \kbd 接口：该接口 ACL 是 SYSTEM-only，
     //   非 SYSTEM 进程恒定 err=5，管理员也打不开 ⇒ 客户机按键全无。
-    //   现在独立线程建隐藏窗口，RegisterRawInputDevices(RIDEV_INPUTSINK) 收 WM_INPUT，
-    //   按设备名 0A5C+8502 过滤，用 HELD[256] 还原 HID 报告快照；不打开任何设备接口。
-    //   ⚠ 仍必须保持遥控器「键盘」身份：改绑成 input.inf/raw 后不注册 HID 设备接口、
-    //   Windows 不建 HID 中断通道 ⇒ 按键与音频同时全断。见 device_probe.rs。
-    //   语音音频仍走 ETW（那条通道本来就有数据）。
+    //   ETW 直接在 ACL 层解析 a1 01 HID 报告（backend::handle_fragment），
+    //   与 Windows 侧绑不绑 kbdhid 无关；改绑 HID_Inst 后接口照常、按键语音照常。
+    //   Raw Input 独立线程建隐藏窗口，RegisterRawInputDevices(RIDEV_INPUTSINK)
+    //   收 WM_INPUT，按设备名过滤，HELD[256] 还原 HID 报告快照；不打开任何设备接口。
+    //   改绑后 Raw Input 不再枚举该键盘，属预期；真断链看 --doctor [11]。
     hid_reader::start();
 
     // ④ 托盘线程（Win32 版由 ui_win32 自己建托盘，这里不再建，否则两个图标）

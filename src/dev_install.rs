@@ -155,7 +155,7 @@ unsafe fn sym(module: *mut c_void, name: &str) -> *mut c_void {
 /// 强制改绑到 `input.inf` 的「HID-compliant device」。
 ///
 /// 选型严格：型号名必须含 `hid-compliant device` 且**不含 `raw`** ——
-/// 选成 raw device 会让 HID 接口彻底消失、按键与音频全断。
+/// 本项目目标是 HID_Inst（标准 HID 驱动，接口照常注册）；raw 型号不在支持范围。
 pub fn install_hid_compliant(instance_id: &str, inf_path: &str) -> Result<(), String> {
     unsafe {
         let dll = wide("setupapi.dll");

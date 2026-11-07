@@ -195,11 +195,12 @@ fn bluetooth_adapters() -> Vec<String> {
                 //   （读它返回 ERROR_FILE_NOT_FOUND）。要用 `ClassGUID` 或 `Service`。
                 let guid = get_string(k, "ClassGUID").unwrap_or_default();
                 let svc = get_string(k, "Service").unwrap_or_default();
-                // ★ 跳过幽灵设备（DN_PHANTOM = 0x20）：拔掉的 dongle 会留在
-                //   Enum\USB 里，报出来只会误导（用户实测：VID_0A12 早已拔掉）。
+                // ★ 2026-11-07 更正：ConfigFlags 的 0x20 是 CONFIGFLAG_REINSTALL
+                //   （下次重枚举重装驱动），在线设备改绑/扫描硬件后也常带这一位；
+                //   真正的"已拔除"标记是 CONFIGFLAG_REMOVED = 0x2。
                 let flags = get_dword(k, "ConfigFlags").unwrap_or(0);
                 let _ = RegCloseKey(k);
-                if flags & 0x20 != 0 {
+                if flags & 0x2 != 0 {
                     continue;
                 }
                 let is_bt = guid.eq_ignore_ascii_case("{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}")
@@ -242,8 +243,8 @@ fn hid_instances() -> Vec<String> {
                     }
                     None => 0,
                 };
-                if flags & 0x20 != 0 {
-                    continue;   // 幽灵节点（设备已拔/休眠 phantom）
+                if flags & 0x2 != 0 {
+                    continue;   // CONFIGFLAG_REMOVED：设备已拔除
                 }
                 out.push(format!(r"HID\{parent}\{inst}"));
             }
@@ -263,11 +264,10 @@ pub fn audit() -> Vec<Finding> {
             let path = if sub.is_empty() { dp.clone() } else { format!("{dp}\\{sub}") };
             unsafe {
                 let Some(k) = open(&path, false) else { continue };
-                // ★ 只报**实际存在**的键。不存在的跳过 —— 否则会刷一堆
-                //   "未设置"，把真正的 WDF\IdleInWorkingState 淹掉。
-                if let Some(v) = get_dword(k, sw) {
-                    out.push(Finding { device: dev.clone(), switch: sw, value: Some(v) });
-                }
+                // ★ 缺失的键也要报成 value=None：系统默认允许省电，
+                //   正是空闲断链的来源（Intel AX200 实测三个开关全不存在）。
+                //   只报存在的键会让 [10] 判 Skip/Ok 的假绿灯。
+                out.push(Finding { device: dev.clone(), switch: sw, value: get_dword(k, sw) });
                 let _ = RegCloseKey(k);
             }
         }
@@ -310,12 +310,11 @@ pub fn apply() -> Result<(usize, usize), String> {
             let path = if sub.is_empty() { dp.clone() } else { format!("{dp}\\{sub}") };
             unsafe {
                 let Some(k) = open(&path, true) else { continue };
-                if let Some(v) = get_dword(k, sw) {
-                    checked += 1;
-                    if v != 0 && set_dword(k, sw, 0) {
-                        fixed += 1;
-                        eprintln!("  [省电] {dev} / {sw}: {v} → 0");
-                    }
+                checked += 1;
+                let cur = get_dword(k, sw);
+                if cur != Some(0) && set_dword(k, sw, 0) {
+                    fixed += 1;
+                    eprintln!("  [省电] {dev} / {sw}: {cur:?} → 0");
                 }
                 let _ = RegCloseKey(k);
             }
@@ -327,12 +326,10 @@ pub fn apply() -> Result<(usize, usize), String> {
         unsafe {
             let Some(k) = open(&dp, true) else { continue };
             let cur = get_dword(k, HID_SWITCH);
-            if cur.map(|v| v != 0).unwrap_or(false) {
-                checked += 1;
-                if set_dword(k, HID_SWITCH, 0) {
-                    fixed += 1;
-                    eprintln!("  [省电] {dev} / {HID_SWITCH}: {cur:?} → 0");
-                }
+            checked += 1;
+            if cur != Some(0) && set_dword(k, HID_SWITCH, 0) {
+                fixed += 1;
+                eprintln!("  [省电] {dev} / {HID_SWITCH}: {cur:?} → 0");
             }
             let _ = RegCloseKey(k);
         }

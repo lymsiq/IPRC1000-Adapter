@@ -141,14 +141,14 @@ pub fn adapter() -> Option<Chip> {
                 let path = format!("SYSTEM\\CurrentControlSet\\Enum\\USB\\{vid}\\{inst}");
                 let Some(k) = open(&path) else { continue };
                 let svc = get_sz(k, "Service").unwrap_or_default();
-                // 跳过幽灵设备（拔掉的 dongle 会留在注册表里）
+                // 跳过已拔除设备（CONFIGFLAG_REMOVED=0x2；0x20 是 REINSTALL，不能当幽灵）
                 let flags = get_dword(k, "ConfigFlags").unwrap_or(0);
                 let desc = get_sz(k, "DeviceDesc").unwrap_or_default();
                 let vendor = get_sz(k, "Mfg")
                     .map(|v| v.trim_start_matches('@').to_string())
                     .unwrap_or_default();
                 let _ = RegCloseKey(k);
-                if !svc.eq_ignore_ascii_case("BTHUSB") || flags & 0x20 != 0 {
+                if !svc.eq_ignore_ascii_case("BTHUSB") || flags & 0x2 != 0 {
                     continue;
                 }
                 let _ = RegCloseKey(vk);

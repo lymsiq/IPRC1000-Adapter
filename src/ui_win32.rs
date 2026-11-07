@@ -360,30 +360,36 @@ unsafe fn refresh_status() {
     //   直接 0xC0000005 崩溃；即使不崩，也会干扰正在工作的注入。
     let drv = crate::device_probe::winuhid_driver_installed();
     // ★ 第 4 项原来是"遥控器"= 改造状态（是否还是键盘），那是**配置态**不是**运行态**：
-    //   改造成功但按键收不到时它也显示 ✓，等于假绿灯。改成显示"按键"是否真的在收。
+    //   改绑后接口照常，ETW 路径仍可用。改成显示"按键"是否真的在收。
     //   （审查 P0-1 / P2-2：两个发行版对同一故障的呈现必须一致。）
+    let fatal = crate::health::fatal();
     let items: [(&str, bool); 4] = [
         ("声卡", p.cable_in && p.cable_out),
         ("麦克风", p.mic_is_cable),
         ("键盘驱动", drv),
-        ("按键", crate::is_key_online()),
+        ("按键", crate::is_key_online() && fatal.is_none()),
     ];
     // 改造状态改为一次性提示：仍是键盘 = 会双触发，必须说
     // 判据已改为 Enum\BTHENUM\{00001124-...} 的 Service（客户机 S2 实测）：
     //   Some(true)=已绑定 HidBth / Some(false)=有节点没绑定 / None=无节点（SDP 未成功）。
+    // 致命故障优先显示（P0-2：Win32 版此前完全不读 health::fatal）
+    if let Some(f) = &fatal {
+        set_hint(&format!("⚠ 服务未就绪：{f}"), C_WARN);
+    } else {
     match p.remote_is_keyboard {
         Some(true) => set_hint(
-            "HID 服务已绑定（Service=HidBth）：按键可读，系统会同时打字母。★ 不要改造",
+            "HID 服务已绑定（Service=HidBth）：按键可读，系统会同时打字母；如不想打字母可改绑（可选），按键语音不受影响",
             C_WARN,
         ),
         Some(false) => set_hint(
-            "HID 服务未绑定 HidBth：主机没有 PSM 0x0011 监听者，按键收不到。修法：删除 IPRC1000 后重新配对",
+            "HID 服务未绑定 HidBth：先禁用再启用蓝牙适配器；若是 Realtek 组合卡，按 --doctor [11] 换独立蓝牙",
             C_WARN,
         ),
         None => set_hint(
-            "没有 HID 服务节点（SDP 未成功）：遥控器会被 REFUSED_PSM。修法：删除设备重新配对",
+            "没有 HID 服务节点（SDP 从未成功）：按用户手册第 3 节完整重配对一次（配对全程持续按遥控器按键）",
             C_WARN,
         ),
+    }
     }
     for (i, (name, ok)) in items.iter().enumerate() {
         if let Some(h) = STATUS_LABELS.get(i) {
@@ -578,6 +584,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             add_tray(hwnd, icon);
             refresh_status();
+            // P0-1：状态条此前只在启动时采一次样，永久冻结。
+            let _ = SetTimer(hwnd, 1, 1000, None);
             LRESULT(0)
         }
         WM_CTLCOLORSTATIC => {
@@ -870,7 +878,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             LRESULT(0)
         }
+        WM_TIMER => {
+            refresh_status();
+            LRESULT(0)
+        }
         WM_DESTROY => {
+            let _ = KillTimer(hwnd, 1);
             remove_tray(hwnd);
             let _ = DeleteObject(HGDIOBJ(BRUSH_BG.0));
             let _ = DeleteObject(HGDIOBJ(FONT_N.0));

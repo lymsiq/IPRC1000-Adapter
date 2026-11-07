@@ -229,15 +229,25 @@ impl eframe::App for App {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             // 三态：链路通 ≠ 按键能收。只显示"在线"会把
                             // "已连接但按键通道没起来"整类故障藏掉。
-                            let (txt, color) = if crate::is_key_online() {
-                                ("● 遥控器在线", Color32::from_rgb(80, 200, 120))
+                            // 四态（2026-11-07 review）：故障态优先于空态，
+                            // 且"链路在线但没按键"是正常休眠，不能说成"通道未就绪"。
+                            let (txt, color) = if let Some(f) = crate::health::fatal() {
+                                (
+                                    format!("⚠ 服务未就绪：{f}"),
+                                    Color32::from_rgb(220, 70, 60),
+                                )
+                            } else if crate::is_key_online() {
+                                ("● 遥控器在线".into(), Color32::from_rgb(80, 200, 120))
                             } else if crate::is_online() {
                                 (
-                                    "◐ 已连接，按键通道未就绪（按一下键试试）",
-                                    Color32::from_rgb(230, 160, 60),
+                                    "◐ 链路在线，暂无按键（休眠或未按）".into(),
+                                    Color32::from_rgb(200, 170, 80),
                                 )
                             } else {
-                                ("○ 遥控器休眠（按任意键唤醒）", Color32::from_rgb(200, 170, 80))
+                                (
+                                    "○ 无链路事件（休眠 / 断链；按任意键唤醒）".into(),
+                                    Color32::from_rgb(150, 160, 175),
+                                )
                             };
                             ui.label(RichText::new(txt).color(color));
                         });
@@ -581,8 +591,8 @@ impl App {
 
         // ★ 遥控器按键通道（2026-11-06 真机结论，判据已反转）：
         //   「仍是键盘」= 接口正常注册 = **正确状态**（副作用：系统也会打字母）。
-        //   「已改绑 raw」= 接口不再注册 = **故障**，按键与音频全断，必须恢复。
-        //   ⚠ 绝不要引导用户去改造：那会把能用的机器直接改坏。
+        //   「已改绑」= HID_Inst 标准 HID 驱动，接口照常注册；按键语音照常，不是故障。
+        //   改绑是可选操作，可用来消除打字母；不会影响 ETW 按键路径。
         match p.remote_is_keyboard {
             Some(false) => {
                 check_row(
@@ -615,7 +625,7 @@ impl App {
                     let warn = Color32::from_rgb(255, 170, 80);
                     ui.label(
                         RichText::new(
-                            "打字母是保持键盘身份的固有代价。⚠ 不要点 ④ —— 改绑后按键收不到，必须删设备重配对才能恢复。",
+                            "打字母是保持键盘身份的代价；想去掉可点 ④ 改绑（HID-compliant device），按键与语音照常，不需重配对。",
                         )
                         .small()
                         .color(warn),
@@ -629,12 +639,12 @@ impl App {
                         ui,
                         false,
                         "遥控器按键通道",
-                        "已被改绑成 HID-compliant device ⇒ 不打字母，但 Raw Input 里没有这台设备，按键收不到",
+                        "已改绑 ⇒ 不打字母；Raw Input 不再列该设备，ETW ACL 主路径仍收按键，不影响使用",
                     );
                     let warn = Color32::from_rgb(255, 140, 90);
                     ui.label(
                         RichText::new(
-                            "⚠ 修法：先点「⑤ 恢复键盘模式」，再删除设备、重新配对（只恢复不重配不够）。",
+                            "提示项，无需处理；仅当需要让设备重新出现在 Raw Input 列表时才用 --restore-keyboard。",
                         )
                         .small()
                         .color(warn),
@@ -742,7 +752,7 @@ impl App {
         ui.add_space(4.0);
         // ④ 禁止打字母：把设备从 kbdhid 改绑到 mshidkmdf（HID-compliant device）。
         //
-        //   为什么需要：遥控器必须保持「键盘」身份才有 HID 通道（改造回 raw 会全断），
+        //   为什么需要：改绑 HID_Inst 后 HID 接口照常注册；按键主路径是 ETW BthPort ACL，
         //   代价就是系统把每次按键打成字母。改绑到 HID-compliant device 后：
         //     · 不再绑键盘驱动 ⇒ 不打字母
         //     · 仍是 HIDClass 设备、TLC 仍是 0x01/0x06 ⇒ HID 接口 / Raw Input 照常
@@ -758,9 +768,9 @@ impl App {
                  这一步把它改绑成 HID-compliant device：\n\
                  · 不再绑键盘驱动 ⇒ 不再打字母\n\
                  · HID 接口仍在，但 **Raw Input 里就没有这台设备了**\n\n\
-                 ⚠ 代价（实测）：改绑后按键会收不到，而且**必须删除设备并重新配对**\n\
-                 才能恢复——点「⑤ 恢复键盘模式」只删节点，不够。\n\
-                 日常使用建议不要点，接受打字；只有确实被打字困扰时才用。",
+                 改绑后 ETW ACL 主路径照常收按键与语音；仅 Raw Input 不再列该设备，\n\
+                 属提示不是故障，无需恢复、无需重配对。\n\
+                 只有确实被打字困扰时才用。",
             )
             .clicked()
         {
@@ -784,10 +794,10 @@ impl App {
 
         // ⑤ 恢复键盘模式：改绑后按键全无时的回退。
         if ui
-            .add_enabled(!self.installing, egui::Button::new("⑤ 恢复键盘模式（改绑后按键全无时用）"))
+            .add_enabled(!self.installing, egui::Button::new("⑤ 恢复键盘模式（需要 Raw Input 时用）"))
             .on_hover_text(
                 "删除 HID 节点，让 Windows 按硬件 ID 重新装回 keyboard.inf。\n\
-                 用于「④ 改绑后按键收不到」的情况；正常使用的机器不需要点。",
+                 用于需要让遥控器重新出现在 Raw Input 列表时；改绑本身不是故障。",
             )
             .clicked()
         {

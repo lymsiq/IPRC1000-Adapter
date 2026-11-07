@@ -206,7 +206,7 @@ pub struct Probes {
     pub play_name: String,
     /// 遥控器是否仍被系统当作键盘（**换机器/换遥控器后必查**）：
     ///   Some(true)  = 还是键盘 ⇒ **正确状态**：程序能读到按键；副作用是系统也会打字母
-    ///   Some(false) = 已改绑成 raw ⇒ **故障**：HID 接口不再暴露，按键全收不到
+    ///   Some(false) = 已改绑 HID_Inst：ETW ACL 主路径照常，仅 Raw Input 不再列该设备，提示不是故障
     ///   None        = 找不到遥控器的 HID 节点（未连接/未配对）
     pub remote_is_keyboard: Option<bool>,
     /// 遥控器的 HID 实例是否仍绑在 `kbdhid`（键盘驱动）上 ⇒ 系统会往焦点窗口打字母。
@@ -305,19 +305,19 @@ fn install_cable() -> crate::step::StepResult {
     crate::installer::install_cable()
 }
 
-/// ⚠ 2026-11-06：命令层的「改造遥控器」入口**已整体删除**。
+/// 2026-11-07 更正：命令层不自动改绑，但**改绑不是故障**。
 ///
-/// 真机结论（`device_probe.rs:481-500`）：raw 绑定不注册 HID 设备接口，
-/// `hid_reader` 枚举恒 0、Windows 不建 HID 中断通道 ⇒ 按键与音频同时全断。
-/// 即「改造」与「能收到按键」不可兼得。
+/// 改绑目标是 `input.inf` 的 `HID_Inst`（HID-compliant device），标准 HID 驱动，
+/// 接口照常注册；按键主路径是 ETW BthPort ACL，与 `kbdhid` 绑定无关 ⇒ 按键语音照常。
+/// 改绑只让 Raw Input 不再枚举该键盘（`--hid-probe` 匹配 0 属预期）。
 ///
-/// 底层 `device_probe::convert_to_hid_compliant()` 只留给手工诊断，
-/// **不暴露给界面 / 一键修复 / 安装器**；留着编译期可达的封装迟早会被误接回去。
-/// 正常状态是「仍是键盘」：按键可读，代价是系统同时打出字母（已知边界，见使用说明）。
+/// 之前"改造 ⇒ 接口消失 / 按键全断"的真因是 Realtek 组合卡蓝牙休眠后链路断
+/// （BTHUSB 18/5，ACL 层无包），与改绑无关。处理见 `--doctor [11]`。
 ///
-/// 误改造的机器用下面的 `restore_keyboard_step()` 救回来。
+/// 命令层仍不主动改绑（避免改变用户机器状态）；`restore_keyboard_step()`
+/// 仅在需要恢复 Raw Input 枚举时由用户显式调用。
 
-/// 把已被改造成 raw 的遥控器**恢复成键盘模式**（改造后按键全无的解药）。
+/// 可选用途：需要让遥控器重新出现在 Raw Input 列表时恢复枚举。
 /// 删掉 devnode 让 PnP 重新枚举时按硬件 ID 装回 keyboard.inf/kbdhid。
 /// 以管理员身份重新启动自己执行 `--convert-hid`（界面按钮用）。
 ///
@@ -441,23 +441,21 @@ pub fn repair_report() -> crate::step::Report {
     //        → 主机侧 PSM 0x0011 无监听者 → 遥控器主动连 HID-Control 被 REFUSED_PSM
     //        → 无 HID-Interrupt、无 HID 报告 → 按键全无。
     //   ⚠ 不能读 Enum\HID 残留节点：HardwareID 永远含 HID_DEVICE_SYSTEM_KEYBOARD ⇒ 假绿灯。
-    //   ★ 绝不要在这里接回任何「改造设备」动作：那会把一台能用的机器直接改坏
+    //   改绑是可选操作，不影响 ETW 按键路径
     //     （命令层的改造入口已整体删除，见本文件 ④ 上方说明）。
     match p.remote_is_keyboard {
         Some(true) => rep.push(
             "遥控器按键通道",
             StepResult::AlreadyOk(if p.is_keyboard_driver {
                 String::from(
-                    "HID 服务已绑定，按键可读；但设备仍绑键盘驱动 ⇒ 会往窗口打字母。\
-                     会往窗口打字母。这是保持键盘身份的固有代价；\
-                     ⚠ 不要点「④ 禁止打字母」—— 改绑后 Raw Input 里不再有这台设备，\
-                     按键收不到，必须删设备重配对才能恢复",
+                    "HID 服务已绑定，按键可读；仍绑键盘驱动 ⇒ 会往窗口打字母。\
+                     想去掉可点「④ 禁止打字母」改绑，按键与语音照常，不需重配对",
                 )
             } else {
                 String::from(
-                    "HID 服务已绑定，但设备已被改绑成 HID-compliant device ⇒ 系统不再当键盘（不打字母），\
-                     同时也**不再出现在 Raw Input 里，按键收不到**。\
-                     修法：点「⑤ 恢复键盘模式」，然后删除设备重新配对（只恢复不重配不够）。",
+                    "HID 服务已绑定，设备已改绑 ⇒ 不打字母。\
+                     Raw Input 不再列该设备，但 ETW ACL 主路径仍收按键与语音；\
+                     属提示不是故障，不必恢复、不必重配对。",
                 )
             }),
         ),

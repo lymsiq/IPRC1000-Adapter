@@ -234,6 +234,11 @@ impl Rec {
         for v in s {
             buf.extend_from_slice(&v.to_le_bytes());
         }
-        let _ = self.tx.try_send(buf);
+        if self.tx.try_send(buf).is_err() {
+            static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("[录音] ⚠ 写盘队列满，后续可能出现无声空洞（诊断数据不完整）");
+            }
+        }
     }
 }

@@ -5,11 +5,12 @@
 //! 2026-11-06 一整天里，最大的时间浪费不是环境本身，而是**程序说了结论但没说依据**：
 //!
 //! ```text
-//! 环境检查：「已改绑 ⇒ 按键可读」   ← 假的，实际收不到
-//! 状态栏：「按键通道未就绪」        ← 真的
+//! 11-06 曾把「改绑」误当成故障源；11-07 复测确认：按键主路径是 ETW BthPort ACL，
+//! 与 kbdhid 绑定无关，改绑只影响 Raw Input 枚举。真正让按键语音全断的是
+//! Realtek 组合卡蓝牙休眠后链路断（BTHUSB 18/5）。
 //! ```
 //!
-//! 两句打架，人只能靠猜。所以这个命令**强制每一项都给三样**：
+//! 结论打架，人只能靠猜。所以这个命令**强制每一项都给三样**：
 //!
 //! ```text
 //! 实测值   —— 到底探到了什么
@@ -125,8 +126,8 @@ pub fn collect() -> Vec<Item> {
             build.map(|b| b.to_string()).unwrap_or_else(|| "未知".into()),
             admin
         ),
-        "Win10 1809+ / Win11；ETW 与驱动安装需要管理员，按键走 Raw Input 不需要",
-        "非管理员时：按键可用但没有语音；需要音频时右键「以管理员身份运行」",
+        "Win10 1809+ / Win11；ETW 会话（语音与按键主路径）与驱动安装需要管理员，Raw Input 备用路径不需要",
+        "非管理员时 ETW 会话可能起不来：语音不可用；若 [4] 显示非键盘，按键也会失效。请以管理员身份运行"
     );
     it.verdict = if build.is_none() {
         Verdict::Warn
@@ -162,7 +163,7 @@ pub fn collect() -> Vec<Item> {
             )
         },
         "遥控器必须有一条 {00001124} HID 服务节点，否则主机不会建 HID 中断通道",
-        "未配对或节点被删：设置→蓝牙→删除设备，再重新配对（配对全程按住按键）",
+        "仅当节点确实丢失（SDP 从未成功）时，按用户手册第 3 节完整重配对一次（全程持续按键）；Realtek 组合卡链路断请看 [11]，重配对无效"
     );
     it.verdict = if has_hid_svc { Verdict::Ok } else { Verdict::Fail };
     v.push(it);
@@ -177,7 +178,7 @@ pub fn collect() -> Vec<Item> {
             None => "找不到 {00001124} 节点，无法判断".to_string(),
         },
         "只有 Service=HidBth 时，主机的 PSM 0x0011/0x0013 才有监听者",
-        "Service 不对通常是驱动没绑上：重启一次蓝牙适配器（禁用→启用）",
+        "Service 不对通常是驱动没绑上：先禁用→启用蓝牙适配器；若是 Realtek 组合卡，按 [11] 换独立蓝牙"
     );
     it.verdict = match bound {
         Some(true) => Verdict::Ok,
@@ -225,7 +226,7 @@ pub fn collect() -> Vec<Item> {
     it.verdict = if insts.is_empty() {
         Verdict::Fail
     } else if kb == 0 {
-        Verdict::Warn   // 非键盘不是故障：ETW 路径仍可用（2026-11-07 更正）
+        Verdict::Ok     // 非键盘不是故障：ETW 路径仍可用（2026-11-07 更正）
     } else {
         Verdict::Ok
     };
@@ -233,6 +234,13 @@ pub fn collect() -> Vec<Item> {
 
     // ── 5. 按键通道（运行时，来自上次的 stats） ──
     let stats = read_stats();
+    // stats 是"上次运行"的累计快照：先看心跳新鲜度，避免拿几天前的文件判当前可用性
+    let stale = stats.as_ref().and_then(|s| {
+        let hb = s["heartbeatMs"].as_u64()?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64;
+        Some(now.saturating_sub(hb) > 600_000)
+    }).unwrap_or(false);
     let (key_events, hid_miss, hid_reports) = match &stats {
         Some(s) => (
             s["keyEvents"].as_u64().unwrap_or(0),
@@ -246,17 +254,20 @@ pub fn collect() -> Vec<Item> {
         "按键通道（上次运行）",
         match &stats {
             None => "没有 bridge-stats.json（程序还没跑过）".to_string(),
+            Some(_) if stale => format!(
+                "数据已过期（心跳 >10 分钟前），仅供参考：keyEvents={key_events} · hidReports={hid_reports} · hidMiss={hid_miss}"
+            ),
             Some(_) => format!(
-                "keyEvents={key_events} · hidReports={hid_reports} · hidMiss={hid_miss}"
+                "上次运行累计：keyEvents={key_events} · hidReports={hid_reports} · hidMiss={hid_miss}"
             ),
         },
-        "keyEvents 随按键增长 = 通；hidMiss 一直涨 = 在反复打开不存在的接口",
-        "keyEvents 为 0 且 hidMiss 在涨 ⇒ 问题在枚举/认领层，不是键表。看上面第 4 项",
+        "这是上一次运行的累计快照，不等于当前可用性。keyEvents>0 = 那次曾收到按键；hidMiss = Raw Input 巡检未认领的轮数，休眠/非键盘时自然增长，不等于故障",
+        "要判当前状态：按一下遥控器，看界面状态栏或跑 --hid-probe；累计值不用于定级",
     );
     it.verdict = match &stats {
         None => Verdict::Skip,
+        Some(_) if stale => Verdict::Skip,
         Some(_) if key_events > 0 => Verdict::Ok,
-        Some(_) if hid_miss > 0 => Verdict::Fail,
         Some(_) => Verdict::Warn,
     };
     v.push(it);
@@ -340,7 +351,7 @@ pub fn collect() -> Vec<Item> {
         next(),
         "蓝牙省电",
         if findings.is_empty() {
-            "没找到蓝牙适配器 / HID 设备".to_string()
+            "没找到蓝牙适配器 / 没有可检查的省电开关（适配器可能在但开关键缺失）".to_string()
         } else if bad.is_empty() {
             format!("{} 项开关全为 0，空闲不会挂起", findings.len())
         } else {
@@ -354,8 +365,8 @@ pub fn collect() -> Vec<Item> {
                     .join("\n")
             )
         },
-        "空闲断链的根因：适配器 EnhancedPowerManagement / SelectiveSuspend 会挂起设备，蓝牙 HID 挂起后不保证自动重连",
-        "管理员运行 `IPRC1000-Native.exe --repair` 会自动写成 0；或设备管理器里取消「允许计算机关闭此设备以节约电源」",
+        "普通适配器：省电开关可关；Realtek 组合卡（见 [11]）：属固件能力缺失，关省电不能根治休眠断链",
+        "管理员运行 --no-sleep 写成 0；或设备管理器取消「允许计算机关闭此设备以节约电源」。Realtek 组合卡请按 [11] 换独立蓝牙"
     );
     it.verdict = if findings.is_empty() {
         Verdict::Skip
@@ -390,7 +401,7 @@ pub fn collect() -> Vec<Item> {
             ),
             "Realtek RTL8821CE/8822CE/8723DE/8822BE 等组合卡的蓝牙不带密钥存储；休眠后常见 BTHUSB 5（HCI 事件未返回）。这是芯片/固件能力缺失，
              不是配置问题，软件层无法修复",
-            "1) 设备管理器 → 蓝牙 → 禁用「Realtek Bluetooth Adapter」（Wi-Fi 不动）\n             2) 插独立蓝牙适配器（AX200/AX210 已验证），装好后回来看本项是否变 OK\n             3) 若是 M.2 Key E 插槽，可整卡换成 AX200/AX210（天线沿用）\n             ** 不要重配对、不要改键盘模式——在这块芯片上都是白费 **",
+            "仅当遇到「休眠后按键不恢复」时才需处理：\n             1) 禁用「Realtek Bluetooth Adapter」（Wi-Fi 不动）\n             2) 插独立蓝牙适配器（AX200/AX210 已验证）或整卡更换（M.2 Key E，天线沿用）\n             独立 USB 蓝牙 dongle 且休眠正常的话，本项可忽略",
         ),
         Some(ref c) => item(
             next(),
@@ -402,7 +413,7 @@ pub fn collect() -> Vec<Item> {
     };
     it.verdict = match chip.as_ref() {
         None => Verdict::Skip,
-        Some(c) if c.is_known_bad() => Verdict::Fail,
+        Some(c) if c.is_known_bad() => Verdict::Warn,  // 能力预测，非已复现故障
         Some(_) => Verdict::Ok,
     };
     v.push(it);

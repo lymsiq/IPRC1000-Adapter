@@ -1431,6 +1431,12 @@ impl Bridge {
                 }
                 // ★ 录键模式：收到第一个键就录下并**不注入**（否则会打到前台窗口）
                 if CAPTURING.load(Ordering::Relaxed) {
+                    // 录键分支带 continue，必须自己记按键时间，否则超过 30 秒
+                    // 会让 key_online 掉回「未就绪」（0.4.54 公共路径补漏）
+                    let mut st = self.stats.lock().unwrap_or_else(|e| e.into_inner());
+                    st.last_key_usage = u as u8;
+                    st.last_key_ms = diag::now_ms();
+                    drop(st);
                     let vks = crate::keymap::vks_of(u as u8);
                     if let Ok(mut g) = captured().lock() {
                         *g = Some(vks);
@@ -3000,6 +3006,14 @@ pub fn run_backend() {
                     .or_else(|_| parser.try_parse::<u16>("BIP_Type").map(u32::from))
                     .unwrap_or(0);
                 if bip_type != 3 {
+                    // ★ 链路层事件持续流动，也刷新填缓冲活跃度：否则空闲 >3 秒后
+                    //   present=false ⇒ 退到 1000ms 冷档 ⇒ 首次按键仍延迟 1 秒。
+                    act_cb.last_event_ms.store(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as u64).unwrap_or(0),
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
                     // 链路层事件是持续流动的（不需要按遥控器），用它来测「产生→收到」的延迟
                     if let Ok(mut s) = stats_cb.lock() {
                         s.other += 1;
@@ -3110,10 +3124,14 @@ pub fn run_backend() {
         .enable(feed_provider)
         .start_and_process()
     {
-        Ok(t) => t,
+        Ok(t) => {
+            // ETW 会话真的起来了 ⇒ 之前"会话启动失败"那条致命态已恢复
+            crate::health::clear_matching("启动 ETW 会话失败");
+            t
+        }
         Err(e) => {
             let msg = format!(
-                "启动 ETW 会话失败：{e:?} —— 语音不可用。请以管理员身份运行本程序；按键走 Raw Input，不受影响。"
+                "启动 ETW 会话失败：{e:?} —— 语音与按键主路径均不可用（仅 Raw Input 备用路径仍可收键）。请以管理员身份运行本程序"
             );
             eprintln!("[!] {msg}");
             crate::health::set_fatal(msg);
@@ -3152,7 +3170,7 @@ pub fn run_backend() {
                     // ★★ 在线判定改用 **ETW 事件**，不再问 `remote_present()`。
                     //
                     //   实测（2026-11-06 客户机）：配对记录在、`Service=HidBth` 也绑了，
-                    //   但 Raw Input 里没有这台设备（改绑残留 / 休眠 phantom）⇒
+                    //   但 Raw Input 里没有这台设备（已改绑 / 休眠 phantom）⇒
                     //   `remote_present()` 返回 false ⇒ `present=false` ⇒ 填缓冲退到
                     //   `FLUSH_FEED_COLD_MS * 5 = 200*5 = 1000 ms` ⇒ **按键延迟整整 1 秒**，
                     //   表现为"重连后还是不能用"。开发机恰好 `remote_present()` 为 true，

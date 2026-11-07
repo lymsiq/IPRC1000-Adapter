@@ -1,3 +1,5 @@
+> ⚠ 历史快照（2026-11-06）：本文关于「改绑 HID 会导致接口消失/按键全断」「按键只走 Raw Input」「重新配对是唯一解」的结论已于 2026-11-07 更正。当前口径见 VERSION.md 与 IPRC1000_Native_用户手册.html：改绑可选（HID_Inst 接口照常注册）；按键主路径 ETW BthPort ACL；休眠后全断的真因是 Realtek 组合卡蓝牙链路断，处理是禁用其蓝牙换独立适配器。
+
 ﻿# 链路验收（只读，5 秒出结论）
 # 对应《测试协议》B1-B4 四条判据，客户机/开发机通用。
 #   powershell -NoProfile -ExecutionPolicy Bypass -File check-link.ps1

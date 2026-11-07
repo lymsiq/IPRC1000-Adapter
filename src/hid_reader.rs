@@ -14,11 +14,13 @@
 //! **不打开设备句柄**，因此完全绕开 ACL，且不需要管理员权限、不需要改造设备。
 //! 交接文档 §3.3 的 Python 原型在客户机实测 20/20 按键全捕获、按下/抬起完整。
 //!
-//! ## 为什么仍不能「改造遥控器」
+//! ## 关于改绑遥控器（2026-11-07 更正）
 //!
-//! 改绑成 `input.inf / HID_Raw_Inst.NT` 后 HID 接口不注册、PSM 0x0013 中断通道不建立，
-//! 空口连 HIDP 报文都没有 ⇒ 按键与音频一起全断（`device_probe.rs:481-500`）。
-//! 保持键盘模式，代价只是系统会同时打字母（已知边界）。
+//! 改绑目标是 `input.inf` 的 `HID_Inst`（HID-compliant device）：标准 HID 驱动，
+//! 接口照常注册。按键主路径是 ETW BthPort ACL（`backend::handle_fragment`），
+//! 与 `kbdhid` 绑定无关 ⇒ 按键与语音照常。
+//! 本模块（Raw Input）是叠加的第二条路径；改绑后不再枚举该键盘，属提示不是故障。
+//! 真正让按键语音全断的是 Realtek 组合卡蓝牙休眠后链路断（BTHUSB 18/5）。
 //!
 //! ## 语义关键点（照交接文档 §5.3 逐条落实）
 //!
@@ -337,8 +339,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             eprintln!("[HID] ✓ 已认领遥控器 Raw Input 设备（{reason}）：{name}");
                         }
                         // Raw Input 的 keyboard.Message 是 WM_KEYDOWN/UP（含 SYS 变体）
-                        let down = matches!(kb.Message, 0x0100 | 0x0104);
-                        let up = matches!(kb.Message, 0x0101 | 0x0105);
+                        // ★ autorepeat::suppress 发的 KEYUP 带 MAGIC；
+                        //   诊断模式 IPRC1000_RAWINPUT_ANY=1 下会被兜底认领，
+                        //   把 0x4D 当成语音键松手 ⇒ 提前收口语音会话。
+                        let mine = kb.ExtraInformation as usize == crate::autorepeat::MAGIC;
+                        let down = !mine && matches!(kb.Message, 0x0100 | 0x0104);
+                        let up = !mine && matches!(kb.Message, 0x0101 | 0x0105);
                         if down || up {
                             on_key(kb.VKey, down);
                         }
@@ -377,7 +383,7 @@ pub fn start() {
         // 读 Enum\HID 残留节点会得到假绿灯：HardwareID 里永远有 HID_DEVICE_SYSTEM_KEYBOARD。
         match crate::device_probe::bt_hid_bound() {
             Some(true) => eprintln!(
-                "[HID] 蓝牙 HID 服务已绑定（Service=HidBth），按键通道正常。★ 不要改造遥控器。"
+                "[HID] 蓝牙 HID 服务已绑定（Service=HidBth），ETW 按键路径正常。"
             ),
             Some(false) => eprintln!(
                 "[HID] ⚠ HID 服务节点在但没有绑定 HidBth ⇒ 主机侧没有 PSM 0x0011 监听者，\
@@ -516,7 +522,7 @@ pub fn probe() {
     }
     let remote: Vec<&String> = names.iter().filter(|n| is_remote_name(n)).collect();
     println!("其中认领为遥控器：{} 个", remote.len());
-    println!("按键通道：Raw Input（WM_INPUT），不打开 \\kbd，绕开 SYSTEM-only ACL，无需管理员");
+    println!("按键主通道：ETW BthPort ACL；叠加通道：Raw Input（WM_INPUT，不打开 \\kbd，无需管理员");
     println!(
         "运行时统计：WM_INPUT 到达但被过滤 {} 次 / RIDI_DEVICENAME 失败 {} 次 / 已收按键 {} 条",
         FILTERED.load(Ordering::Relaxed),
@@ -526,7 +532,7 @@ pub fn probe() {
     if remote.is_empty() {
         println!("★ 没认领到遥控器 —— 把上面这份设备清单发回来即可精确适配过滤规则。");
         println!("  临时验证：设环境变量 IPRC1000_RAWINPUT_ANY=1 后重跑主程序，若按键生效即证明是过滤规则问题。");
-        println!("  若清单为空：按一下唤醒 / 重新配对；被改造过则先 --restore-keyboard 并重启蓝牙适配器。");
+        println!("  若清单为空：按一下唤醒；已改绑时本就不在 Raw Input 列表，属预期；Realtek 组合卡链路断请按 --doctor [11] 处理。");
     }
 }
 

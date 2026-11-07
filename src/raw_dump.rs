@@ -22,12 +22,15 @@
 
 use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// 帧长（与 `backend::FRAME_LEN` 一致；这里复制一份避免循环依赖）
 const FRAME: usize = 653;
 
 pub struct RawDump {
     tx: std::sync::mpsc::SyncSender<Vec<u8>>,
+    lost: Arc<AtomicU64>,
 }
 
 impl RawDump {
@@ -46,6 +49,8 @@ impl RawDump {
         let path = dir.join("raw-frames.bin");
         let f = std::fs::File::create(&path).ok()?;
         let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(256);
+        let lost = Arc::new(AtomicU64::new(0));
+        let lost_bg = Arc::clone(&lost);
 
         std::thread::Builder::new()
             .name("raw-dump".into())
@@ -63,11 +68,15 @@ impl RawDump {
                     }
                 }
                 let _ = w.flush();
+                let n = lost_bg.load(Ordering::Relaxed);
+                if n > 0 {
+                    eprintln!("[录音] ⚠ 原始帧队列满，丢弃 {n} 帧（诊断数据不完整）");
+                }
             })
             .ok()?;
 
         eprintln!("[录音] 原始帧导出 -> {}", path.display());
-        Some(Self { tx })
+        Some(Self { tx, lost })
     }
 
     /// 投递一帧原始负载（653 字节）。**非阻塞**。
@@ -75,6 +84,8 @@ impl RawDump {
         if p.len() != FRAME {
             return;
         }
-        let _ = self.tx.try_send(p.to_vec());
+        if self.tx.try_send(p.to_vec()).is_err() {
+            self.lost.fetch_add(1, Ordering::Relaxed);
+        }
     }
 }

@@ -703,7 +703,7 @@ fn silent_install(args: &[String]) {
         //   （同一个动作只能一套实现）。它做 5 项并逐项复检：
         //   声卡（含 Problem 健康码）/ 键盘驱动 / 遥控器按键通道状态 / 默认麦克风 /
         //   BthPort ETW 注册表（写完需重启）。
-        //   ⚠ 第 ③ 项只**判状态**，不再改造遥控器（2026-11-06：raw 绑定会切断按键通道）。
+        //   ⚠ 第 ③ 项只判状态、不改绑（改绑是可选的，且不影响 ETW 按键路径）。
         run_app_install(&dir, |x| slog(&x));
         let outcome = INSTALL_OUTCOME.load(std::sync::atomic::Ordering::Relaxed);
         // 静默安装也要如实失败：以前无论 --install 返回什么都打「完成」并退出 0。
