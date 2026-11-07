@@ -219,13 +219,13 @@ pub fn collect() -> Vec<Item> {
                     .join("\n")
             )
         },
-        "绑 kbdhid ⇒ 按键能被读（代价：会打字符）；绑空/非键盘 ⇒ Raw Input 里不会有它",
-        "0 个：按遥控器任意键唤醒；仍无则删除设备重新配对。有节点但非键盘：这就是改绑残留，必须重配对",
+        "绑 kbdhid ⇒ Raw Input 能枚举（代价：会打字符）；非键盘 ⇒ Raw Input 不列，但 ETW ACL 路径仍收按键，不影响使用",
+        "0 个：按遥控器任意键唤醒；仍无则删除设备重新配对。非键盘：若只需按键/语音可以不管；要恢复 Raw Input 用 --restore-keyboard（之后按键唤醒或重启适配器）",
     );
     it.verdict = if insts.is_empty() {
         Verdict::Fail
     } else if kb == 0 {
-        Verdict::Fail
+        Verdict::Warn   // 非键盘不是故障：ETW 路径仍可用（2026-11-07 更正）
     } else {
         Verdict::Ok
     };
