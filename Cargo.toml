@@ -1,6 +1,6 @@
 [package]
 name = "iprc1000_native"
-version = "0.4.55"
+version = "0.4.56"
 edition = "2021"
 
 [features]
@@ -47,6 +47,7 @@ windows = { version = "0.57", features = [
     "Win32_Security",          # 权限只读判定：判进程是否 elevated（不自动 UAC，按键不需要管理员）
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_Threading",
+    "Win32_Devices_Bluetooth",   # BluetoothSetServiceState：禁用/启用 HID 服务以强制重连
     # stderr 重定向到日志文件
     "Win32_System_Console",
     # 卸载脚本转 GBK（cmd 批处理编码）

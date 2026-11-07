@@ -366,6 +366,47 @@ pub fn collect() -> Vec<Item> {
     };
     v.push(it);
 
+
+    // ── 11. 蓝牙芯片能力（Realtek 组合卡的硬伤，不做无效尝试） ──
+    let chip = crate::bt_chip::adapter();
+    let mut it = match chip {
+        None => {
+            let mut i = item(
+                next(),
+                "蓝牙芯片能力",
+                "没找到蓝牙适配器（Service=BTHUSB）".to_string(),
+                "部分 Wi-Fi+BT 组合卡的蓝牙不提供链接密钥存储，休眠后无法重建 HID 通道",
+                "接上蓝牙适配器后重跑本检查",
+            );
+            i.verdict = Verdict::Skip;
+            i
+        }
+        Some(ref c) if c.is_known_bad() => item(
+            next(),
+            "蓝牙芯片能力",
+            format!(
+                "{}（{}，{}）\n{}\n这块芯片的蓝牙**存不住链接密钥**（BTHUSB 事件 18 是常态）\n                 表现：醒着时第一次重连通；休眠后密钥丢失，Windows 仍显示已连接但按键通道不再建；\n                 \u{20}      重配对只能维持 30 秒，改键盘模式/重装驱动都无效",
+                c.desc, c.vid_pid, c.vendor, c.instance
+            ),
+            "Realtek RTL8821CE/8822CE/8723DE/8822BE 等组合卡的蓝牙不带密钥存储；休眠后常见 BTHUSB 5（HCI 事件未返回）。这是芯片/固件能力缺失，
+             不是配置问题，软件层无法修复",
+            "1) 设备管理器 → 蓝牙 → 禁用「Realtek Bluetooth Adapter」（Wi-Fi 不动）\n             2) 插独立蓝牙适配器（AX200/AX210 已验证），装好后回来看本项是否变 OK\n             3) 若是 M.2 Key E 插槽，可整卡换成 AX200/AX210（天线沿用）\n             ** 不要重配对、不要改键盘模式——在这块芯片上都是白费 **",
+        ),
+        Some(ref c) => item(
+            next(),
+            "蓝牙芯片能力",
+            format!("{}（{}，{}）\n{}", c.desc, c.vid_pid, c.vendor, c.instance),
+            "只拦已知存不住密钥的组合卡；BTHUSB 事件 5（HCI 事件超时）与 18 同属控制器固件问题，不是系统权限；其它型号以实测重连为准",
+            "无需处理",
+        ),
+    };
+    it.verdict = match chip.as_ref() {
+        None => Verdict::Skip,
+        Some(c) if c.is_known_bad() => Verdict::Fail,
+        Some(_) => Verdict::Ok,
+    };
+    v.push(it);
+
     v
 }
 

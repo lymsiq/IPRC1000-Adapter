@@ -23,6 +23,8 @@ mod autorepeat;
 mod device_id;
 mod power;
 mod raw_dump;
+mod bt_reconnect;
+mod bt_chip;
 mod commands;
 mod device_probe;
 mod dev_install;
@@ -377,6 +379,7 @@ fn main() {
             || a == "--doctor"
             || a == "--forget-device"
             || a == "--no-sleep"
+            || a == "--reconnect"
             || a == "--audio"
             || a == "--launch-shortcut"
             || a == "--check-key"
@@ -557,6 +560,25 @@ fn main() {
                 false,
             );
         }
+        std::process::exit(0);
+    }
+
+    // 强制重连：禁用再启用 HID 服务，逼蓝牙栈重新协商（不用重配对）
+    if std::env::args().any(|a| a == "--reconnect") {
+        let hint = crate::settings::device_name_hints()
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| "IPRC".into());
+        let msg = match bt_reconnect::renegotiate(&hint) {
+            Some(o) => o.summary(),
+            None => format!("没找到名称含「{hint}」的已配对蓝牙设备"),
+        };
+        let p = crate::paths::logs_dir().join("reconnect.log");
+        if let Some(d) = p.parent() {
+            let _ = std::fs::create_dir_all(d);
+        }
+        let _ = std::fs::write(&p, msg.as_bytes());
+        eprintln!("[重连] {msg}");
         std::process::exit(0);
     }
 
