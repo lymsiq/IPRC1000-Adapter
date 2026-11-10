@@ -132,6 +132,9 @@ fn install_cjk_font(ctx: &egui::Context) {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // 运行时文本轮盘（按键触发，独立置顶窗口；未激活时什么都不做）
+        crate::ui_wheel::show(ctx);
+
         // 每帧确认"工具窗口"样式（winit 会覆盖，见 ensure_toolwindow 的说明）
         if !self.hidden {
             crate::ensure_toolwindow();
@@ -997,6 +1000,9 @@ fn binding_label(id: &str, usage: u8, mouse_group: bool) -> String {
         let v = raw.trim();
         if let Ok(n) = v.parse::<i64>() {
             if n < 0 {
+                if n == crate::mouse_act::ACT_TEXT_WHEEL as i64 {
+                    return "文本轮盘（按下弹盘）".to_string();
+                }
                 if (-6..=-1).contains(&n) {
                     return format!("{}（动作）", mouse_act::action_name(n as i32));
                 }

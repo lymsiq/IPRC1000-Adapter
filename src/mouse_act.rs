@@ -20,6 +20,9 @@ pub const ACT_WHEEL_UP: i32 = -3;
 pub const ACT_WHEEL_DOWN: i32 = -4;
 pub const ACT_SWITCH_GROUP: i32 = -5;
 pub const ACT_CLICK_ICON: i32 = -6;
+/// 文本轮盘（2026-11-10）：按下这个键，屏幕上弹出 4 方向轮盘，
+/// 遥控器方向键选一条文本，OK 确认后自动输入。运行时 UI 见 `ui_wheel.rs`。
+pub const ACT_TEXT_WHEEL: i32 = -3000;
 
 /// 动作的中文名（界面与日志共用）
 pub fn action_name(act: i32) -> &'static str {
@@ -30,6 +33,7 @@ pub fn action_name(act: i32) -> &'static str {
         ACT_WHEEL_DOWN => "滚轮下",
         ACT_SWITCH_GROUP => "切换配置组",
         ACT_CLICK_ICON => "截图点击",
+        ACT_TEXT_WHEEL => "文本轮盘",
         _ => "未知动作",
     }
 }
@@ -65,6 +69,9 @@ fn send_mouse(flags: u32, data: i32) {
 /// 返回 true 表示"这个动作被处理了"，调用方就不要把它当键盘键处理。
 pub fn fire(act: i32, down: bool) -> bool {
     match act {
+        // 轮盘是运行时 UI，真正的打开动作在 backend 的按键分派里做；
+        // 这里只负责"认领"，避免这个键再被注入成键盘键。
+        ACT_TEXT_WHEEL => true,
         ACT_LEFT => {
             send_mouse(
                 if down { MOUSEEVENTF_LEFTDOWN.0 } else { MOUSEEVENTF_LEFTUP.0 },

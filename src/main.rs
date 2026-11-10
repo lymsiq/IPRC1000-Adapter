@@ -49,6 +49,7 @@ mod text_slot;
 mod winuhid;
 #[cfg(feature = "gui")]
 mod ui_edit;
+mod ui_wheel;
 mod ui_edit_win32;
 #[cfg(feature = "gui")]
 mod ui_egui;
@@ -135,6 +136,13 @@ pub fn apply_binding(id: &str, value: &str) -> String {
             } else {
                 format!("{id} → 文本槽 {slot}（{n} 字）")
             };
+        }
+        // 文本轮盘：-3000（运行时弹盘，方向键选、OK 输入）
+        if act == crate::mouse_act::ACT_TEXT_WHEEL as i64 {
+            settings::set_binding_in_group(id, v);
+            keymap::set_action(usage, Some(act as i32));
+            keymap::set_override(usage, Vec::new());
+            return format!("{id} → 文本轮盘（按下弹盘，方向键选 1–4 号）");
         }
         // 「打开程序」：-2001..-2999 → 快捷方式编号 1..999
         if (-2999..=-2001).contains(&act) {

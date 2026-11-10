@@ -41,6 +41,7 @@
 
 use std::net::UdpSocket;
 use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -660,6 +661,57 @@ fn now_filetime() -> u64 {
 #[cfg(not(target_os = "windows"))]
 fn now_filetime() -> u64 { 0 }
 
+/// ── 文本轮盘（运行时 UI，2026-11-10）──
+///
+/// 按下绑了 `-3000` 的键 → 屏幕上弹出 4 方向轮盘（槽 1–4）；
+/// 遥控器 ↑↓←→ 移动高亮、OK 确认并输入、返回（0x09）取消。
+/// 轮盘激活期间**所有遥控器按键都不注入**，只用于驱动轮盘。
+static TW_ON: AtomicBool = AtomicBool::new(false);
+static TW_SEL: AtomicU8 = AtomicU8::new(0);
+static TW_UNTIL_MS: AtomicU64 = AtomicU64::new(0);
+
+/// 轮盘是否可见。`Some(高亮下标 0..3)` = 显示中；`None` = 关闭。
+/// 超过 15 秒没操作自动取消（用户可能已经走开）。
+pub fn text_wheel_active() -> Option<u8> {
+    if !TW_ON.load(Ordering::Relaxed) {
+        return None;
+    }
+    if diag::now_ms() > TW_UNTIL_MS.load(Ordering::Relaxed) {
+        TW_ON.store(false, Ordering::Relaxed);
+        eprintln!("[轮盘] 15 秒无操作，自动取消");
+        return None;
+    }
+    Some(TW_SEL.load(Ordering::Relaxed))
+}
+
+/// 外部取消（当前只有"返回键"会用到；保留给 UI 关闭按钮/托盘退出）。
+#[allow(dead_code)]
+pub fn text_wheel_cancel() {
+    if TW_ON.swap(false, Ordering::Relaxed) {
+        eprintln!("[轮盘] 已取消");
+    }
+}
+
+fn text_wheel_open() {
+    TW_SEL.store(0, Ordering::Relaxed);
+    TW_UNTIL_MS.store(diag::now_ms() + 15_000, Ordering::Relaxed);
+    TW_ON.store(true, Ordering::Relaxed);
+    eprintln!("[轮盘] 打开：↑=1 号 →=2 号 ↓=3 号 ←=4 号 · OK 输入 · 返回取消");
+}
+
+/// OK 确认：把高亮那条文本打出去（复用文本槽的 Unicode 注入）。
+fn text_wheel_confirm() {
+    let sel = TW_SEL.load(Ordering::Relaxed) as u32 + 1;
+    TW_ON.store(false, Ordering::Relaxed);
+    match crate::text_slot::get(sel) {
+        Some(t) if !t.text.is_empty() => {
+            crate::macro_player::type_text_public(&t.text);
+            eprintln!("[轮盘] 输入槽 {sel}（{} 字）", t.text.chars().count());
+        }
+        _ => eprintln!("[轮盘] 槽 {sel} 是空的，没有输出（去「文本」页填内容）"),
+    }
+}
+
 /// 填缓冲线程与回调之间共享的"活跃度"信息
 struct Activity {
     /// 最近一次收到蓝牙事件的单调时刻（毫秒）
@@ -1180,6 +1232,28 @@ impl Bridge {
             diag::log(&format!("[RAW] len={} usages=[{}]", usages.len(), hex.join(" ")));
         }
 
+        // ★★ 文本轮盘激活：把方向键/OK/返回改道给轮盘，**所有键都不注入**。
+        //   必须在任何基线/差分逻辑之前 return —— 否则方向键会照常发箭头，
+        //   前台窗口跟着滚动，用户以为程序失控。
+        if TW_ON.load(Ordering::Relaxed) {
+            if let Some(&u) = usages.iter().find(|&&u| u != 0) {
+                match u {
+                    0x52 => { TW_SEL.store(0, Ordering::Relaxed); }          // ↑ = 1 号
+                    0x4F => { TW_SEL.store(1, Ordering::Relaxed); }          // → = 2 号
+                    0x51 => { TW_SEL.store(2, Ordering::Relaxed); }          // ↓ = 3 号
+                    0x50 => { TW_SEL.store(3, Ordering::Relaxed); }          // ← = 4 号
+                    0x28 => text_wheel_confirm(),                            // OK 输入
+                    0x09 => {                                                // 返回取消
+                        TW_ON.store(false, Ordering::Relaxed);
+                        eprintln!("[轮盘] 已取消");
+                    }
+                    _ => {}
+                }
+                TW_UNTIL_MS.store(diag::now_ms() + 15_000, Ordering::Relaxed);
+            }
+            return;
+        }
+
         // ★★★ 2026-10-18（真机铁证）：**取消"空档 ≥600ms 就重取基线"**。
         //
         //   原始报文（bridge.log [RAW]）：
@@ -1476,6 +1550,13 @@ impl Bridge {
                 }
                 // 绑了鼠标动作的键：直接执行动作，不进键盘报告
                 if let Some(act) = crate::keymap::action_of(u as u8) {
+                    // ★ 文本轮盘：弹出运行时轮盘，后续方向键由上面的拦截处理
+                    if act == crate::mouse_act::ACT_TEXT_WHEEL {
+                        text_wheel_open();
+                        self.held[u] = true;
+                        self.arm_deadline(u);
+                        continue;
+                    }
                     // ★ "切换配置组"必须在这里真正执行 —— `mouse_act::fire` 只负责
                     //   "认领"（返回 true 防止漏成键盘键），它不知道有哪些组。
                     if act == crate::mouse_act::ACT_SWITCH_GROUP {
