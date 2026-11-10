@@ -696,7 +696,7 @@ fn text_wheel_open() {
     TW_SEL.store(0, Ordering::Relaxed);
     TW_UNTIL_MS.store(diag::now_ms() + 15_000, Ordering::Relaxed);
     TW_ON.store(true, Ordering::Relaxed);
-    eprintln!("[轮盘] 打开：↑=1 号 →=2 号 ↓=3 号 ←=4 号 · OK 输入 · 返回取消");
+    eprintln!("[轮盘] 打开：↑=1 →=2 ↓=3 ←=4（按下即输入）· 返回取消");
 }
 
 /// OK 确认：把高亮那条文本打出去（复用文本槽的 Unicode 注入）。
@@ -1237,13 +1237,15 @@ impl Bridge {
         //   前台窗口跟着滚动，用户以为程序失控。
         if TW_ON.load(Ordering::Relaxed) {
             if let Some(&u) = usages.iter().find(|&&u| u != 0) {
+                // ★ 2026-11-10 定稿交互：方向键**按下即输入**，不需要再确认。
+                //   用户操作链：按映射键弹盘 → 按 ←/↑/→/↓ 直接得到对应那条 → 完。
+                //   返回键取消；OK 不参与（中心有提示，避免"按了没反应"）。
                 match u {
-                    0x52 => { TW_SEL.store(0, Ordering::Relaxed); }          // ↑ = 1 号
-                    0x4F => { TW_SEL.store(1, Ordering::Relaxed); }          // → = 2 号
-                    0x51 => { TW_SEL.store(2, Ordering::Relaxed); }          // ↓ = 3 号
-                    0x50 => { TW_SEL.store(3, Ordering::Relaxed); }          // ← = 4 号
-                    0x28 => text_wheel_confirm(),                            // OK 输入
-                    0x09 => {                                                // 返回取消
+                    0x52 => { TW_SEL.store(0, Ordering::Relaxed); text_wheel_confirm(); } // ↑ 1 号
+                    0x4F => { TW_SEL.store(1, Ordering::Relaxed); text_wheel_confirm(); } // → 2 号
+                    0x51 => { TW_SEL.store(2, Ordering::Relaxed); text_wheel_confirm(); } // ↓ 3 号
+                    0x50 => { TW_SEL.store(3, Ordering::Relaxed); text_wheel_confirm(); } // ← 4 号
+                    0x09 => {                                                              // 返回/ESC 取消
                         TW_ON.store(false, Ordering::Relaxed);
                         eprintln!("[轮盘] 已取消");
                     }
