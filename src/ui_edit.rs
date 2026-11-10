@@ -191,25 +191,69 @@ pub fn show(ctx: &egui::Context, st: &mut EditState) -> EditResult {
                     //   同一份数据两个编辑入口必然打架（改了一处另一处看不见）。
                     //   这里只负责"选哪个槽"。
                     ui.label(
-                        RichText::new("选一个文本槽绑给这个键（内容去「文本」页编辑）")
+                        RichText::new("点 1–4 号格子：按下这个键就输出那段文字（内容在「文本」页编辑）")
                             .small()
                             .weak(),
                     );
-                    ui.add_space(4.0);
-                    ui.horizontal_wrapped(|ui| {
-                        for slot in 1..=10u32 {
+                    ui.add_space(6.0);
+                    // ★ 1–4 号大格子（2026-11-10）：文本回复最常用的就是前四句，
+                    //   编号 + 摘要直接可见，比"槽 1（空）/ 槽 2（3 字）"更好认。
+                    //   复用同一份 text_slot 数据，不新增存储、不新增概念。
+                    ui.horizontal(|ui| {
+                        for slot in 1..=4u32 {
                             let t = crate::text_slot::get(slot);
                             let chars = t.as_ref().map(|x| x.text.chars().count()).unwrap_or(0);
                             let sel = st.text_slot == slot;
-                            let label = if chars > 0 {
-                                format!("槽 {slot}（{chars} 字）")
+                            let summary: String = if chars > 0 {
+                                let mut s: String = t
+                                    .as_ref()
+                                    .map(|x| x.text.chars().take(7).collect())
+                                    .unwrap_or_default();
+                                if chars > 7 {
+                                    s.push('…');
+                                }
+                                s
                             } else {
-                                format!("槽 {slot}（空）")
+                                "未设置".to_string()
                             };
-                            if ui.selectable_label(sel, label).clicked() {
+                            let fg = if sel {
+                                Color32::WHITE
+                            } else if chars > 0 {
+                                Color32::from_gray(235)
+                            } else {
+                                Color32::from_gray(135)
+                            };
+                            let btn = egui::Button::new(
+                                RichText::new(format!("{slot}\n{summary}")).size(13.0).color(fg),
+                            )
+                            .min_size(egui::vec2(104.0, 56.0))
+                            .fill(if sel {
+                                Color32::from_rgb(38, 110, 66)
+                            } else {
+                                Color32::from_rgb(38, 40, 45)
+                            });
+                            if ui.add(btn).clicked() {
                                 st.text_slot = slot;
                             }
                         }
+                    });
+                    ui.add_space(6.0);
+                    ui.collapsing("更多槽（5–10）", |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            for slot in 5..=10u32 {
+                                let t = crate::text_slot::get(slot);
+                                let chars = t.as_ref().map(|x| x.text.chars().count()).unwrap_or(0);
+                                let sel = st.text_slot == slot;
+                                let label = if chars > 0 {
+                                    format!("槽 {slot}（{chars} 字）")
+                                } else {
+                                    format!("槽 {slot}（空）")
+                                };
+                                if ui.selectable_label(sel, label).clicked() {
+                                    st.text_slot = slot;
+                                }
+                            }
+                        });
                     });
                     if let Some(t) = crate::text_slot::get(st.text_slot) {
                         if !t.text.is_empty() {

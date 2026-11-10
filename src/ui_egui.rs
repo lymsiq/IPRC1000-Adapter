@@ -1007,11 +1007,18 @@ fn binding_label(id: &str, usage: u8, mouse_group: bool) -> String {
                 }
                 if (-1010..=-1001).contains(&n) {
                     let slot = (-1000 - n) as u32;
-                    let chars = text_slot::get(slot).map(|t| t.text.chars().count()).unwrap_or(0);
-                    return if chars == 0 {
-                        format!("文本槽 {slot}（空）")
-                    } else {
-                        format!("文本槽 {slot}（{chars} 字）")
+                    // ★ 直接显示文本摘要（2026-11-10）：用户要的是"这个键回哪句话"，
+                    //   "文本槽 2（18 字）"看不出内容，还得点进去看。
+                    return match text_slot::get(slot) {
+                        Some(t) if !t.text.is_empty() => {
+                            let total = t.text.chars().count();
+                            let mut s: String = t.text.chars().take(10).collect();
+                            if total > 10 {
+                                s.push('…');
+                            }
+                            format!("文本 {slot}：{s}")
+                        }
+                        _ => format!("文本槽 {slot}（空）"),
                     };
                 }
                 if (-1999..=-1101).contains(&n) {
