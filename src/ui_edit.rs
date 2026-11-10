@@ -38,6 +38,10 @@ pub struct EditState {
     pub macro_num: u32,
     /// 「全局」开关：所有配置组都生效（本版先只做展示，落盘逻辑在下一版）
     pub global: bool,
+    /// 文本轮盘是否展开（动作行的「文本轮盘」打开）
+    pub wheel_open: bool,
+    /// 轮盘当前高亮方向：0=上(槽1) 1=右(槽2) 2=下(槽3) 3=左(槽4)
+    pub wheel_sel: u8,
 }
 
 /// 弹窗的返回：None = 还开着；Some(Some(v)) = 确定（值是绑定字符串）；Some(None) = 取消
@@ -57,6 +61,8 @@ impl EditState {
             text_slot: 1,
             macro_num: 0,
             global: false,
+            wheel_open: false,
+            wheel_sel: 0,
         }
     }
 
@@ -318,10 +324,119 @@ pub fn show(ctx: &egui::Context, st: &mut EditState) -> EditResult {
                 }
             });
         });
+    if st.wheel_open {
+        wheel_overlay(ctx, st, &mut result);
+    }
     if !open {
         return Some(None);
     }
     result
+}
+
+/// 4 方向文本轮盘（模态浮层）：↑ 槽1 / → 槽2 / ↓ 槽3 / ← 槽4，中心 = 直接输入提示。
+///
+/// 确认方式三选一：方向键 + Enter、鼠标点扇区、数字键 1–4。
+/// 确认后直接把绑定值写回 `result`，不要求再点弹窗里的「确定」。
+fn wheel_overlay(ctx: &egui::Context, st: &mut EditState, result: &mut EditResult) {
+    use egui::{Align2, Color32, FontId, Key, Pos2, Sense, Shape, Stroke};
+
+    let screen = ctx.screen_rect();
+    let center = screen.center();
+    let r_out = 168.0f32;
+    let r_in = 74.0f32;
+
+    // 键盘：方向键 / 数字 / Esc / Enter
+    ctx.input(|i| {
+        if i.key_pressed(Key::ArrowUp) || i.key_pressed(Key::Num1) { st.wheel_sel = 0; }
+        if i.key_pressed(Key::ArrowRight) || i.key_pressed(Key::Num2) { st.wheel_sel = 1; }
+        if i.key_pressed(Key::ArrowDown) || i.key_pressed(Key::Num3) { st.wheel_sel = 2; }
+        if i.key_pressed(Key::ArrowLeft) || i.key_pressed(Key::Num4) { st.wheel_sel = 3; }
+        if i.key_pressed(Key::Escape) { st.wheel_open = false; }
+        if i.key_pressed(Key::Enter) {
+            *result = Some(Some(format!("{}", -1000 - (st.wheel_sel as i64 + 1))));
+            st.wheel_open = false;
+        }
+    });
+    if !st.wheel_open {
+        return;
+    }
+
+    let area = egui::Area::new(egui::Id::new("text_wheel"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(screen.min);
+    area.show(ctx, |ui| {
+        let resp = ui.interact(screen, ui.id().with("wheel_bg"), Sense::click());
+        let p = ui.painter();
+        p.rect_filled(screen, 0.0, Color32::from_black_alpha(150));
+
+        let labels = [(0u8, "↑"), (1, "→"), (2, "↓"), (3, "←")];
+        for (idx, arrow) in labels {
+            let a0 = (-135.0 + idx as f32 * 90.0).to_radians();
+            let a1 = a0 + 90f32.to_radians();
+            // 扇区多边形
+            let mut pts: Vec<Pos2> = Vec::new();
+            let steps = 20;
+            for k in 0..=steps {
+                let t = a0 + (a1 - a0) * k as f32 / steps as f32;
+                pts.push(center + egui::vec2(t.cos() * r_out, t.sin() * r_out));
+            }
+            for k in (0..=steps).rev() {
+                let t = a0 + (a1 - a0) * k as f32 / steps as f32;
+                pts.push(center + egui::vec2(t.cos() * r_in, t.sin() * r_in));
+            }
+            let hot = st.wheel_sel == idx;
+            let fill = if hot { Color32::from_rgb(28, 110, 68) } else { Color32::from_rgb(34, 36, 40) };
+            let stroke = Stroke::new(2.0_f32, Color32::from_rgb(58, 62, 68));
+            p.add(Shape::convex_polygon(pts, fill, stroke));
+
+            // 文字：箭头 + 槽号 + 摘要
+            let mid = (a0 + a1) / 2.0;
+            let tx = center + egui::vec2(mid.cos() * (r_in + r_out) / 2.0, mid.sin() * (r_in + r_out) / 2.0);
+            let slot = idx as u32 + 1;
+            let t = crate::text_slot::get(slot);
+            let chars = t.as_ref().map(|x| x.text.chars().count()).unwrap_or(0);
+            let summary: String = if chars > 0 {
+                let mut s: String = t.as_ref().map(|x| x.text.chars().take(8).collect()).unwrap_or_default();
+                if chars > 8 { s.push('…'); }
+                s
+            } else { "未设置".to_string() };
+            p.text(tx + egui::vec2(0.0, -16.0), Align2::CENTER_CENTER, format!("{arrow}  {slot} 号"),
+                   FontId::proportional(17.0), if hot { Color32::WHITE } else { Color32::from_gray(200) });
+            p.text(tx + egui::vec2(0.0, 8.0), Align2::CENTER_CENTER, summary,
+                   FontId::proportional(14.0), if hot { Color32::WHITE } else { Color32::from_gray(150) });
+        }
+
+        // 中心
+        p.circle_filled(center, r_in, Color32::from_rgb(24, 26, 30));
+        p.circle_stroke(center, r_in, Stroke::new(2.0_f32, Color32::from_rgb(62, 66, 72)));
+        p.text(center + egui::vec2(0.0, -22.0), Align2::CENTER_CENTER, format!("当前按键 · {}", st.label),
+               FontId::proportional(13.0), Color32::from_gray(150));
+        p.text(center + egui::vec2(0.0, 4.0), Align2::CENTER_CENTER, "↑↓←→ 选择",
+               FontId::proportional(17.0), Color32::from_rgb(120, 200, 150));
+        p.text(center + egui::vec2(0.0, 26.0), Align2::CENTER_CENTER, "Enter 确认 · Esc 取消",
+               FontId::proportional(12.5), Color32::from_gray(140));
+
+        // 鼠标命中
+        if resp.clicked() {
+            if let Some(pos) = resp.interact_pointer_pos() {
+                let v = pos - center;
+                let r = v.length();
+                if r < r_in {
+                    // 点中心：回「文本」页编辑（轮盘收起，不绑定）
+                    st.wheel_open = false;
+                    st.tab = EditTab::Text;
+                } else if r <= r_out {
+                    let mut a = v.y.atan2(v.x).to_degrees();
+                    if a < -135.0 { a += 360.0; }
+                    let idx = (((a + 135.0) / 90.0).floor() as i32).clamp(0, 3) as u8;
+                    *result = Some(Some(format!("{}", -1000 - (idx as i64 + 1))));
+                    st.wheel_open = false;
+                } else {
+                    st.wheel_open = false; // 点空白 = 取消
+                }
+            }
+        }
+    });
 }
 
 fn keys_pane(ui: &mut egui::Ui, st: &mut EditState) {
@@ -392,6 +507,22 @@ fn keys_pane(ui: &mut egui::Ui, st: &mut EditState) {
                 act_clicked = Some(*act);
             }
         }
+    });
+
+    // ★ 文本轮盘入口（2026-11-10）：与"动作"并列 —— 绑一段文字也是"这个键干什么"。
+    //   点开后在界面上弹一个 4 方向轮盘，↑↓←→ 选、Enter 确认即完成绑定。
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        if ui
+            .add(egui::Button::new(RichText::new("◎ 文本轮盘").color(Color32::from_rgb(90, 190, 130)))
+                .min_size(egui::vec2(bw * 3.6, bh)))
+            .on_hover_text("上下左右选一条文本，确认后按下这个键就输出它")
+            .clicked()
+        {
+            st.wheel_open = true;
+            st.wheel_sel = 0;
+        }
+        ui.label(RichText::new("（1–4 号文本，内容在「文本」页编辑）").small().weak());
     });
 
     // 延迟处理点击（避免在闭包里同时借用 st）
