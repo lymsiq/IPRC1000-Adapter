@@ -669,6 +669,62 @@ fn now_filetime() -> u64 { 0 }
 static TW_ON: AtomicBool = AtomicBool::new(false);
 static TW_SEL: AtomicU8 = AtomicU8::new(0);
 static TW_UNTIL_MS: AtomicU64 = AtomicU64::new(0);
+/// 轮盘左上角（屏幕坐标），打开时算一次，之后每帧复用 —— 每帧重算会抖。
+static TW_POS: std::sync::Mutex<Option<(f32, f32)>> = std::sync::Mutex::new(None);
+
+/// 轮盘窗口左上角。窗口还没定位过时返回 None。
+pub fn text_wheel_pos() -> Option<(f32, f32)> {
+    TW_POS.lock().ok().and_then(|g| *g)
+}
+
+/// 锚点：优先文本插入符（caret），拿不到用鼠标，再不行屏幕正中。
+/// 这样轮盘出现在用户正在输入的地方，而不是永远屏幕中央。
+fn wheel_anchor(size: f32) -> (f32, f32) {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::Graphics::Gdi::ClientToScreen;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetCursorPos, GetForegroundWindow, GetGUIThreadInfo,
+            GetSystemMetrics, GetWindowThreadProcessId, GUITHREADINFO, SM_CXSCREEN, SM_CYSCREEN,
+        };
+        let sw = GetSystemMetrics(SM_CXSCREEN) as f32;
+        let sh = GetSystemMetrics(SM_CYSCREEN) as f32;
+        let mut ax = sw / 2.0;
+        let mut ay = sh / 2.0;
+        let mut hit_caret = false;
+
+        let fg = GetForegroundWindow();
+        if fg.0 != 0 {
+            let tid = GetWindowThreadProcessId(fg, None);
+            let mut gti = GUITHREADINFO::default();
+            gti.cbSize = std::mem::size_of::<GUITHREADINFO>() as u32;
+            if GetGUIThreadInfo(tid, &mut gti).is_ok() && gti.hwndCaret.0 != 0 {
+                let mut pt = POINT { x: gti.rcCaret.left, y: gti.rcCaret.bottom };
+                if ClientToScreen(gti.hwndCaret, &mut pt).as_bool() {
+                    ax = pt.x as f32;
+                    ay = pt.y as f32 + 26.0;
+                    hit_caret = true;
+                }
+            }
+        }
+        if !hit_caret {
+            let mut p = POINT::default();
+            if GetCursorPos(&mut p).is_ok() {
+                ax = p.x as f32;
+                ay = p.y as f32 + 26.0;
+            }
+        }
+        let half = size / 2.0;
+        let x = (ax - half).clamp(0.0, (sw - size).max(0.0));
+        let y = (ay - half).clamp(0.0, (sh - size).max(0.0));
+        (x, y)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        (960.0, 540.0)
+    }
+}
 
 /// 轮盘是否可见。`Some(高亮下标 0..3)` = 显示中；`None` = 关闭。
 /// 超过 15 秒没操作自动取消（用户可能已经走开）。
@@ -693,6 +749,10 @@ pub fn text_wheel_cancel() {
 }
 
 fn text_wheel_open() {
+    // 位置在打开瞬间定一次
+    if let Ok(mut g) = TW_POS.lock() {
+        *g = Some(wheel_anchor(crate::ui_wheel::WINDOW_SIZE));
+    }
     TW_SEL.store(0, Ordering::Relaxed);
     TW_UNTIL_MS.store(diag::now_ms() + 15_000, Ordering::Relaxed);
     TW_ON.store(true, Ordering::Relaxed);

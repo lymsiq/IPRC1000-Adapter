@@ -1,80 +1,144 @@
 //! 运行时文本轮盘（2026-11-10）
 //!
-//! 与"绑定期的选择框"不是一回事：
+//! ## 交互（定稿）
 //!
 //! ```text
-//! 绑定期：改键弹窗里选一条文本 → 这个键以后输出它
-//! 运行时：按下绑了「文本轮盘」的键 → 屏幕上弹圆盘 → 方向键选 → 输入
+//! 按映射键（绑「文本轮盘」）→ 圆盘弹出（跟随输入光标 / 鼠标位置）
+//! ↑=1 号  →=2 号  ↓=3 号  ←=4 号   按下即输入
+//! 返回键 = 取消
 //! ```
 //!
-//! ## 三个必须做对的地方
+//! ## 为什么用 SetWindowRgn 裁圆
 //!
-//! 1. **不抢焦点**：`with_active(false)`。抢了焦点，随后注入的文字会打进轮盘窗口。
-//! 2. **透明**：`with_transparent(true)` + 面板填透明 —— 只留圆盘，不要深色方块底。
-//! 3. **自己驱动重绘**：主窗口可能收在托盘，刷新很慢。激活期间主动
-//!    `request_repaint_after(33ms)`，否则按键改了高亮、画面却不动（用户说"卡顿"）。
+//! `with_transparent(true)` 在 Windows + glow 后端的 secondary viewport 上**不生效**
+//! （实测仍是深色方块底）。所以改成：窗口照常不透明，但用 `SetWindowRgn` +
+//! `CreateEllipticRgn` 把窗口区裁成圆 —— 方块的四个角直接不存在，视觉上就是圆盘。
 //!
-//! 状态全部来自 `backend::text_wheel_active()`：按键拦截在 ETW 回调线程里做，
-//! 这里只负责画，窗口画不出来也不影响按键逻辑。
+//! 代价是没有外发光（被裁掉），窗口留 6px 边当描边。
+//!
+//! ## 另外两点
+//!
+//! * **不抢焦点**：`with_active(false)`。抢了焦点，随后注入的文字会打进轮盘窗口。
+//! * **自己催帧**：主窗口可能收在托盘，刷新很慢；激活期间 `request_repaint_after(33ms)`，
+//!   否则按键改了状态、画面却不动（用户说的"卡顿"）。
 
 use eframe::egui;
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicIsize, Ordering};
 
-static OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// 窗口边长（也是裁圆的直径）。轮盘直径比它小 12px，留一圈边当描边。
+pub const WINDOW_SIZE: f32 = 330.0;
+
+static OPEN: AtomicBool = AtomicBool::new(false);
+static CUT_DONE: AtomicBool = AtomicBool::new(false);
+static TARGET: AtomicI32 = AtomicI32::new(0);
+static FOUND: AtomicIsize = AtomicIsize::new(0);
 
 pub fn show(ctx: &egui::Context) {
-    use std::sync::atomic::Ordering;
     let id = egui::ViewportId::from_hash_of("text_wheel");
     let active = crate::backend::text_wheel_active();
 
     if active.is_none() {
         if OPEN.swap(false, Ordering::Relaxed) {
             ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Close);
+            CUT_DONE.store(false, Ordering::Relaxed);
         }
         return;
     }
-    let _sel = active.unwrap_or(0);   // 按下即输入，不画高亮；保留读取以免状态未消费
     OPEN.store(true, Ordering::Relaxed);
-    // 轮盘自己催帧：主窗口隐藏时也按 30fps 刷新
+    // 窗口句柄是异步创建的：没裁成功就下一帧再试
+    if !CUT_DONE.load(Ordering::Relaxed) {
+        cut_round();
+    }
     ctx.request_repaint_after(std::time::Duration::from_millis(33));
 
-    // 文本只在弹窗打开时取一次，别在每帧的绘制里反复加锁 + clone
-    let labels: [String; 4] = std::array::from_fn(|i| {
-        let slot = i as u32 + 1;
-        match crate::text_slot::get(slot) {
-            Some(t) if !t.text.is_empty() => {
-                let total = t.text.chars().count();
-                let mut s: String = t.text.chars().take(10).collect();
-                if total > 10 {
-                    s.push('…');
-                }
-                s
+    // 文本只在打开时取一次，别在每帧绘制里反复加锁 + clone
+    let labels: [String; 4] = std::array::from_fn(|i| match crate::text_slot::get(i as u32 + 1) {
+        Some(t) if !t.text.is_empty() => {
+            let total = t.text.chars().count();
+            let mut s: String = t.text.chars().take(10).collect();
+            if total > 10 {
+                s.push('…');
             }
-            _ => "未设置".to_string(),
+            s
         }
+        _ => "未设置".to_string(),
     });
-    let empty: [bool; 4] = std::array::from_fn(|i| !crate::text_slot::get(i as u32 + 1)
-        .map(|t| !t.text.is_empty())
-        .unwrap_or(false));
+    let empty: [bool; 4] = std::array::from_fn(|i| {
+        !crate::text_slot::get(i as u32 + 1)
+            .map(|t| !t.text.is_empty())
+            .unwrap_or(false)
+    });
 
-    let (cx, cy) = screen_center();
-    let d = 372.0f32;
+    let (x, y) = crate::backend::text_wheel_pos().unwrap_or_else(|| {
+        let (cx, cy) = screen_center();
+        (cx - WINDOW_SIZE / 2.0, cy - WINDOW_SIZE / 2.0)
+    });
+
     ctx.show_viewport_deferred(
         id,
         egui::ViewportBuilder::default()
-            .with_inner_size([d, d])
-            .with_position([cx - d / 2.0, cy - d / 2.0])
+            .with_inner_size([WINDOW_SIZE, WINDOW_SIZE])
+            .with_position([x, y])
             .with_decorations(false)
             .with_resizable(false)
             .with_always_on_top()
             .with_active(false)
-            .with_taskbar(false)
-            .with_transparent(true),
+            .with_taskbar(false),
         move |ctx, _class| {
             egui::CentralPanel::default()
-                .frame(egui::Frame::none().fill(egui::Color32::TRANSPARENT))
+                .frame(
+                    egui::Frame::none()
+                        .fill(egui::Color32::from_rgb(20, 22, 26))
+                        .inner_margin(egui::Margin::same(0.0)),
+                )
                 .show(ctx, |ui| draw(ui, &labels, &empty));
         },
     );
+}
+
+use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
+
+unsafe extern "system" fn enum_cb(hwnd: HWND, _l: LPARAM) -> BOOL {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowRect, GetWindowThreadProcessId};
+    let mut pid = 0u32;
+    let _ = GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    if pid != std::process::id() {
+        return BOOL(1);
+    }
+    let mut r = RECT::default();
+    if GetWindowRect(hwnd, &mut r).is_err() {
+        return BOOL(1);
+    }
+    let s = TARGET.load(Ordering::Relaxed);
+    if (r.right - r.left - s).abs() <= 3 && (r.bottom - r.top - s).abs() <= 3 {
+        FOUND.store(hwnd.0 as isize, Ordering::Relaxed);
+        return BOOL(0);
+    }
+    BOOL(1)
+}
+
+/// 把窗口区裁成圆。找不到窗口就下次再试。
+fn cut_round() {
+    use windows::Win32::Graphics::Gdi::{CreateEllipticRgn, SetWindowRgn};
+    use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
+
+    let s = WINDOW_SIZE as i32;
+    TARGET.store(s, Ordering::Relaxed);
+    FOUND.store(0, Ordering::Relaxed);
+    unsafe {
+        let _ = EnumWindows(Some(enum_cb), LPARAM(0));
+        let h = FOUND.load(Ordering::Relaxed);
+        if h == 0 {
+            return;
+        }
+        let rgn = CreateEllipticRgn(0, 0, s, s);
+        if rgn.is_invalid() {
+            return;
+        }
+        if SetWindowRgn(HWND(h), rgn, true) != 0 {
+            CUT_DONE.store(true, Ordering::Relaxed);
+        }
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -97,24 +161,20 @@ fn draw(ui: &mut egui::Ui, labels: &[String; 4], empty: &[bool; 4]) {
     use egui::{Align2, Color32, FontId, Pos2, Shape, Stroke};
 
     let center = ui.max_rect().center();
-    let r_out = 150.0f32;
-    let r_in = 64.0f32;
+    let r_out = 156.0f32;
+    let r_in = 66.0f32;
     let p = ui.painter();
 
-    // 柔和外光（多层半透明圆，代替方形底）
-    for (i, a) in [(18.0f32, 10u8), (10.0, 16), (4.0, 22)] {
-        p.circle_filled(center, r_out + i, Color32::from_black_alpha(a));
-    }
-    p.circle_filled(center, r_out, Color32::from_rgba_unmultiplied(26, 29, 34, 246));
+    p.circle_filled(center, r_out, Color32::from_rgb(30, 33, 38));
     p.circle_stroke(
         center,
         r_out,
-        Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(70, 76, 84, 200)),
+        Stroke::new(1.0_f32, Color32::from_rgb(58, 64, 72)),
     );
 
     let arrows = ["↑", "→", "↓", "←"];
     for i in 0..4u8 {
-        // 间隙只留 1.2°：之前 3.6° 的缝把圆切成了三块，看着像"带黑框"
+        // 间隙 1.2°：再大就像四块拼图
         let a0 = (-135.0 + i as f32 * 90.0 + 0.6).to_radians();
         let a1 = a0 + (90.0 - 1.2f32).to_radians();
         let mut pts: Vec<Pos2> = Vec::new();
@@ -127,59 +187,50 @@ fn draw(ui: &mut egui::Ui, labels: &[String; 4], empty: &[bool; 4]) {
             let t = a0 + (a1 - a0) * k as f32 / steps as f32;
             pts.push(center + egui::vec2(t.cos() * r_in, t.sin() * r_in));
         }
-        // 按下即输入，所以没有"高亮"状态；只把空槽画暗一点
         p.add(Shape::convex_polygon(
             pts,
             if empty[i as usize] {
-                Color32::from_rgb(32, 35, 40)
+                Color32::from_rgb(34, 37, 42)
             } else {
-                Color32::from_rgb(42, 46, 52)
+                Color32::from_rgb(44, 48, 55)
             },
-            Stroke::new(1.0_f32, Color32::from_rgb(62, 68, 76)),
+            Stroke::new(1.0_f32, Color32::from_rgb(60, 66, 74)),
         ));
 
         let mid = (a0 + a1) / 2.0;
         let at = center
             + egui::vec2(mid.cos() * (r_in + r_out) / 2.0, mid.sin() * (r_in + r_out) / 2.0);
-        let slot = i as u32 + 1;
-        let fg = Color32::from_gray(215);
-        let fg2 = if empty[i as usize] {
-            Color32::from_gray(118)
-        } else {
-            Color32::from_gray(170)
-        };
         p.text(
-            at + egui::vec2(0.0, -17.0),
+            at + egui::vec2(0.0, -18.0),
             Align2::CENTER_CENTER,
-            format!("{}  {} 号", arrows[i as usize], slot),
+            format!("{}  {} 号", arrows[i as usize], i + 1),
             FontId::proportional(18.0),
-            fg,
+            Color32::from_gray(220),
         );
         p.text(
             at + egui::vec2(0.0, 6.0),
             Align2::CENTER_CENTER,
             &labels[i as usize],
             FontId::proportional(13.5),
-            fg2,
+            if empty[i as usize] {
+                Color32::from_gray(118)
+            } else {
+                Color32::from_gray(170)
+            },
         );
     }
 
-    // 中心
-    p.circle_filled(center, r_in, Color32::from_rgb(22, 24, 28));
-    p.circle_stroke(
-        center,
-        r_in,
-        Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(70, 76, 84, 180)),
-    );
+    p.circle_filled(center, r_in, Color32::from_rgb(24, 26, 31));
+    p.circle_stroke(center, r_in, Stroke::new(1.0_f32, Color32::from_rgb(66, 72, 80)));
     p.text(
-        center + egui::vec2(0.0, -13.0),
+        center + egui::vec2(0.0, -12.0),
         Align2::CENTER_CENTER,
         "按方向键直接输入",
-        FontId::proportional(11.5),
-        Color32::from_gray(150),
+        FontId::proportional(12.0),
+        Color32::from_gray(160),
     );
     p.text(
-        center + egui::vec2(0.0, 8.0),
+        center + egui::vec2(0.0, 10.0),
         Align2::CENTER_CENTER,
         "返回键取消",
         FontId::proportional(11.5),
