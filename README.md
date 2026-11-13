@@ -6,6 +6,9 @@
 - 方向 / 确认 / 返回 / 音量 等键 → 注入对应快捷键（可自由映射，支持组合键、媒体键）
 - 最底部【方块键】→ **循环切换配置组**；内置「Windows 日常」与「WorkBuddy 快捷键」两组
 
+> **另有 Rust 原生版**（5.9 MB、不依赖 WebView2、内存约 110 MB）：
+> [`native` 分支](https://github.com/lymsiq/IPRC1000-Adapter/tree/native) · [下载 v0.4.63](https://github.com/lymsiq/IPRC1000-Adapter/releases/tag/v0.4.63)
+
 ---
 
 ## 界面
